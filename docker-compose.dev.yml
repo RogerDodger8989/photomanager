@@ -1,0 +1,72 @@
+services:
+
+  photomanager:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    container_name: pm_dev
+    ports:
+      - "3000:3000"
+    volumes:
+      # Källkod mountas live — ändringar syns direkt utan rebuild
+      - ./backend/src:/app/src
+      - ./frontend:/frontend
+      # Lokala mediamappar för testfoton
+      - ./backend/media/photos:/media/photos
+      - ./backend/media/thumbs:/media/thumbs
+      - ./backend/media/transcode:/media/transcode
+      # node_modules stannar i containern
+      - /app/node_modules
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      HOST: 0.0.0.0
+      DATABASE_URL: postgresql://pm:secret@postgres:5432/photomanager
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: dev_secret_minimum_32_tecken_lang_string_123
+      JWT_ACCESS_EXPIRES: 15m
+      JWT_REFRESH_EXPIRES: 30d
+      MEDIA_PHOTOS_PATH: /media/photos
+      MEDIA_THUMBS_PATH: /media/thumbs
+      MEDIA_TRANSCODE_PATH: /media/transcode
+      TRASH_AUTO_CLEAN_DAYS: 30
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - pm_net
+    restart: unless-stopped
+
+  postgres:
+    build: ./postgres
+    container_name: pm_dev_db
+    environment:
+      POSTGRES_USER: pm
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: photomanager
+    volumes:
+      - pgdata_dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pm -d photomanager"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - pm_net
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: pm_dev_redis
+    networks:
+      - pm_net
+    restart: unless-stopped
+
+volumes:
+  pgdata_dev:
+
+networks:
+  pm_net:
+    driver: bridge

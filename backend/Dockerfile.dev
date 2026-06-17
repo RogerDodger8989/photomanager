@@ -1,0 +1,14 @@
+FROM node:20-alpine
+
+# ffmpeg för videotranskodning
+RUN apk add --no-cache ffmpeg
+
+WORKDIR /app
+
+# Installera beroenden (cachas om package.json inte ändrats)
+COPY package*.json ./
+RUN npm install
+
+# Källkoden mountas som volym — kopieras INTE in i imagen
+# node --watch startar om automatiskt när .js-filer ändras
+CMD ["node", "--watch", "--watch-path=src", "src/server.js"]

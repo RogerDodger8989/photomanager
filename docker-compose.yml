@@ -1,0 +1,56 @@
+services:
+  photomanager:
+    build: ./backend
+    container_name: photomanager
+    ports:
+      - "3000:3000"
+    volumes:
+      - /mnt/user/photos:/media/photos
+      - /mnt/user/thumbs:/media/thumbs
+      - /mnt/user/transcode:/media/transcode
+      - /mnt/user/appdata/photomanager/models:/models
+    env_file:
+      - ./backend/.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - pm_net
+
+  postgres:
+    build: ./postgres
+    container_name: photomanager_db
+    environment:
+      POSTGRES_USER: pm
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: photomanager
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pm -d photomanager"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - pm_net
+
+  redis:
+    image: redis:7-alpine
+    container_name: photomanager_redis
+    volumes:
+      - redisdata:/data
+    restart: unless-stopped
+    networks:
+      - pm_net
+
+volumes:
+  pgdata:
+  redisdata:
+
+networks:
+  pm_net:
+    driver: bridge

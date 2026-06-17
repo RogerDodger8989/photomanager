@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="sv" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0f172a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>PhotoManager</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
+
+  <!-- Tailwind CSS v3 via CDN (utbyts mot build i produktion) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            surface: { DEFAULT: '#1e293b', 2: '#0f172a', 3: '#334155' },
+          },
+        },
+      },
+    };
+  </script>
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
+
+  <style>
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+
+    /* Photo grid aspect-ratio */
+    .photo-cell { aspect-ratio: 1; overflow: hidden; cursor: pointer; }
+    .photo-cell img { width: 100%; height: 100%; object-fit: cover; transition: transform .2s; }
+    .photo-cell:hover img { transform: scale(1.04); }
+
+    /* Lightbox */
+    #lightbox { display: none; }
+    #lightbox.open { display: flex; }
+
+    /* Leaflet dark theme */
+    .leaflet-container { background: #0f172a !important; }
+    .leaflet-tile { filter: brightness(0.85) saturate(0.8); }
+
+    /* Face overlay */
+    .face-box {
+      position: absolute; border: 2px solid #60a5fa;
+      border-radius: 4px; pointer-events: none;
+    }
+    .face-label {
+      position: absolute; bottom: 100%; left: 0;
+      background: rgba(96,165,250,.85); color: #fff;
+      font-size: 10px; padding: 1px 4px; border-radius: 2px; white-space: nowrap;
+    }
+
+    /* Toast */
+    #toast-container { position: fixed; bottom: 1.5rem; right: 1.5rem; z-index: 9999; }
+    .toast { animation: slideIn .25s ease; }
+    @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: none; opacity: 1; } }
+
+    /* Bottom nav on mobile */
+    @media (max-width: 767px) {
+      #sidebar { display: none; }
+      #bottom-nav { display: flex; }
+      #main-content { padding-bottom: 64px; }
+    }
+    @media (min-width: 768px) {
+      #bottom-nav { display: none; }
+    }
+
+    /* Skeleton loading */
+    .skeleton { background: linear-gradient(90deg, #1e293b 25%, #334155 50%, #1e293b 75%);
+      background-size: 200% 100%; animation: shimmer 1.5s infinite; }
+    @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+  </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen">
+
+<!-- Login-skärm -->
+<div id="login-screen" class="fixed inset-0 bg-slate-900 flex items-center justify-center z-50">
+  <div class="w-full max-w-sm px-6">
+    <div class="text-center mb-8">
+      <div class="text-5xl mb-3">📷</div>
+      <h1 class="text-2xl font-bold text-white">PhotoManager</h1>
+      <p class="text-slate-400 text-sm mt-1">Logga in för att fortsätta</p>
+    </div>
+    <form id="login-form" class="space-y-4">
+      <input id="login-username" type="text" placeholder="Användarnamn" required
+        class="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500">
+      <input id="login-password" type="password" placeholder="Lösenord" required
+        class="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500">
+      <div id="login-error" class="text-red-400 text-sm hidden"></div>
+      <button type="submit"
+        class="w-full bg-blue-600 hover:bg-blue-500 text-white font-medium py-3 rounded-lg transition-colors">
+        Logga in
+      </button>
+    </form>
+  </div>
+</div>
+
+<!-- App-skal (dold tills inloggad) -->
+<div id="app" class="hidden flex flex-col h-screen">
+
+  <!-- Toppbar -->
+  <header class="bg-slate-800 border-b border-slate-700 px-4 py-2 flex items-center gap-3 flex-shrink-0 z-30">
+    <!-- Hamburger (mobil) -->
+    <button id="menu-toggle" class="md:hidden text-slate-400 hover:text-white p-1">
+      <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+      </svg>
+    </button>
+
+    <!-- Logo -->
+    <span class="text-lg font-semibold text-white hidden md:block">📷</span>
+
+    <!-- Sökfält -->
+    <div class="flex-1 relative">
+      <input id="global-search" type="text" placeholder="Sök bilder, platser, ansikten…"
+        class="w-full bg-slate-700 border border-slate-600 rounded-lg pl-10 pr-4 py-2 text-sm text-white placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:bg-slate-600">
+      <svg class="absolute left-3 top-2.5 w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+      </svg>
+    </div>
+
+    <!-- Avancerad sökning -->
+    <button id="advanced-search-btn" class="text-slate-400 hover:text-white text-sm whitespace-nowrap hidden sm:flex items-center gap-1 px-3 py-2 rounded-lg hover:bg-slate-700 transition-colors">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-.293.707L13 13.414V19a1 1 0 01-.553.894l-4 2A1 1 0 017 21v-7.586L3.293 6.707A1 1 0 013 6V4z"/>
+      </svg>
+      Filter
+    </button>
+
+    <!-- Notis-ikon + Avatar -->
+    <div class="flex items-center gap-2">
+      <button id="notif-btn" class="relative text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-700">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
+        </svg>
+        <span id="notif-badge" class="absolute -top-0.5 -right-0.5 w-2 h-2 bg-blue-500 rounded-full hidden"></span>
+      </button>
+      <button id="user-menu-btn" class="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white font-medium text-sm">
+        ?
+      </button>
+    </div>
+  </header>
+
+  <!-- Avancerat sökpanel (dold) -->
+  <div id="advanced-search-panel" class="hidden bg-slate-800 border-b border-slate-700 px-4 py-3 flex-shrink-0">
+    <div class="flex flex-wrap gap-3 items-end">
+      <div>
+        <label class="text-xs text-slate-400 block mb-1">Fotodatum från</label>
+        <input type="date" id="adv-date-from" class="bg-slate-700 border border-slate-600 rounded px-2 py-1 text-sm text-white">
+      </div>
+      <div>
+        <label class="text-xs text-slate-400 block mb-1">till</label>
+        <input type="date" id="adv-date-to" class="bg-slate-700 border border-slate-600 rounded px-2 py-1 text-sm text-white">
+      </div>
+      <div>
+        <label class="text-xs text-slate-400 block mb-1">Taggar</label>
+        <input type="text" id="adv-tags" placeholder="semester, familj…" class="bg-slate-700 border border-slate-600 rounded px-2 py-1 text-sm text-white w-32">
+      </div>
+      <div>
+        <label class="text-xs text-slate-400 block mb-1">Typ</label>
+        <select id="adv-mime" class="bg-slate-700 border border-slate-600 rounded px-2 py-1 text-sm text-white">
+          <option value="">Alla</option>
+          <option value="image">Bilder</option>
+          <option value="video">Videor</option>
+        </select>
+      </div>
+      <div>
+        <label class="text-xs text-slate-400 block mb-1">GPS</label>
+        <select id="adv-gps" class="bg-slate-700 border border-slate-600 rounded px-2 py-1 text-sm text-white">
+          <option value="">Alla</option>
+          <option value="true">Med plats</option>
+          <option value="false">Utan plats</option>
+        </select>
+      </div>
+      <button id="adv-search-go" class="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-sm transition-colors">Sök</button>
+      <button id="adv-search-clear" class="text-slate-400 hover:text-white text-sm px-2 py-1">Rensa</button>
+    </div>
+  </div>
+
+  <div class="flex flex-1 overflow-hidden">
+
+    <!-- Sidebar (desktop) -->
+    <nav id="sidebar" class="w-56 bg-slate-800 border-r border-slate-700 flex-shrink-0 flex flex-col overflow-y-auto">
+      <div id="nav-links" class="flex-1 p-2 space-y-0.5">
+        <!-- Fylls dynamiskt av nav.js baserat på user permissions -->
+      </div>
+      <div class="p-3 border-t border-slate-700">
+        <div id="storage-bar" class="hidden">
+          <div class="flex justify-between text-xs text-slate-400 mb-1">
+            <span>Lagring</span>
+            <span id="storage-used">–</span>
+          </div>
+          <div class="h-1.5 bg-slate-700 rounded-full overflow-hidden">
+            <div id="storage-fill" class="h-full bg-blue-500 rounded-full" style="width:0%"></div>
+          </div>
+        </div>
+        <button id="logout-btn" class="mt-3 w-full text-left text-slate-400 hover:text-white text-sm px-2 py-1.5 rounded hover:bg-slate-700 transition-colors flex items-center gap-2">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
+          </svg>
+          Logga ut
+        </button>
+      </div>
+    </nav>
+
+    <!-- Huvudinnehåll -->
+    <main id="main-content" class="flex-1 overflow-y-auto bg-slate-900">
+      <div id="view-container" class="h-full"></div>
+    </main>
+  </div>
+
+  <!-- Bottom nav (mobil) -->
+  <nav id="bottom-nav" class="fixed bottom-0 left-0 right-0 bg-slate-800 border-t border-slate-700 px-2 py-1 z-30">
+    <div id="bottom-nav-links" class="flex justify-around">
+      <!-- Fylls av nav.js -->
+    </div>
+  </nav>
+</div>
+
+<!-- Lightbox -->
+<div id="lightbox" class="fixed inset-0 bg-black/95 z-50 flex-col open:flex">
+  <div class="flex items-center justify-between px-4 py-3 flex-shrink-0">
+    <div id="lb-info" class="text-sm text-slate-300"></div>
+    <div class="flex items-center gap-3">
+      <button id="lb-favorite" title="Favorit" class="text-slate-400 hover:text-yellow-400 transition-colors">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/>
+        </svg>
+      </button>
+      <button id="lb-share" title="Dela" class="text-slate-400 hover:text-blue-400 transition-colors">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/>
+        </svg>
+      </button>
+      <button id="lb-download" title="Ladda ner original" class="text-slate-400 hover:text-green-400 transition-colors">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+        </svg>
+      </button>
+      <button id="lb-info-btn" title="Metadata" class="text-slate-400 hover:text-white transition-colors">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+      </button>
+      <button id="lb-close" class="text-slate-400 hover:text-white transition-colors">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <div class="flex-1 relative flex items-center justify-center overflow-hidden">
+    <!-- Prev/Next knappar -->
+    <button id="lb-prev" class="absolute left-2 z-10 bg-black/50 hover:bg-black/80 text-white rounded-full p-2 transition-colors">
+      <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+      </svg>
+    </button>
+
+    <div id="lb-media-container" class="relative max-h-full max-w-full">
+      <img id="lb-img" class="max-h-[80vh] max-w-[90vw] object-contain hidden" alt="">
+      <video id="lb-video" class="max-h-[80vh] max-w-[90vw] hidden" controls preload="metadata"></video>
+      <div id="lb-faces" class="absolute inset-0 pointer-events-none"></div>
+    </div>
+
+    <button id="lb-next" class="absolute right-2 z-10 bg-black/50 hover:bg-black/80 text-white rounded-full p-2 transition-colors">
+      <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+      </svg>
+    </button>
+  </div>
+
+  <!-- Metadata-panel -->
+  <div id="lb-meta-panel" class="hidden bg-slate-900 border-t border-slate-700 p-4 max-h-48 overflow-y-auto flex-shrink-0">
+    <div id="lb-meta-content" class="grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm"></div>
+  </div>
+</div>
+
+<!-- User dropdown -->
+<div id="user-dropdown" class="hidden fixed top-14 right-4 bg-slate-800 border border-slate-700 rounded-lg shadow-xl z-50 w-48 py-1">
+  <div id="user-info" class="px-4 py-2 border-b border-slate-700">
+    <div id="user-display-name" class="font-medium text-sm"></div>
+    <div id="user-role-badge" class="text-xs text-slate-400"></div>
+  </div>
+  <button id="profile-btn" class="w-full text-left px-4 py-2 text-sm hover:bg-slate-700">Profil</button>
+  <button id="backup-btn" class="w-full text-left px-4 py-2 text-sm hover:bg-slate-700">Ladda ner backup</button>
+  <button id="dropdown-logout" class="w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-slate-700">Logga ut</button>
+</div>
+
+<!-- Toast-notiser -->
+<div id="toast-container" class="space-y-2"></div>
+
+<!-- Leaflet + MarkerCluster JS -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+
+<!-- App -->
+<script type="module" src="/app.js"></script>
+</body>
+</html>
