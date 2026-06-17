@@ -26,6 +26,7 @@ import eventsRoutes  from './routes/events.js';
 import exportRoutes  from './routes/export.js';
 import uploadRoutes  from './routes/upload.js';
 import pushRoutes    from './routes/push.js';
+import foldersAdminRoutes from './routes/folders.js';
 
 // Workers
 import { startFileWatcher }     from './workers/fileWatcher.js';
@@ -67,6 +68,7 @@ await fastify.register(eventsRoutes);
 await fastify.register(exportRoutes);
 await fastify.register(uploadRoutes);
 await fastify.register(pushRoutes);
+await fastify.register(foldersAdminRoutes);
 
 // Health check
 fastify.get('/api/health', async () => ({
@@ -98,7 +100,7 @@ const start = async () => {
     await initAiWorker();
 
     // Starta bakgrundsprocesser
-    startFileWatcher();
+    await startFileWatcher();
     startJobRunner();
     startTrashCleanerCron();
     // Bygg händelse-index i bakgrunden vid uppstart

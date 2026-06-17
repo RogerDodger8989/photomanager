@@ -1,7 +1,7 @@
 import { api } from '../api.js';
 import { toast, formatDateTime, formatBytes, confirm } from '../utils.js';
 
-const TABS = ['stats', 'users', 'jobs', 'ai', 'audit', 'duplicates'];
+const TABS = ['stats', 'users', 'jobs', 'ai', 'audit', 'duplicates', 'folders'];
 
 export async function renderAdmin(container, tab = 'stats') {
   container.innerHTML = `
@@ -31,7 +31,7 @@ export async function renderAdmin(container, tab = 'stats') {
 }
 
 function tabLabel(t) {
-  return { stats:'Statistik', users:'Användare', jobs:'Jobb', ai:'AI-förslag', audit:'Logg', duplicates:'Duplikat' }[t] ?? t;
+  return { stats:'Statistik', users:'Användare', jobs:'Jobb', ai:'AI-förslag', audit:'Logg', duplicates:'Duplikat', folders:'Mappar' }[t] ?? t;
 }
 
 async function loadTab(tab, content) {
@@ -43,6 +43,7 @@ async function loadTab(tab, content) {
     if (tab === 'ai')         await renderAiSuggestions(content);
     if (tab === 'audit')      await renderAuditLog(content);
     if (tab === 'duplicates') await renderDuplicates(content);
+    if (tab === 'folders')    await renderWatchedFolders(content);
   } catch (e) { content.innerHTML = `<div class="text-red-400 text-sm">${e.message}</div>`; }
 }
 
@@ -295,4 +296,287 @@ async function renderDuplicates(content) {
           </div>
         </div>`).join('')}
     </div>`;
+}
+
+async function renderWatchedFolders(content) {
+  const reload = () => renderWatchedFolders(content);
+
+  const { data } = await api.watchedFolders();
+
+  content.innerHTML = `
+    <div class="space-y-4">
+
+      <!-- Windows/nätverksmapp-guide -->
+      <div class="bg-slate-800 rounded-xl p-4">
+        <div class="text-sm font-medium text-white mb-1">Windows- eller nätverksmapp</div>
+        <p class="text-xs text-slate-400 mb-3">
+          Vill du bevaka en mapp på din Windows-dator eller ett nätverksdelat ställe (t.ex. en NAS)?
+          Klicka nedan så öppnas en riktig Windows-dialog.
+        </p>
+        <button id="wf-winpick-btn"
+          class="flex items-center gap-2 px-4 py-2.5 bg-amber-600 hover:bg-amber-500 text-white text-sm font-medium rounded-xl transition-colors">
+          🪟 Välj Windows-mapp…
+        </button>
+        <!-- Instruktionsruta — visas efter val -->
+        <div id="wf-winpick-info" class="hidden mt-4 bg-slate-900 border border-amber-700 rounded-xl p-4 space-y-3">
+          <div class="flex items-start gap-2">
+            <span class="text-amber-400 text-lg leading-none mt-0.5">ℹ️</span>
+            <div>
+              <div class="text-amber-300 text-sm font-medium mb-1">
+                Du valde mappen: <span id="wf-win-name" class="font-mono text-white"></span>
+              </div>
+              <div class="text-slate-400 text-xs">
+                Webbläsaren kan inte visa den fullständiga Windows-sökvägen av säkerhetsskäl.
+                Följ stegen nedan för att koppla in mappen.
+              </div>
+            </div>
+          </div>
+
+          <div class="space-y-2 text-sm">
+            <div class="text-slate-300 font-medium">Steg 1 — Lägg till denna rad i <span class="font-mono text-blue-300">docker-compose.dev.yml</span> under <span class="font-mono text-green-300">volumes:</span> för photomanager-tjänsten:</div>
+            <div class="flex items-center gap-2 bg-slate-800 rounded-lg px-3 py-2">
+              <code id="wf-win-mountline" class="flex-1 text-xs text-green-300 font-mono break-all"></code>
+              <button id="wf-win-copy" class="flex-shrink-0 text-xs px-2 py-1 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded">Kopiera</button>
+            </div>
+            <div class="text-xs text-slate-500">
+              Ersätt <span class="text-amber-300 font-mono">C:\DIN\SÖKVÄG</span> med den faktiska sökvägen på din dator.
+              Exempel: <span class="font-mono text-slate-300">- D:\Bilder\Semester:/mnt/Semester</span>
+            </div>
+
+            <div class="text-slate-300 font-medium mt-1">Steg 2 — Starta om Docker med det nya mount:</div>
+            <div class="bg-slate-800 rounded-lg px-3 py-2">
+              <code class="text-xs text-green-300 font-mono">docker-compose -f docker-compose.dev.yml up -d</code>
+            </div>
+
+            <div class="text-slate-300 font-medium mt-1">Steg 3 — Lägg till mappen i fältet nedan:</div>
+            <div class="flex items-center gap-2 bg-slate-800 rounded-lg px-3 py-2">
+              <code id="wf-win-containerpath" class="flex-1 text-xs text-blue-300 font-mono"></code>
+              <button id="wf-win-use" class="flex-shrink-0 text-xs px-2 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded">Använd</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Lägg till känd server-sökväg -->
+      <div class="bg-slate-800 rounded-xl p-4">
+        <div class="text-sm font-medium text-white mb-3">Lägg till bevakad mapp</div>
+        <div class="flex gap-2 mb-2">
+          <div class="flex-1 flex gap-1">
+            <input id="wf-path" type="text" placeholder="/media/photos"
+              class="flex-1 bg-slate-700 text-white text-sm rounded-lg px-3 py-2 border border-slate-600 focus:outline-none focus:border-blue-500">
+            <button id="wf-browse-btn"
+              class="px-3 py-2 bg-slate-600 hover:bg-slate-500 text-white text-sm rounded-lg transition-colors whitespace-nowrap">
+              📁 Bläddra
+            </button>
+          </div>
+          <input id="wf-label" type="text" placeholder="Namn (valfritt)"
+            class="w-36 bg-slate-700 text-white text-sm rounded-lg px-3 py-2 border border-slate-600 focus:outline-none focus:border-blue-500">
+          <button id="wf-add-btn"
+            class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded-lg transition-colors whitespace-nowrap">
+            + Lägg till
+          </button>
+        </div>
+        <p class="text-xs text-slate-500">
+          Välj en mapp på servern (inuti Docker-containern).
+          Nätverksmappar måste vara monterade som volymer i docker-compose.yml.
+        </p>
+      </div>
+
+      <!-- Mappbläddrare modal -->
+      <div id="wf-browser-modal" class="hidden fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+        <div class="bg-slate-900 rounded-2xl w-full max-w-xl shadow-2xl flex flex-col" style="max-height:85vh">
+          <div class="flex items-center justify-between px-4 py-3 border-b border-slate-700 flex-shrink-0">
+            <div class="text-sm font-medium text-white">Välj mapp på servern</div>
+            <button id="wf-browser-close" class="text-slate-400 hover:text-white text-xl leading-none px-1">×</button>
+          </div>
+
+          <!-- Snabbknappar -->
+          <div class="px-4 py-2 border-b border-slate-800 flex gap-2 flex-wrap flex-shrink-0">
+            <span class="text-xs text-slate-500 self-center mr-1">Snabbval:</span>
+            ${['/media/photos','/media/thumbs','/mnt','/'].map((p) =>
+              `<button class="quick-path text-xs px-2 py-1 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-md"
+                data-path="${p}">${p}</button>`).join('')}
+          </div>
+
+          <!-- Nuvarande sökväg -->
+          <div id="wf-browser-path" class="px-4 py-2 text-xs text-blue-300 font-mono bg-slate-800/50 flex-shrink-0"></div>
+
+          <!-- Mappiste -->
+          <div id="wf-browser-list" class="overflow-y-auto flex-1 py-1 min-h-32"></div>
+
+          <div class="px-4 py-3 border-t border-slate-700 flex justify-between items-center flex-shrink-0">
+            <div id="wf-browser-selected" class="text-xs text-slate-300 font-mono truncate flex-1 mr-3"></div>
+            <button id="wf-browser-select"
+              class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded-lg transition-colors flex-shrink-0">
+              ✓ Välj denna mapp
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="space-y-2">
+        ${data.length === 0
+          ? '<div class="text-slate-400 text-sm">Inga extra mappar tillagda ännu.</div>'
+          : data.map((f) => `
+            <div class="bg-slate-800 rounded-xl p-4 flex items-center gap-3">
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 mb-0.5">
+                  <span class="text-white text-sm font-medium truncate">${f.label || f.path}</span>
+                  <span class="text-xs px-2 py-0.5 rounded-full flex-shrink-0 ${
+                    f.status === 'watching' ? 'bg-green-900 text-green-300' :
+                    f.status === 'error'    ? 'bg-red-900 text-red-300' :
+                    'bg-slate-700 text-slate-400'
+                  }">${f.status}</span>
+                  ${!f.enabled ? '<span class="text-xs text-slate-500">inaktiv</span>' : ''}
+                </div>
+                <div class="text-xs text-slate-500 truncate">${f.path}</div>
+                ${f.error_msg ? `<div class="text-xs text-red-400 mt-1">${f.error_msg}</div>` : ''}
+              </div>
+              <div class="flex gap-2 flex-shrink-0">
+                <button class="wf-toggle text-xs px-3 py-1.5 rounded-lg transition-colors ${
+                  f.enabled
+                    ? 'bg-slate-700 hover:bg-slate-600 text-slate-300'
+                    : 'bg-blue-700 hover:bg-blue-600 text-white'
+                }" data-id="${f.id}" data-enabled="${f.enabled}">
+                  ${f.enabled ? 'Inaktivera' : 'Aktivera'}
+                </button>
+                <button class="wf-delete text-xs px-3 py-1.5 bg-red-900 hover:bg-red-800 text-red-300 rounded-lg transition-colors"
+                  data-id="${f.id}">Ta bort</button>
+              </div>
+            </div>`).join('')}
+      </div>
+    </div>`;
+
+  content.querySelector('#wf-add-btn').addEventListener('click', async () => {
+    const path  = content.querySelector('#wf-path').value.trim();
+    const label = content.querySelector('#wf-label').value.trim();
+    if (!path) return;
+    try {
+      await api.addWatchedFolder({ path, label });
+      toast('Mapp tillagd och bevakas nu', 'success');
+      reload();
+    } catch (e) { toast(e.message, 'error'); }
+  });
+
+  // === Windows-mappväljare ===
+  content.querySelector('#wf-winpick-btn').addEventListener('click', async () => {
+    if (!('showDirectoryPicker' in window)) {
+      toast('Din webbläsare stöder inte Windows-dialogrutan. Ange sökvägen manuellt.', 'warn');
+      return;
+    }
+    let handle;
+    try {
+      handle = await window.showDirectoryPicker();
+    } catch (e) {
+      if (e.name !== 'AbortError') toast(e.message, 'error');
+      return;
+    }
+    const folderName = handle.name;
+    const containerPath = `/mnt/${folderName}`;
+    const mountLine = `      - C:\\DIN\\SÖKVÄG\\${folderName}:${containerPath}`;
+
+    const infoEl       = content.querySelector('#wf-winpick-info');
+    const nameEl       = content.querySelector('#wf-win-name');
+    const mountEl      = content.querySelector('#wf-win-mountline');
+    const cpathEl      = content.querySelector('#wf-win-containerpath');
+
+    nameEl.textContent  = folderName;
+    mountEl.textContent = mountLine;
+    cpathEl.textContent = containerPath;
+    infoEl.classList.remove('hidden');
+
+    content.querySelector('#wf-win-copy').onclick = () => {
+      navigator.clipboard.writeText(mountLine.trim())
+        .then(() => toast('Kopierat!', 'success'))
+        .catch(() => toast('Kunde inte kopiera — markera och kopiera manuellt', 'warn'));
+    };
+
+    content.querySelector('#wf-win-use').onclick = () => {
+      content.querySelector('#wf-path').value = containerPath;
+      content.querySelector('#wf-label').value = folderName;
+      content.querySelector('#wf-path').focus();
+      toast(`Sökväg ifylld: ${containerPath}`, 'info');
+    };
+  });
+
+  // === Mappbläddrare ===
+  const modal      = content.querySelector('#wf-browser-modal');
+  const pathEl     = content.querySelector('#wf-browser-path');
+  const listEl     = content.querySelector('#wf-browser-list');
+  const selectedEl = content.querySelector('#wf-browser-selected');
+  const pathInput  = content.querySelector('#wf-path');
+  let currentBrowsePath = '/';
+
+  async function browseTo(path) {
+    currentBrowsePath = path;
+    listEl.innerHTML = '<div class="px-4 py-3 text-slate-400 text-sm">Laddar…</div>';
+    try {
+      const { data } = await api.browseDir(path);
+      pathEl.textContent = data.path;
+      selectedEl.textContent = data.path;
+
+      listEl.innerHTML = [
+        // Gå upp-rad
+        data.parent !== null ? `
+          <button class="browse-dir w-full text-left px-4 py-2 hover:bg-slate-800 text-slate-300 text-sm flex items-center gap-2"
+            data-path="${data.parent}">
+            <span class="text-base">⬆️</span> ..
+          </button>` : '',
+        // Undermappar
+        ...data.dirs.map((d) => `
+          <button class="browse-dir w-full text-left px-4 py-2 hover:bg-slate-800 text-slate-300 text-sm flex items-center gap-2"
+            data-path="${d.path}">
+            <span class="text-base">📁</span> ${d.name}
+          </button>`),
+        data.dirs.length === 0 && data.parent !== null
+          ? '<div class="px-4 py-2 text-slate-500 text-sm italic">Inga undermappar</div>'
+          : '',
+      ].join('');
+
+      listEl.querySelectorAll('.browse-dir').forEach((btn) => {
+        btn.addEventListener('click', () => browseTo(btn.dataset.path));
+      });
+    } catch (e) {
+      listEl.innerHTML = `<div class="px-4 py-3 text-red-400 text-sm">${e.message}</div>`;
+    }
+  }
+
+  content.querySelector('#wf-browse-btn').addEventListener('click', () => {
+    modal.classList.remove('hidden');
+    browseTo(pathInput.value.trim() || '/media/photos');
+  });
+
+  content.querySelectorAll('.quick-path').forEach((btn) => {
+    btn.addEventListener('click', () => browseTo(btn.dataset.path));
+  });
+
+  content.querySelector('#wf-browser-close').addEventListener('click', () => {
+    modal.classList.add('hidden');
+  });
+
+  content.querySelector('#wf-browser-select').addEventListener('click', () => {
+    pathInput.value = currentBrowsePath;
+    modal.classList.add('hidden');
+  });
+
+  content.querySelectorAll('.wf-toggle').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const enabled = btn.dataset.enabled === 'true';
+      try {
+        await api.patchWatchedFolder(btn.dataset.id, { enabled: !enabled });
+        reload();
+      } catch (e) { toast(e.message, 'error'); }
+    });
+  });
+
+  content.querySelectorAll('.wf-delete').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (!await confirm('Ta bort bevakad mapp?')) return;
+      try {
+        await api.deleteWatchedFolder(btn.dataset.id);
+        toast('Mapp borttagen', 'success');
+        reload();
+      } catch (e) { toast(e.message, 'error'); }
+    });
+  });
 }

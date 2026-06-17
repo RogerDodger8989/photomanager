@@ -1,9 +1,10 @@
 // Formatera bytes till läsbart format
 export function formatBytes(bytes) {
-  if (!bytes) return '0 B';
+  const n = Number(bytes);
+  if (!n || n < 0) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(1024));
-  return `${(bytes / 1024 ** i).toFixed(1)} ${units[i]}`;
+  const i = Math.min(Math.floor(Math.log(n) / Math.log(1024)), units.length - 1);
+  return `${(n / 1024 ** i).toFixed(1)} ${units[i]}`;
 }
 
 // Formatera datum

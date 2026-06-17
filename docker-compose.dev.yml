@@ -15,8 +15,6 @@ services:
       - ./backend/media/photos:/media/photos
       - ./backend/media/thumbs:/media/thumbs
       - ./backend/media/transcode:/media/transcode
-      # node_modules stannar i containern
-      - /app/node_modules
     environment:
       NODE_ENV: development
       PORT: 3000

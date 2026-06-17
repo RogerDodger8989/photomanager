@@ -4,35 +4,42 @@ export function renderUpload(container) {
   container.innerHTML = `
     <div class="p-4 max-w-2xl mx-auto">
       <h1 class="text-xl font-semibold text-white mb-1">Ladda upp foton & videor</h1>
-      <p class="text-sm text-slate-400 mb-6">Filerna placeras i ditt fotobibliotek och indexeras automatiskt.</p>
+      <p class="text-sm text-slate-400 mb-6">Välj filer eller en hel mapp från din dator.</p>
 
       <!-- Subfolder -->
       <div class="mb-4">
-        <label class="block text-xs text-slate-400 mb-1">Spara i mapp (valfritt)</label>
+        <label class="block text-xs text-slate-400 mb-1">Spara i undermapp (valfritt)</label>
         <input id="upload-subfolder" type="text" placeholder="t.ex. Semester/2024"
           class="w-full bg-slate-800 text-white text-sm rounded-lg px-3 py-2 border border-slate-700 focus:outline-none focus:border-blue-500">
       </div>
 
-      <!-- Drop zone -->
-      <div id="drop-zone"
-        class="border-2 border-dashed border-slate-600 rounded-2xl p-10 text-center cursor-pointer transition-colors hover:border-blue-500 hover:bg-slate-800/50">
-        <div class="text-4xl mb-3">📁</div>
-        <div class="text-slate-300 font-medium mb-1">Dra & släpp filer här</div>
-        <div class="text-slate-500 text-sm mb-4">eller klicka för att välja</div>
+      <!-- Välj-knappar -->
+      <div class="flex gap-3 mb-4">
         <button id="pick-files-btn"
-          class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded-lg transition-colors">
-          Välj filer
+          class="flex-1 flex items-center justify-center gap-2 py-3 bg-slate-700 hover:bg-slate-600 text-white text-sm rounded-xl transition-colors border border-slate-600">
+          🖼️ Välj filer
+        </button>
+        <button id="pick-folder-btn"
+          class="flex-1 flex items-center justify-center gap-2 py-3 bg-slate-700 hover:bg-slate-600 text-white text-sm rounded-xl transition-colors border border-slate-600">
+          📁 Välj mapp
         </button>
         <input id="file-input" type="file" multiple accept="image/*,video/*" class="hidden">
+        <input id="folder-input" type="file" webkitdirectory multiple accept="image/*,video/*" class="hidden">
+      </div>
+
+      <!-- Drop zone -->
+      <div id="drop-zone"
+        class="border-2 border-dashed border-slate-700 rounded-2xl p-8 text-center transition-colors">
+        <div class="text-slate-500 text-sm">eller dra & släpp filer/mappar här</div>
       </div>
 
       <!-- Filkö -->
-      <div id="upload-queue" class="mt-4 space-y-2 hidden"></div>
+      <div id="upload-queue" class="mt-4 space-y-1.5 hidden"></div>
 
       <!-- Starta uppladdning -->
       <div id="upload-actions" class="mt-4 hidden">
         <button id="start-upload-btn"
-          class="w-full py-2.5 bg-green-600 hover:bg-green-500 text-white font-medium rounded-xl transition-colors">
+          class="w-full py-3 bg-green-600 hover:bg-green-500 text-white font-medium rounded-xl transition-colors">
           Ladda upp
         </button>
       </div>
@@ -41,9 +48,9 @@ export function renderUpload(container) {
       <div id="upload-result" class="mt-4 hidden"></div>
     </div>`;
 
-  const dropZone    = container.querySelector('#drop-zone');
   const fileInput   = container.querySelector('#file-input');
-  const pickBtn     = container.querySelector('#pick-files-btn');
+  const folderInput = container.querySelector('#folder-input');
+  const dropZone    = container.querySelector('#drop-zone');
   const queueEl     = container.querySelector('#upload-queue');
   const actionsEl   = container.querySelector('#upload-actions');
   const resultEl    = container.querySelector('#upload-result');
@@ -51,33 +58,47 @@ export function renderUpload(container) {
 
   let selectedFiles = [];
 
-  // Klick → öppna filväljare
-  pickBtn.addEventListener('click', () => fileInput.click());
-  dropZone.addEventListener('click', (e) => {
-    if (e.target === dropZone) fileInput.click();
-  });
-
+  // Välj enskilda filer
+  container.querySelector('#pick-files-btn').addEventListener('click', () => fileInput.click());
   fileInput.addEventListener('change', () => addFiles([...fileInput.files]));
+
+  // Välj hel mapp — försök modern API först, fallback till input
+  container.querySelector('#pick-folder-btn').addEventListener('click', async () => {
+    if ('showDirectoryPicker' in window) {
+      try {
+        const dirHandle = await window.showDirectoryPicker();
+        const files = await readDirHandle(dirHandle);
+        addFiles(files);
+        return;
+      } catch (e) {
+        if (e.name === 'AbortError') return; // användaren avbröt
+      }
+    }
+    // Fallback för äldre webbläsare
+    folderInput.click();
+  });
+  folderInput.addEventListener('change', () => addFiles([...folderInput.files]));
 
   // Drag & drop
   dropZone.addEventListener('dragover', (e) => {
     e.preventDefault();
-    dropZone.classList.add('border-blue-400', 'bg-slate-800/70');
+    dropZone.classList.add('border-blue-500', 'bg-slate-800/50');
   });
   dropZone.addEventListener('dragleave', () => {
-    dropZone.classList.remove('border-blue-400', 'bg-slate-800/70');
+    dropZone.classList.remove('border-blue-500', 'bg-slate-800/50');
   });
-  dropZone.addEventListener('drop', (e) => {
+  dropZone.addEventListener('drop', async (e) => {
     e.preventDefault();
-    dropZone.classList.remove('border-blue-400', 'bg-slate-800/70');
-    addFiles([...e.dataTransfer.files]);
+    dropZone.classList.remove('border-blue-500', 'bg-slate-800/50');
+    const files = await getDroppedFiles(e.dataTransfer.items);
+    addFiles(files);
   });
 
   function addFiles(files) {
     const allowed = files.filter((f) => f.type.startsWith('image/') || f.type.startsWith('video/'));
     const skipped = files.length - allowed.length;
     if (skipped > 0) toast(`${skipped} fil(er) hoppades över (ej bild/video)`, 'warning');
-
+    if (allowed.length === 0) return;
     selectedFiles = [...selectedFiles, ...allowed];
     renderQueue();
   }
@@ -91,15 +112,27 @@ export function renderUpload(container) {
     queueEl.classList.remove('hidden');
     actionsEl.classList.remove('hidden');
 
-    queueEl.innerHTML = selectedFiles.map((f, i) => `
-      <div class="flex items-center gap-3 bg-slate-800 rounded-xl px-4 py-2.5" data-idx="${i}">
-        <span class="text-lg">${f.type.startsWith('video/') ? '🎬' : '🖼️'}</span>
-        <span class="flex-1 text-sm text-slate-300 truncate">${f.name}</span>
-        <span class="text-xs text-slate-500">${formatSize(f.size)}</span>
-        <button class="remove-file text-slate-500 hover:text-red-400 text-lg leading-none" data-idx="${i}">×</button>
-        <div class="progress-bar w-0 h-1 bg-blue-500 rounded-full absolute bottom-0 left-0 transition-all" style="display:none"></div>
-      </div>`).join('');
+    const btn = container.querySelector('#start-upload-btn');
+    btn.textContent = `Ladda upp ${selectedFiles.length} fil${selectedFiles.length > 1 ? 'er' : ''}`;
 
+    queueEl.innerHTML = `
+      <div class="flex items-center justify-between text-xs text-slate-400 px-1 mb-1">
+        <span>${selectedFiles.length} filer valda</span>
+        <button id="clear-queue" class="hover:text-red-400">Rensa allt</button>
+      </div>
+      ${selectedFiles.slice(0, 50).map((f, i) => `
+        <div class="flex items-center gap-3 bg-slate-800 rounded-xl px-4 py-2">
+          <span>${f.type.startsWith('video/') ? '🎬' : '🖼️'}</span>
+          <span class="flex-1 text-sm text-slate-300 truncate">${f.name}</span>
+          <span class="text-xs text-slate-500">${formatSize(f.size)}</span>
+          <button class="remove-file text-slate-500 hover:text-red-400 text-lg leading-none" data-idx="${i}">×</button>
+        </div>`).join('')}
+      ${selectedFiles.length > 50 ? `<div class="text-xs text-slate-500 px-1">…och ${selectedFiles.length - 50} till</div>` : ''}`;
+
+    queueEl.querySelector('#clear-queue').addEventListener('click', () => {
+      selectedFiles = [];
+      renderQueue();
+    });
     queueEl.querySelectorAll('.remove-file').forEach((btn) => {
       btn.addEventListener('click', () => {
         selectedFiles.splice(Number(btn.dataset.idx), 1);
@@ -112,7 +145,6 @@ export function renderUpload(container) {
 
   async function startUpload() {
     if (selectedFiles.length === 0) return;
-
     const btn = container.querySelector('#start-upload-btn');
     btn.disabled = true;
     btn.textContent = 'Laddar upp…';
@@ -123,26 +155,21 @@ export function renderUpload(container) {
     selectedFiles.forEach((f) => formData.append('files', f));
 
     try {
-      // Hämta token från localStorage/memory via cookie — fetch med credentials
       const res = await fetch('/api/upload', {
         method: 'POST',
         credentials: 'include',
-        headers: {
-          // accessToken hämtas från api-modulens internstate via window
-          ...(window.__pmToken ? { Authorization: `Bearer ${window.__pmToken}` } : {}),
-        },
+        headers: window.__pmToken ? { Authorization: `Bearer ${window.__pmToken}` } : {},
         body: formData,
       });
-
       if (!res.ok) throw new Error(`Uppladdning misslyckades (${res.status})`);
       const { data } = await res.json();
 
       resultEl.classList.remove('hidden');
       resultEl.innerHTML = `
         <div class="bg-green-900/40 border border-green-700 rounded-xl p-4">
-          <div class="text-green-300 font-medium mb-1">✓ ${data.uploaded.length} fil(er) uppladdade</div>
+          <div class="text-green-300 font-medium">✓ ${data.uploaded.length} fil${data.uploaded.length !== 1 ? 'er' : ''} uppladdad${data.uploaded.length !== 1 ? 'e' : ''}</div>
           ${data.errors.length ? `<div class="text-red-400 text-sm mt-2">${data.errors.join('<br>')}</div>` : ''}
-          <div class="text-slate-400 text-sm mt-2">Bilderna indexeras automatiskt och syns i biblioteket inom kort.</div>
+          <div class="text-slate-400 text-sm mt-1">Bilderna indexeras automatiskt och syns i biblioteket inom kort.</div>
         </div>`;
 
       selectedFiles = [];
@@ -156,9 +183,49 @@ export function renderUpload(container) {
   }
 }
 
+// Läs filer rekursivt från en FileSystemDirectoryHandle (showDirectoryPicker)
+async function readDirHandle(handle, files = []) {
+  for await (const [, entry] of handle) {
+    if (entry.kind === 'file') {
+      files.push(await entry.getFile());
+    } else if (entry.kind === 'directory') {
+      await readDirHandle(entry, files);
+    }
+  }
+  return files;
+}
+
+// Hämta filer från drag & drop (inkl. mappar)
+async function getDroppedFiles(items) {
+  const files = [];
+  const promises = [];
+  for (const item of items) {
+    const entry = item.webkitGetAsEntry?.();
+    if (entry) promises.push(readEntry(entry, files));
+    else if (item.kind === 'file') files.push(item.getAsFile());
+  }
+  await Promise.all(promises);
+  return files;
+}
+
+async function readEntry(entry, files) {
+  if (entry.isFile) {
+    await new Promise((res) => entry.file((f) => { files.push(f); res(); }));
+  } else if (entry.isDirectory) {
+    const reader = entry.createReader();
+    await new Promise((res) => {
+      reader.readEntries(async (entries) => {
+        await Promise.all(entries.map((e) => readEntry(e, files)));
+        res();
+      });
+    });
+  }
+}
+
 function formatSize(bytes) {
-  if (bytes < 1024)       return `${bytes} B`;
-  if (bytes < 1024 ** 2)  return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 ** 3)  return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
-  return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+  const n = Number(bytes);
+  if (!n) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.min(Math.floor(Math.log(n) / Math.log(1024)), units.length - 1);
+  return `${(n / 1024 ** i).toFixed(1)} ${units[i]}`;
 }

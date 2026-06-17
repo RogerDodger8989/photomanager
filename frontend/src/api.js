@@ -151,6 +151,13 @@ export const api = {
   setPermissions: (id, perms)   => request('PUT', `/api/admin/users/${id}/permissions`, perms),
   auditLog:     (p = {})        => request('GET', `/api/admin/audit-log?${qs(p)}`),
   duplicates:   ()              => request('GET', '/api/admin/duplicates'),
+
+  // Bevakade mappar
+  browseDir:          (path)       => request('GET', `/api/admin/browse?path=${encodeURIComponent(path || '/')}`),
+  watchedFolders:     ()           => request('GET', '/api/admin/watched-folders'),
+  addWatchedFolder:   (body)       => request('POST', '/api/admin/watched-folders', body),
+  patchWatchedFolder: (id, body)   => request('PATCH', `/api/admin/watched-folders/${id}`, body),
+  deleteWatchedFolder:(id)         => request('DELETE', `/api/admin/watched-folders/${id}`),
   adminStats2:  ()              => request('GET', '/api/admin/stats'),
 };
 
