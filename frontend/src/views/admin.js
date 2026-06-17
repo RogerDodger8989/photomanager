@@ -306,53 +306,47 @@ async function renderWatchedFolders(content) {
   content.innerHTML = `
     <div class="space-y-4">
 
-      <!-- Windows/nätverksmapp-guide -->
+      <!-- Montera Windows/nätverksmapp -->
       <div class="bg-slate-800 rounded-xl p-4">
-        <div class="text-sm font-medium text-white mb-1">Windows- eller nätverksmapp</div>
-        <p class="text-xs text-slate-400 mb-3">
-          Vill du bevaka en mapp på din Windows-dator eller ett nätverksdelat ställe (t.ex. en NAS)?
-          Klicka nedan så öppnas en riktig Windows-dialog.
-        </p>
-        <button id="wf-winpick-btn"
-          class="flex items-center gap-2 px-4 py-2.5 bg-amber-600 hover:bg-amber-500 text-white text-sm font-medium rounded-xl transition-colors">
-          🪟 Välj Windows-mapp…
-        </button>
-        <!-- Instruktionsruta — visas efter val -->
-        <div id="wf-winpick-info" class="hidden mt-4 bg-slate-900 border border-amber-700 rounded-xl p-4 space-y-3">
-          <div class="flex items-start gap-2">
-            <span class="text-amber-400 text-lg leading-none mt-0.5">ℹ️</span>
-            <div>
-              <div class="text-amber-300 text-sm font-medium mb-1">
-                Du valde mappen: <span id="wf-win-name" class="font-mono text-white"></span>
-              </div>
-              <div class="text-slate-400 text-xs">
-                Webbläsaren kan inte visa den fullständiga Windows-sökvägen av säkerhetsskäl.
-                Följ stegen nedan för att koppla in mappen.
-              </div>
+        <div class="text-sm font-medium text-white mb-3">Koppla in Windows- eller nätverksmapp</div>
+
+        <div class="space-y-3">
+          <!-- Windows-sökväg -->
+          <div>
+            <label class="block text-xs text-slate-400 mb-1">Sökväg på Windows-datorn</label>
+            <div class="flex gap-2">
+              <input id="wf-win-hostpath" type="text" placeholder="C:\\Bilder  eller  \\\\NAS\\photos"
+                class="flex-1 bg-slate-700 text-white text-sm rounded-lg px-3 py-2 border border-slate-600 focus:outline-none focus:border-blue-500 font-mono">
+              <button id="wf-winpick-btn"
+                class="px-3 py-2 bg-slate-600 hover:bg-slate-500 text-white text-sm rounded-lg transition-colors whitespace-nowrap">
+                Bläddra…
+              </button>
             </div>
           </div>
 
-          <div class="space-y-2 text-sm">
-            <div class="text-slate-300 font-medium">Steg 1 — Lägg till denna rad i <span class="font-mono text-blue-300">docker-compose.dev.yml</span> under <span class="font-mono text-green-300">volumes:</span> för photomanager-tjänsten:</div>
-            <div class="flex items-center gap-2 bg-slate-800 rounded-lg px-3 py-2">
+          <!-- Container-sökväg (auto) -->
+          <div>
+            <label class="block text-xs text-slate-400 mb-1">Sökväg i Docker-containern</label>
+            <input id="wf-win-cpath" type="text" placeholder="/mnt/Bilder"
+              class="w-full bg-slate-700 text-white text-sm rounded-lg px-3 py-2 border border-slate-600 focus:outline-none focus:border-blue-500 font-mono">
+          </div>
+
+          <!-- Genererad docker-compose-rad -->
+          <div id="wf-win-compose-row" class="hidden">
+            <label class="block text-xs text-slate-400 mb-1">Lägg till denna rad i <span class="font-mono">docker-compose.dev.yml</span> → volumes</label>
+            <div class="flex items-center gap-2 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2">
               <code id="wf-win-mountline" class="flex-1 text-xs text-green-300 font-mono break-all"></code>
-              <button id="wf-win-copy" class="flex-shrink-0 text-xs px-2 py-1 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded">Kopiera</button>
+              <button id="wf-win-copy" class="flex-shrink-0 text-xs px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded transition-colors">Kopiera</button>
             </div>
-            <div class="text-xs text-slate-500">
-              Ersätt <span class="text-amber-300 font-mono">C:\DIN\SÖKVÄG</span> med den faktiska sökvägen på din dator.
-              Exempel: <span class="font-mono text-slate-300">- D:\Bilder\Semester:/mnt/Semester</span>
-            </div>
-
-            <div class="text-slate-300 font-medium mt-1">Steg 2 — Starta om Docker med det nya mount:</div>
-            <div class="bg-slate-800 rounded-lg px-3 py-2">
-              <code class="text-xs text-green-300 font-mono">docker-compose -f docker-compose.dev.yml up -d</code>
-            </div>
-
-            <div class="text-slate-300 font-medium mt-1">Steg 3 — Lägg till mappen i fältet nedan:</div>
-            <div class="flex items-center gap-2 bg-slate-800 rounded-lg px-3 py-2">
-              <code id="wf-win-containerpath" class="flex-1 text-xs text-blue-300 font-mono"></code>
-              <button id="wf-win-use" class="flex-shrink-0 text-xs px-2 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded">Använd</button>
-            </div>
+            <p class="text-xs text-slate-500 mt-1.5">
+              Starta sedan om med:
+              <code class="text-green-400 font-mono">docker-compose -f docker-compose.dev.yml up -d</code>
+              — därefter klickar du <span class="text-blue-300">Använd</span> nedan och lägger till mappen.
+            </p>
+            <button id="wf-win-use"
+              class="mt-2 px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded-lg transition-colors">
+              Använd container-sökvägen
+            </button>
           </div>
         </div>
       </div>
@@ -458,45 +452,71 @@ async function renderWatchedFolders(content) {
     } catch (e) { toast(e.message, 'error'); }
   });
 
-  // === Windows-mappväljare ===
+  // === Windows/nätverksmapp-konfiguration ===
+  const hostPathEl   = content.querySelector('#wf-win-hostpath');
+  const cpathEl      = content.querySelector('#wf-win-cpath');
+  const composeRowEl = content.querySelector('#wf-win-compose-row');
+  const mountLineEl  = content.querySelector('#wf-win-mountline');
+
+  function deriveContainerPath(hostPath) {
+    // Extrahera sista mappnamnet ur Windows-sökväg
+    const name = hostPath.replace(/\\/g, '/').replace(/\/$/, '').split('/').filter(Boolean).pop();
+    return name ? `/mnt/${name}` : '';
+  }
+
+  function updateComposeLine() {
+    const host  = hostPathEl.value.trim();
+    const cpath = cpathEl.value.trim();
+    if (!host || !cpath) { composeRowEl.classList.add('hidden'); return; }
+    mountLineEl.textContent = `- ${host}:${cpath}`;
+    composeRowEl.classList.remove('hidden');
+  }
+
+  hostPathEl.addEventListener('input', () => {
+    const derived = deriveContainerPath(hostPathEl.value.trim());
+    if (derived) cpathEl.value = derived;
+    updateComposeLine();
+  });
+  cpathEl.addEventListener('input', updateComposeLine);
+
+  // Bläddra-knapp: öppnar Windows-dialog, fyller i mappnamnet i host-fältet som hjälp
   content.querySelector('#wf-winpick-btn').addEventListener('click', async () => {
     if (!('showDirectoryPicker' in window)) {
-      toast('Din webbläsare stöder inte Windows-dialogrutan. Ange sökvägen manuellt.', 'warn');
+      toast('Ange sökvägen manuellt i fältet ovan.', 'info');
       return;
     }
     let handle;
-    try {
-      handle = await window.showDirectoryPicker();
-    } catch (e) {
-      if (e.name !== 'AbortError') toast(e.message, 'error');
-      return;
+    try { handle = await window.showDirectoryPicker(); }
+    catch (e) { if (e.name !== 'AbortError') toast(e.message, 'error'); return; }
+
+    // Webbläsaren ger bara mappnamnet, inte fullständig sökväg
+    const name = handle.name;
+    if (!hostPathEl.value.trim()) {
+      hostPathEl.value = `C:\\${name}`;
+      hostPathEl.focus();
+      // Sätt markören på C:\ så det är lätt att skriva över
+      hostPathEl.setSelectionRange(0, 2);
     }
-    const folderName = handle.name;
-    const containerPath = `/mnt/${folderName}`;
-    const mountLine = `      - C:\\DIN\\SÖKVÄG\\${folderName}:${containerPath}`;
+    cpathEl.value = `/mnt/${name}`;
+    updateComposeLine();
+    toast(`Mappnamn: ${name} — justera Windows-sökvägen om den skiljer sig`, 'info');
+  });
 
-    const infoEl       = content.querySelector('#wf-winpick-info');
-    const nameEl       = content.querySelector('#wf-win-name');
-    const mountEl      = content.querySelector('#wf-win-mountline');
-    const cpathEl      = content.querySelector('#wf-win-containerpath');
+  content.querySelector('#wf-win-copy').addEventListener('click', () => {
+    const line = mountLineEl.textContent.trim();
+    navigator.clipboard.writeText(line)
+      .then(() => toast('Kopierat!', 'success'))
+      .catch(() => toast('Markera texten och kopiera manuellt', 'warn'));
+  });
 
-    nameEl.textContent  = folderName;
-    mountEl.textContent = mountLine;
-    cpathEl.textContent = containerPath;
-    infoEl.classList.remove('hidden');
-
-    content.querySelector('#wf-win-copy').onclick = () => {
-      navigator.clipboard.writeText(mountLine.trim())
-        .then(() => toast('Kopierat!', 'success'))
-        .catch(() => toast('Kunde inte kopiera — markera och kopiera manuellt', 'warn'));
-    };
-
-    content.querySelector('#wf-win-use').onclick = () => {
-      content.querySelector('#wf-path').value = containerPath;
-      content.querySelector('#wf-label').value = folderName;
-      content.querySelector('#wf-path').focus();
-      toast(`Sökväg ifylld: ${containerPath}`, 'info');
-    };
+  content.querySelector('#wf-win-use').addEventListener('click', () => {
+    const cpath = cpathEl.value.trim();
+    const name  = cpath.split('/').pop();
+    if (!cpath) return;
+    content.querySelector('#wf-path').value  = cpath;
+    content.querySelector('#wf-label').value = name;
+    content.querySelector('#wf-path').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    content.querySelector('#wf-path').focus();
   });
 
   // === Mappbläddrare ===

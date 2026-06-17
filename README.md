@@ -1,37 +1,78 @@
 # PhotoManager
 
-Self-hosted Google Photos-ersättare som körs i Docker/Unraid. Stöder automatisk indexering av foton och videor, ansiktsigenkänning, kartvyer, album, delning och PWA-frontend.
+> Self-hosted Google Photos-ersättare. Kör lokalt i Docker/Unraid — dina bilder stannar hemma.
+
+![Node.js](https://img.shields.io/badge/Node.js-20+-green) ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-pgvector%20%2B%20PostGIS-blue) ![Docker](https://img.shields.io/badge/Docker-ready-blue)
+
+---
+
+## Funktioner
+
+### Implementerat
+
+| Funktion | Beskrivning |
+|----------|-------------|
+| **Automatisk indexering** | Bevakar `/media/photos/` med chokidar — nya filer indexeras direkt |
+| **EXIF/XMP/IPTC** | Läser all metadata: datum, GPS, kamera, objektiv, taggar |
+| **Thumbnails** | Genererar WebP-thumbnails (400px + 1200px) via Sharp |
+| **HEIC-stöd** | Konverterar Apple HEIC till WebP automatiskt |
+| **Video-transkodning** | FFmpeg konverterar HEVC/MOV → H.264 MP4 för webbuppspelning |
+| **Video-streaming** | Range-requests med stöd för seek |
+| **Karta** | Visar bilder på karta med PostGIS-klustring (Leaflet.js) |
+| **Ansikten** | Ansiktsdetektering med ArcFace (ONNX Runtime) + pgvector-sökning |
+| **Sökning** | Full-text + fuzzy-sökning på filnamn, plats och taggar (pg_trgm) |
+| **Explore** | Auto-grupperade händelser från tidslinje |
+| **Album** | Manuella och smarta album med sorteringsordning |
+| **Favoriter** | Markera bilder som favoriter |
+| **Delning** | Intern delning + publika länkar med valfri giltighetstid och max-visningar |
+| **Uppladdning** | Direkt uppladdning via webbgränssnittet (multipart) |
+| **Papperskorg** | Mjuk-radering med automatisk rensning via cron |
+| **Export** | Ladda ner ZIP med original + XMP-sidecar |
+| **Push-notiser** | Web Push-notifikationer (t.ex. vid ny indexering) |
+| **Jobbkö** | BullMQ + Redis — thumbnailing, transkodning, AI och export körs asynkront |
+| **Admin** | Hantera användare, bevakade mappar, jobbstatus och audit-log |
+| **RBAC** | Rollbaserad åtkomstkontroll (admin / user / guest) med granulära rättigheter |
+| **PWA** | Installerbar webapp med Service Worker och offline-stöd |
+| **Auth** | JWT-sessioner med bcrypt, rate-limiting och httpOnly-cookies |
+
+### Planerat / under arbete
+
+| Funktion | Status |
+|----------|--------|
+| Komplett PWA-frontend | Pågår |
+| Ansiktsigenkänning (clustering + namngivning) | Pågår |
+| Audit-log UI i admin | Planerat |
+| Säkerhetsgranskning inför release | Planerat |
+
+---
 
 ## Stack
 
 | Lager | Teknik |
 |-------|--------|
 | API | Node.js 20 + Fastify |
-| Databas | PostgreSQL (pgvector + PostGIS) |
+| Databas | PostgreSQL med pgvector + PostGIS + pg_trgm |
 | Cache / Köer | Redis + BullMQ |
+| AI | ONNX Runtime (ArcFace 512-dim, worker_threads) |
 | Frontend | PWA — HTML + Tailwind CSS v4 + Vanilla JS |
-| AI | ONNX Runtime (worker_threads) |
+| Media | Sharp (bilder) + FFmpeg (video) |
 | Containers | Docker / Unraid |
 
-## Funktioner (planerade faser)
-
-- **Fas 1** — Projektgrund & infrastruktur (katalogstruktur, DB-schema, auth)
-- **Fas 2** — Filsystem & indexering (chokidar, EXIF/XMP, thumbnails, HEIC)
-- **Fas 3** — Video-transkodning (FFmpeg, HEVC → H.264, streaming)
-- **Fas 4** — Kärn-API & RBAC (assets, papperskorg, behörigheter, admin, audit-log)
-- **Fas 5** — Sök & utforska (full-text, avancerad sökning, explore-kollektioner)
-- **Fas 6** — Kartan (PostGIS-klustring, Leaflet.js)
-- **Fas 7** — Sociala funktioner (album, favoriter, delning, folders, webhooks)
-- **Fas 8** — Ansikten & AI (ansiktsigenkänning med ONNX, pgvector-sökning)
-- **Fas 9** — PWA & frontend (komplett gränssnitt)
-- **Fas 10** — Export & backup (ZIP+XMP, audit-log UI, säkerhetsgranskning)
+---
 
 ## Kom igång
 
 ### Förutsättningar
 
 - Docker + Docker Compose
-- (Unraid) Delarna `/mnt/user/photos`, `/mnt/user/thumbs`, `/mnt/user/transcode`, `/mnt/user/appdata/photomanager/models`
+- (Unraid) Skapa dessa paths innan start:
+
+```
+/mnt/user/photos          ← dina originalfiler
+/mnt/user/thumbs          ← thumbnails (skapas automatiskt)
+/mnt/user/transcode       ← transkodade videor (skapas automatiskt)
+/mnt/user/appdata/photomanager/models  ← ONNX-modeller
+```
 
 ### 1. Klona och konfigurera
 
@@ -39,7 +80,7 @@ Self-hosted Google Photos-ersättare som körs i Docker/Unraid. Stöder automati
 git clone <repo-url>
 cd PhotoManager
 cp backend/.env.example backend/.env
-# Redigera backend/.env med dina värden
+# Redigera backend/.env med dina egna värden
 ```
 
 ### 2. Starta
@@ -48,7 +89,7 @@ cp backend/.env.example backend/.env
 docker compose up -d
 ```
 
-API:et är tillgängligt på `http://localhost:3000`.
+Öppna `http://localhost:3000` i webbläsaren.
 
 ### 3. Kör migrationer
 
@@ -56,14 +97,17 @@ API:et är tillgängligt på `http://localhost:3000`.
 docker compose exec photomanager npm run migrate
 ```
 
-## Volymer (Docker)
+Skapar alla tabeller och en admin-användare (se `.env` för lösenord).
 
-| Host-sökväg | Container-sökväg | Syfte |
-|-------------|------------------|-------|
-| `/mnt/user/photos` | `/media/photos` | Originalfiler |
-| `/mnt/user/thumbs` | `/media/thumbs` | Genererade thumbnails |
-| `/mnt/user/transcode` | `/media/transcode` | Transkodade videor |
-| `/mnt/user/appdata/photomanager/models` | `/models` | ONNX-modeller |
+### Utvecklingsläge
+
+```bash
+docker compose -f docker-compose.dev.yml up
+```
+
+Använder `--watch` för hot-reload av backend.
+
+---
 
 ## Projektstruktur
 
@@ -71,21 +115,42 @@ docker compose exec photomanager npm run migrate
 PhotoManager/
 ├── backend/
 │   ├── src/
-│   │   ├── server.js        # Fastify-applikation
-│   │   └── config.js        # Konfiguration
-│   ├── Dockerfile
+│   │   ├── db/
+│   │   │   └── migrations/     # SQL-migrationer
+│   │   ├── plugins/            # Fastify-plugins (auth, cors, rate-limit)
+│   │   ├── routes/             # API-endpoints
+│   │   ├── services/           # Affärslogik
+│   │   ├── workers/            # Bakgrundsprocesser (watcher, thumbnailer, transcoder, AI)
+│   │   └── server.js
 │   └── package.json
 ├── frontend/
-│   ├── public/              # Statiska filer (PWA)
-│   └── src/                 # JS-moduler
+│   ├── public/                 # Statiska filer & PWA-manifest
+│   └── src/
+│       ├── views/              # Vyer (timeline, albums, map, persons, …)
+│       └── components/         # Komponenter (lightbox, nav)
 ├── postgres/
-│   └── Dockerfile           # PostgreSQL med pgvector + PostGIS
+│   └── Dockerfile              # PostgreSQL med pgvector + PostGIS
 └── docker-compose.yml
 ```
 
+---
+
+## Volymer
+
+| Host-sökväg | Container-sökväg | Syfte |
+|-------------|------------------|-------|
+| `/mnt/user/photos` | `/media/photos` | Originalfiler (skrivskyddad rekommenderas) |
+| `/mnt/user/thumbs` | `/media/thumbs` | Genererade thumbnails |
+| `/mnt/user/transcode` | `/media/transcode` | Transkodade videor |
+| `/mnt/user/appdata/photomanager/models` | `/models` | ONNX-modeller för AI |
+
+---
+
 ## Miljövariabler
 
-Se [backend/.env.example](backend/.env.example) för alla tillgängliga variabler.
+Se [backend/.env.example](backend/.env.example) för samtliga variabler.
+
+---
 
 ## Licens
 
