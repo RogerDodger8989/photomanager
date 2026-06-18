@@ -1,5 +1,8 @@
+import path from 'path';
+import sharp from 'sharp';
 import { query } from '../db/pool.js';
 import { syncFacesToFile } from '../services/xmpService.js';
+import { config } from '../config.js';
 
 export default async function personsRoutes(fastify) {
 
@@ -9,7 +12,7 @@ export default async function personsRoutes(fastify) {
   }, async (request, reply) => {
     const { rows } = await query(
       `SELECT
-         p.id, p.name, p.created_at,
+         p.id, p.name, p.birth_year, p.death_year, p.cover_face_id, p.created_at,
          a.thumb_small_path AS cover_thumb,
          COUNT(DISTINCT f.asset_id)::int AS photo_count
        FROM persons p
@@ -21,6 +24,42 @@ export default async function personsRoutes(fastify) {
        ORDER BY COUNT(DISTINCT f.asset_id) DESC`
     );
     return reply.send({ data: rows });
+  });
+
+  // GET /api/persons/:id/face-thumb — beskuren ansiktsbild (ingen auth)
+  fastify.get('/api/persons/:id/face-thumb', async (request, reply) => {
+    const { id } = request.params;
+    const { rows } = await query(
+      `SELECT f.region_x, f.region_y, f.region_w, f.region_h,
+              a.file_path, a.width, a.height
+       FROM persons p
+       JOIN faces f ON f.id = p.cover_face_id
+       JOIN assets a ON a.id = f.asset_id
+       WHERE p.id = $1`,
+      [id]
+    );
+    if (!rows[0]) return reply.status(404).send({ error: 'Ingen profilbild satt' });
+
+    const { region_x, region_y, region_w, region_h, file_path, width, height } = rows[0];
+    const fullPath = path.join(config.media.photosPath, file_path);
+
+    const imgW = width  ?? 1000;
+    const imgH = height ?? 1000;
+    const left   = Math.max(0, Math.round(region_x * imgW));
+    const top    = Math.max(0, Math.round(region_y * imgH));
+    const cropW  = Math.max(1, Math.round(region_w * imgW));
+    const cropH  = Math.max(1, Math.round(region_h * imgH));
+
+    reply.header('Content-Type', 'image/webp');
+    reply.header('Cache-Control', 'public, max-age=86400');
+
+    const imgBuf = await sharp(fullPath)
+      .extract({ left, top, width: cropW, height: cropH })
+      .resize(200, 200, { fit: 'cover' })
+      .webp({ quality: 85 })
+      .toBuffer();
+
+    return reply.send(imgBuf);
   });
 
   // GET /api/persons/:id — person med bilder
@@ -40,7 +79,7 @@ export default async function personsRoutes(fastify) {
     const { limit = 50, cursor } = request.query;
 
     const { rows: personRows } = await query(
-      'SELECT * FROM persons WHERE id = $1',
+      'SELECT id, name, birth_year, death_year, cover_face_id, created_at FROM persons WHERE id = $1',
       [id]
     );
     if (!personRows[0]) return reply.status(404).send({ error: 'Person hittades inte' });
@@ -51,6 +90,9 @@ export default async function personsRoutes(fastify) {
     const { rows: assets } = await query(
       `SELECT DISTINCT a.id, a.file_name, a.mime_type,
               a.taken_at, a.thumb_small_path, a.thumb_large_path,
+              a.location_label,
+              ST_Y(a.location::geometry) AS lat,
+              ST_X(a.location::geometry) AS lon,
               f.region_x, f.region_y, f.region_w, f.region_h
        FROM faces f
        JOIN assets a ON a.id = f.asset_id
@@ -69,38 +111,76 @@ export default async function personsRoutes(fastify) {
     });
   });
 
-  // PATCH /api/persons/:id — byt namn
+  // PATCH /api/persons/:id — uppdatera namn, födelseår, dödsdatum, omslag
   fastify.patch('/api/persons/:id', {
     onRequest: [fastify.authenticate],
     schema: {
       body: {
         type: 'object',
-        required: ['name'],
         properties: {
-          name:         { type: 'string', minLength: 1 },
-          coverFaceId:  { type: 'string' },
+          name:        { type: 'string', minLength: 1 },
+          birthYear:   { type: ['integer', 'null'] },
+          deathYear:   { type: ['integer', 'null'] },
+          coverFaceId: { type: 'string' },
         },
       },
     },
   }, async (request, reply) => {
     const { id } = request.params;
-    const { name, coverFaceId } = request.body;
-    await query('UPDATE persons SET name = $1 WHERE id = $2', [name, id]);
-    if (coverFaceId) {
+    const { name, birthYear, deathYear, coverFaceId } = request.body;
+    if (name !== undefined) {
+      await query('UPDATE persons SET name = $1 WHERE id = $2', [name, id]);
+    }
+    if (birthYear !== undefined) {
+      await query('UPDATE persons SET birth_year = $1 WHERE id = $2', [birthYear ?? null, id]);
+    }
+    if (deathYear !== undefined) {
+      await query('UPDATE persons SET death_year = $1 WHERE id = $2', [deathYear ?? null, id]);
+    }
+    if (coverFaceId !== undefined) {
       await query('UPDATE persons SET cover_face_id = $1 WHERE id = $2', [coverFaceId, id]);
     }
     return reply.send({ data: { ok: true } });
   });
 
-  // POST /api/persons/:id/merge/:targetId — slå ihop två personer
+  // POST /api/persons/:id/merge/:targetId — slå ihop två personer (bakåtkompatibel)
   fastify.post('/api/persons/:id/merge/:targetId', {
     onRequest: [fastify.authenticate],
   }, async (request, reply) => {
     const { id, targetId } = request.params;
-    // Flytta alla ansikten från targetId → id
     await query('UPDATE faces SET person_id = $1 WHERE person_id = $2', [id, targetId]);
     await query('DELETE FROM persons WHERE id = $1', [targetId]);
     return reply.send({ data: { ok: true } });
+  });
+
+  // POST /api/persons/merge — slå ihop flera personer till en
+  fastify.post('/api/persons/merge', {
+    onRequest: [fastify.authenticate],
+    schema: {
+      body: {
+        type: 'object',
+        required: ['personIds', 'keepId'],
+        properties: {
+          personIds: { type: 'array', items: { type: 'string' }, minItems: 2 },
+          keepId:    { type: 'string' },
+          newName:   { type: 'string', minLength: 1 },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { personIds, keepId, newName } = request.body;
+    if (!personIds.includes(keepId)) {
+      return reply.status(400).send({ error: 'keepId måste vara med i personIds' });
+    }
+    const removeIds = personIds.filter((id) => id !== keepId);
+    for (const rid of removeIds) {
+      await query('UPDATE faces SET person_id = $1 WHERE person_id = $2', [keepId, rid]);
+      await query('DELETE FROM persons WHERE id = $1', [rid]);
+    }
+    if (newName?.trim()) {
+      await query('UPDATE persons SET name = $1 WHERE id = $2', [newName.trim(), keepId]);
+    }
+    return reply.send({ data: { ok: true, keepId } });
   });
 
   // POST /api/faces — skapa ny ansiktsregion (manuell taggning)
@@ -173,7 +253,7 @@ export default async function personsRoutes(fastify) {
     const { rows } = await query(
       `SELECT f.id, f.person_id, f.source,
               f.region_x, f.region_y, f.region_w, f.region_h,
-              p.name AS person_name
+              p.name AS person_name, p.birth_year
        FROM faces f
        LEFT JOIN persons p ON p.id = f.person_id
        WHERE f.asset_id = $1`,
@@ -189,8 +269,8 @@ export default async function personsRoutes(fastify) {
       body: {
         type: 'object',
         properties: {
-          personId: { type: 'string' },  // null = okänd
-          personName: { type: 'string' }, // skapa ny person om personId saknas
+          personId:   { type: 'string' },
+          personName: { type: 'string' },
         },
       },
     },

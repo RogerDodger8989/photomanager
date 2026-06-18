@@ -201,7 +201,7 @@ export default async function assetsRoutes(fastify) {
         ST_X(a.location::geometry) AS lon,
         u.username AS owner_name,
         (SELECT COALESCE(json_agg(json_build_object(
-           'faceId', f.id, 'personId', p.id, 'personName', p.name,
+           'faceId', f.id, 'personId', p.id, 'personName', p.name, 'birthYear', p.birth_year,
            'x', f.region_x, 'y', f.region_y, 'w', f.region_w, 'h', f.region_h
          )), '[]'::json)
          FROM faces f LEFT JOIN persons p ON p.id = f.person_id
@@ -268,6 +268,7 @@ export default async function assetsRoutes(fastify) {
         faceId:      f.faceId,
         personId:    f.personId,
         personName:  f.personName,
+        birthYear:   f.birthYear ?? null,
         boundingBox: { x: f.x, y: f.y, width: f.w, height: f.h },
       })),
       temporalSpatial: {

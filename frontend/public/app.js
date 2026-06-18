@@ -111,11 +111,72 @@ window.addEventListener('pm:timeline-filter', (e) => {
 // === SÖK ===
 
 const globalSearch = document.getElementById('global-search');
+
+// Person-dropdown i sökfältet
+let _personSuggestions = [];
+let _personSuggestionsLoaded = false;
+
+async function ensurePersonsLoaded() {
+  if (_personSuggestionsLoaded) return;
+  _personSuggestionsLoaded = true;
+  try { const { data } = await api.persons(); _personSuggestions = data ?? []; } catch {}
+}
+
+function getPersonDropdown() {
+  let el = document.getElementById('person-search-dropdown');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'person-search-dropdown';
+    el.className = 'absolute left-0 right-0 top-full mt-1 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl overflow-hidden hidden';
+    el.style.zIndex = '500';
+    const parent = document.getElementById('global-search').parentElement;
+    parent.style.position = 'relative';
+    parent.appendChild(el);
+  }
+  return el;
+}
+
+async function showPersonDropdown(q) {
+  const dropdown = getPersonDropdown();
+  if (!q) { dropdown.classList.add('hidden'); return; }
+  await ensurePersonsLoaded();
+  const matches = _personSuggestions.filter((p) => p.name.toLowerCase().includes(q.toLowerCase())).slice(0, 6);
+  if (!matches.length) { dropdown.classList.add('hidden'); return; }
+  dropdown.innerHTML = matches.map((p) => `
+    <button data-pid="${p.id}" class="w-full flex items-center gap-3 px-3 py-2 hover:bg-slate-700 text-left transition-colors">
+      <div class="w-8 h-8 rounded-full overflow-hidden bg-slate-600 flex-shrink-0">
+        ${p.cover_face_id
+          ? `<img src="/api/persons/${p.id}/face-thumb" class="w-full h-full object-cover">`
+          : p.cover_thumb
+            ? `<img src="/thumbs/${p.cover_thumb}" class="w-full h-full object-cover">`
+            : '<div class="w-full h-full flex items-center justify-center text-sm">👤</div>'}
+      </div>
+      <span class="text-sm text-white">${p.name}</span>
+      <span class="text-xs text-slate-400 ml-auto">${p.photo_count} bilder</span>
+    </button>`).join('');
+  dropdown.classList.remove('hidden');
+  dropdown.querySelectorAll('[data-pid]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      dropdown.classList.add('hidden');
+      globalSearch.value = '';
+      location.hash = `#/faces/${btn.dataset.pid}`;
+    });
+  });
+}
+
+document.addEventListener('click', (e) => {
+  const dropdown = document.getElementById('person-search-dropdown');
+  if (dropdown && !globalSearch.contains(e.target) && !dropdown.contains(e.target)) {
+    dropdown.classList.add('hidden');
+  }
+});
+
 const doSearch = debounce((q) => {
+  showPersonDropdown(q);
   if (!q.trim()) { navigate(location.hash); return; }
   const container = document.getElementById('view-container');
   renderTimeline(container, { q: q.trim() });
-}, 400);
+}, 300);
 
 globalSearch.addEventListener('input', (e) => doSearch(e.target.value));
 globalSearch.addEventListener('keydown', (e) => {

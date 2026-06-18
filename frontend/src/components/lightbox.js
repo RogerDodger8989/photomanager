@@ -124,7 +124,7 @@ function showItem(idx) {
   lbInfo.textContent = `${dateStr}${loc}`;
 
   lbFaces.innerHTML = '';
-  if (!isVid) loadFaceOverlays(asset.id);
+  if (!isVid) loadFaceOverlays(asset.id, asset.taken_at);
 
   document.getElementById('lb-download').onclick = () => {
     window.location = `/api/assets/${asset.id}/original`;
@@ -141,12 +141,17 @@ function showItem(idx) {
   }
 }
 
-async function loadFaceOverlays(assetId) {
+async function loadFaceOverlays(assetId, takenAt) {
   try {
     const { data: faces } = await api.faces(assetId);
     if (!faces?.length) return;
-    const _reloadFaces = () => loadFaceOverlays(assetId);
+    const _reloadFaces = () => loadFaceOverlays(assetId, takenAt);
+    const photoYear = takenAt ? new Date(takenAt).getFullYear() : null;
     faces.forEach((f, idx) => {
+      const age = (f.birth_year && photoYear != null) ? photoYear - f.birth_year : null;
+      const label = f.person_name
+        ? (age !== null && age >= 0 ? `${f.person_name} (${age} år)` : f.person_name)
+        : 'Okänd';
       const box = document.createElement('div');
       box.className = 'face-box';
       box.dataset.faceIndex  = idx;
@@ -160,7 +165,7 @@ async function loadFaceOverlays(assetId) {
       box.innerHTML = `
         <div class="face-edit-bar">
           <button class="face-rename-btn" title="Byt person">✏️</button>
-          <span class="face-name-label">${f.person_name ?? 'Okänd'}</span>
+          <span class="face-name-label">${label}</span>
           <button class="face-delete-btn" title="Ta bort">✕</button>
         </div>`;
       lbFaces.appendChild(box);
@@ -248,7 +253,7 @@ function buildDrawerHTML(m) {
         title="Lägg till ansiktstaggar" style="font-size:15px;line-height:1;font-weight:600">+</button>
         <button class="face-overlay-toggle flex-shrink-0 text-slate-400 hover:text-white transition-colors p-1 rounded"
         title="Visa/dölj ansiktsmarkeringar" style="font-size:14px;line-height:1">👁</button>`,
-      custom: buildFacesSection(m.faces, m.fileInfo.thumbLargePath),
+      custom: buildFacesSection(m.faces, m.fileInfo.thumbLargePath, m.temporalSpatial.capturedAt),
     },
     {
       id: 'camera',
@@ -388,14 +393,17 @@ function buildOrgSection(org) {
     </div>`;
 }
 
-function buildFacesSection(faces, thumbPath) {
+function buildFacesSection(faces, thumbPath, capturedAt) {
   if (!faces.length) {
     return `<p class="px-4 pb-2 text-xs text-slate-500 italic">Inga taggade personer</p>`;
   }
+  const photoYear = capturedAt ? new Date(capturedAt).getFullYear() : null;
 
   return `<div class="px-4 pb-2 space-y-2">
     ${faces.map((f, idx) => {
       const thumbStyle = thumbPath ? faceThumbStyle(f.boundingBox, thumbPath) : '';
+      const age = (f.birthYear && photoYear != null) ? photoYear - f.birthYear : null;
+      const ageLabel = (age !== null && age >= 0) ? ` (${age} år)` : '';
       return `
         <button data-person-id="${f.personId ?? ''}" data-person-name="${f.personName ?? ''}"
           data-face-index="${idx}"
@@ -405,7 +413,7 @@ function buildFacesSection(faces, thumbPath) {
             ${!thumbStyle ? '<span class="flex items-center justify-center w-full h-full text-2xl">👤</span>' : ''}
           </div>
           <div class="min-w-0 flex-1">
-            <div class="text-sm text-white font-medium truncate">${f.personName ?? 'Okänd person'}</div>
+            <div class="text-sm text-white font-medium truncate">${f.personName ?? 'Okänd person'}${ageLabel}</div>
             <div class="text-xs text-blue-400">Visa alla bilder →</div>
           </div>
         </button>`;

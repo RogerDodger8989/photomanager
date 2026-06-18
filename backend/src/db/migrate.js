@@ -14,6 +14,8 @@ const MIGRATIONS = [
   '005_network_mounts.sql',
   '006_rating.sql',
   '007_asset_title_description.sql',
+  '008_person_birth_year.sql',
+  '009_person_death_year.sql',
 ];
 
 async function migrate() {
