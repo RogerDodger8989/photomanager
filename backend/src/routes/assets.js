@@ -47,7 +47,8 @@ export default async function assetsRoutes(fastify) {
               a.location_label, a.view_count, a.duration, a.transcode_status,
               a.owner_id,
               ST_Y(a.location::geometry) AS lat,
-              ST_X(a.location::geometry) AS lon
+              ST_X(a.location::geometry) AS lon,
+              (EXISTS (SELECT 1 FROM favorites f WHERE f.asset_id = a.id AND f.user_id = $${params.push(userId)})) AS is_favorite
        FROM assets a
        ${where}
        ORDER BY a.${sort} ${order} NULLS LAST

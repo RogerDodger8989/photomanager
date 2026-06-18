@@ -4,8 +4,13 @@ let accessToken = null;
 let refreshPromise = null;
 
 export function setToken(token) {
+  const changed = accessToken !== token;
   accessToken = token;
-  window.__pmToken = token; // exponeras för upload-vyn (FormData kan inte sätta header via api-modulen)
+  window.__pmToken = token;
+  // Återanslut SSE med ny token om den ändrades
+  if (changed && token && typeof window.__pmReconnectSSE === 'function') {
+    window.__pmReconnectSSE();
+  }
 }
 export function clearToken()    { accessToken = null; window.__pmToken = null; }
 export function hasToken()      { return !!accessToken; }
@@ -95,7 +100,7 @@ export const api = {
   collections: ()               => request('GET', '/api/explore/collections'),
   collection:  (id)             => request('GET', `/api/explore/collections/${id}`),
   favorites:   ()               => request('GET', '/api/explore/favorites'),
-  addFav:      (id)             => request('POST', `/api/explore/favorites/${id}`),
+  addFav:      (id)             => request('POST', `/api/explore/favorites/${id}`, {}),
   removeFav:   (id)             => request('DELETE', `/api/explore/favorites/${id}`),
 
   // Map
@@ -121,10 +126,11 @@ export const api = {
   removeFromAlbum: (id, assetId)=> request('DELETE', `/api/albums/${id}/assets/${assetId}`),
 
   // Shares
-  shares:      ()               => request('GET', '/api/shares'),
-  received:    ()               => request('GET', '/api/shares/received'),
-  createShare: (body)           => request('POST', '/api/shares', body),
-  deleteShare: (id)             => request('DELETE', `/api/shares/${id}`),
+  shares:         ()            => request('GET', '/api/shares'),
+  received:       ()            => request('GET', '/api/shares/received'),
+  createShare:    (body)        => request('POST', '/api/shares', body),
+  deleteShare:    (id)          => request('DELETE', `/api/shares/${id}`),
+  getPublicShare: (token)       => fetch(`/api/share/${token}`).then(r => r.json()),
 
   // Folders
   folders: (path = '')          => request('GET', `/api/folders?path=${encodeURIComponent(path)}`),

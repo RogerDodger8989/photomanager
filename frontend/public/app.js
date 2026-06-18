@@ -3,7 +3,7 @@ import { state, setUser, on }        from '/src/state.js';
 import { renderNav, updateActiveNav } from '/src/components/nav.js';
 import { toast, debounce }            from '/src/utils.js';
 import { renderTimeline, destroyTimeline } from '/src/views/timeline.js';
-import { renderExplore }              from '/src/views/explore.js';
+import { renderExplore, renderFavorites } from '/src/views/explore.js';
 import { renderMap, destroyMap }      from '/src/views/mapview.js';
 import { renderAlbums }               from '/src/views/albums.js';
 import { renderPersons }              from '/src/views/persons.js';
@@ -85,10 +85,11 @@ function navigate(hash) {
   else if (route === 'albums')    renderAlbums(container, rest[0]);
   else if (route === 'faces')     renderPersons(container, rest[0]);
   else if (route === 'sharing')   renderSharing(container);
-  else if (route === 'favorites') renderTimeline(container, { /* favorites filter */ });
+  else if (route === 'favorites') renderFavorites(container);
   else if (route === 'folders')   renderFolders(container, rest.join('/'));
   else if (route === 'upload')     renderUpload(container);
   else if (route === 'admin')     renderAdmin(container, rest[0] ?? 'stats');
+  else if (route === 'share')     renderSharePage(container, rest[0]);
   else                            renderTimeline(container);
 }
 
@@ -206,8 +207,16 @@ async function renderFolders(container, path = '') {
 
 // === SSE (realtid) ===
 
+let _sseInstance = null;
+
 function connectSSE() {
-  const es = new EventSource('/api/events', { withCredentials: true });
+  if (_sseInstance) { try { _sseInstance.close(); } catch {} _sseInstance = null; }
+
+  const token = window.__pmToken ?? '';
+  if (!token) return; // Inget token = inte inloggad, vänta
+
+  const es = new EventSource(`/api/events?token=${encodeURIComponent(token)}`, { withCredentials: true });
+  _sseInstance = es;
 
   es.addEventListener('asset.indexed', () => {
     toast('Ny bild tillagd i biblioteket', 'info', 2000);
@@ -226,8 +235,47 @@ function connectSSE() {
 
   es.onerror = () => {
     es.close();
-    setTimeout(connectSSE, 10_000); // Återanslut om 10s
+    _sseInstance = null;
+    setTimeout(connectSSE, 10_000);
   };
+}
+
+// Exponeras så att api.js kan återansluta efter token-refresh
+window.__pmReconnectSSE = connectSSE;
+
+// === DELNINGSSIDA (publik, ingen inloggning krävs) ===
+
+async function renderSharePage(container, token) {
+  if (!token) { container.innerHTML = '<div class="p-8 text-slate-400">Ogiltig delningslänk.</div>'; return; }
+  container.innerHTML = '<div class="p-8 text-slate-400 text-sm">Laddar delad bild…</div>';
+  try {
+    const { data, error } = await api.getPublicShare(token);
+    if (error) { container.innerHTML = `<div class="p-8 text-red-400">${error}</div>`; return; }
+    const { share } = data;
+    const thumbSrc = share.thumb_large_path ? `/thumbs/${share.thumb_large_path}` : null;
+    const isVideo  = share.mime_type?.startsWith('video/');
+
+    container.innerHTML = `
+      <div class="flex flex-col items-center justify-center min-h-full p-6 gap-6">
+        <div class="text-center">
+          <div class="text-xs text-slate-500 mb-1">Delad bild</div>
+          <div class="text-white font-medium text-lg">${share.file_name ?? ''}</div>
+        </div>
+        <div class="rounded-xl overflow-hidden shadow-2xl max-w-3xl w-full">
+          ${isVideo
+            ? `<video src="/api/assets/${share.asset_id_r}/stream" controls class="w-full max-h-[70vh] bg-black"></video>`
+            : thumbSrc
+              ? `<img src="${thumbSrc}" class="w-full max-h-[70vh] object-contain bg-black">`
+              : '<div class="bg-slate-800 aspect-video flex items-center justify-center text-slate-500">Förhandsgranskning saknas</div>'}
+        </div>
+        <a href="/api/assets/${share.asset_id_r}/original"
+           class="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors">
+          ⬇ Ladda ner original
+        </a>
+      </div>`;
+  } catch (e) {
+    container.innerHTML = `<div class="p-8 text-red-400">Kunde inte ladda delad bild: ${e.message}</div>`;
+  }
 }
 
 // === INIT ===

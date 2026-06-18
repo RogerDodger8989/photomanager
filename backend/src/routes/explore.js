@@ -64,7 +64,8 @@ export default async function exploreRoutes(fastify) {
   }, async (request, reply) => {
     const { rows } = await query(
       `SELECT a.id, a.file_name, a.mime_type, a.taken_at,
-              a.thumb_small_path, a.thumb_large_path, f.added_at
+              a.thumb_small_path, a.thumb_large_path, f.added_at,
+              true AS is_favorite
        FROM favorites f
        JOIN assets a ON a.id = f.asset_id
        WHERE f.user_id = $1 AND a.status = 'active'

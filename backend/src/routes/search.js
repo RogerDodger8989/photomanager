@@ -26,6 +26,7 @@ export default async function searchRoutes(fastify) {
       },
     },
   }, async (request, reply) => {
+    const userId = request.user.id;
     const {
       q, tags, personId, dateFrom, dateTo,
       changedFrom, changedTo, hasGps, mimeType,
@@ -101,17 +102,19 @@ export default async function searchRoutes(fastify) {
     const where = `WHERE ${conditions.join(' AND ')}`;
     params.push(limit + 1);
 
+    params.push(userId);
     const { rows } = await query(
       `SELECT DISTINCT
          a.id, a.file_name, a.mime_type, a.file_size,
          a.taken_at, a.indexed_at, a.thumb_small_path, a.thumb_large_path,
          a.location_label, a.view_count, a.duration, a.width, a.height,
          ST_Y(a.location::geometry) AS lat,
-         ST_X(a.location::geometry) AS lon
+         ST_X(a.location::geometry) AS lon,
+         (EXISTS (SELECT 1 FROM favorites f WHERE f.asset_id = a.id AND f.user_id = $${params.length})) AS is_favorite
        FROM assets a
        ${where}
        ORDER BY a.taken_at DESC NULLS LAST
-       LIMIT $${params.length}`,
+       LIMIT $${params.length - 1}`,
       params
     );
 

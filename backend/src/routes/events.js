@@ -3,9 +3,19 @@ import { addClient, removeClient } from '../services/sseService.js';
 export default async function eventsRoutes(fastify) {
 
   // GET /api/events — SSE-ström för realtidsuppdateringar
-  fastify.get('/api/events', {
-    onRequest: [fastify.authenticate],
-  }, async (request, reply) => {
+  // EventSource kan inte skicka Authorization-header — acceptera token som query-param
+  fastify.get('/api/events', async (request, reply) => {
+    try {
+      const { token } = request.query;
+      if (token) {
+        const decoded = await request.server.jwt.verify(token);
+        request.user = decoded;
+      } else {
+        await request.jwtVerify();
+      }
+    } catch {
+      return reply.status(401).send({ error: 'Unauthorized' });
+    }
     const userId = request.user.id;
 
     reply.raw.setHeader('Content-Type', 'text/event-stream');

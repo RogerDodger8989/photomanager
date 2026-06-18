@@ -21,16 +21,21 @@ export default fp(async (fastify) => {
     root: FRONTEND_SRC,
     prefix: '/src/',
     decorateReply: false,
+    setHeaders: (res) => { res.setHeader('Cache-Control', 'no-store'); },
   });
 
   // Frontend PWA-rot (index.html, app.js, manifest.json, sw.js)
-  // wildcard: true = servera index.html för okända routes (SPA-routing)
   fastify.register(staticPlugin, {
     root: FRONTEND_PUBLIC,
     prefix: '/',
     decorateReply: false,
     wildcard: false,
     index: 'index.html',
+    setHeaders: (res, path) => {
+      if (path.endsWith('.js') || path.endsWith('.html')) {
+        res.setHeader('Cache-Control', 'no-store');
+      }
+    },
   });
 
   // Catch-all för SPA: alla okända GET-routes → index.html

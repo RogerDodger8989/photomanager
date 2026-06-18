@@ -120,8 +120,73 @@ export default async function sharesRoutes(fastify) {
     return reply.send({ data: { ok: true } });
   });
 
-  // GET /share/:token — publik delnings-endpoint (ingen auth)
+  // GET /share/:token — publik delningssida (ingen auth, serverar HTML)
   fastify.get('/share/:token', async (request, reply) => {
+    const { token } = request.params;
+    const { rows } = await query(
+      `SELECT s.*,
+              a.id AS asset_id_r, a.file_name, a.mime_type,
+              a.thumb_large_path, a.thumb_small_path, a.duration, a.transcode_status
+       FROM shares s
+       LEFT JOIN assets a ON a.id = s.asset_id AND a.status = 'active'
+       WHERE s.token = $1 AND s.share_type = 'public_link'`,
+      [token]
+    );
+    const share = rows[0];
+    if (!share) {
+      return reply.status(404).type('text/html').send('<html><body style="background:#0f172a;color:#94a3b8;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><h2>Delningslänk hittades inte</h2></body></html>');
+    }
+    if (share.expires_at && new Date(share.expires_at) < new Date()) {
+      return reply.status(410).type('text/html').send('<html><body style="background:#0f172a;color:#94a3b8;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><h2>Länken har gått ut</h2></body></html>');
+    }
+    await query('UPDATE shares SET view_count = view_count + 1 WHERE token = $1', [token]);
+
+    const isVideo = share.mime_type?.startsWith('video/');
+    const mediaSrc = isVideo
+      ? `/api/assets/${share.asset_id_r}/stream`
+      : share.thumb_large_path
+        ? `/thumbs/${share.thumb_large_path}`
+        : share.thumb_small_path ? `/thumbs/${share.thumb_small_path}` : null;
+
+    const html = `<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>${share.file_name ?? 'Delad bild'} – PhotoManager</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background:#0f172a;color:#e2e8f0;font-family:system-ui,sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1.5rem;padding:2rem}
+    .card{background:#1e293b;border:1px solid #334155;border-radius:1rem;overflow:hidden;max-width:900px;width:100%;box-shadow:0 25px 50px -12px rgba(0,0,0,.5)}
+    .media{width:100%;max-height:80vh;object-fit:contain;display:block;background:#000}
+    .info{padding:1.25rem 1.5rem;display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap}
+    .filename{font-size:.9rem;color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .dl{display:inline-flex;align-items:center;gap:.4rem;background:#3b82f6;color:#fff;text-decoration:none;padding:.5rem 1.25rem;border-radius:.5rem;font-size:.875rem;font-weight:500;white-space:nowrap}
+    .dl:hover{background:#2563eb}
+    .brand{font-size:.75rem;color:#475569}
+  </style>
+</head>
+<body>
+  <div class="card">
+    ${mediaSrc
+      ? isVideo
+        ? `<video src="${mediaSrc}" class="media" controls preload="metadata"></video>`
+        : `<img src="${mediaSrc}" class="media" alt="${share.file_name ?? ''}">`
+      : '<div style="padding:4rem;text-align:center;color:#475569">Förhandsgranskning saknas</div>'}
+    <div class="info">
+      <span class="filename">📷 ${share.file_name ?? ''}</span>
+      <a class="dl" href="/api/assets/${share.asset_id_r}/original" download="${share.file_name ?? 'bild'}">⬇ Ladda ner</a>
+    </div>
+  </div>
+  <span class="brand">PhotoManager</span>
+</body>
+</html>`;
+
+    return reply.type('text/html').send(html);
+  });
+
+  // GET /api/share/:token — publik delnings-API (ingen auth)
+  fastify.get('/api/share/:token', async (request, reply) => {
     const { token } = request.params;
 
     const { rows } = await query(

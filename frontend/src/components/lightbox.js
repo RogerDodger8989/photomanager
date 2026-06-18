@@ -4,14 +4,25 @@ import { state } from '../state.js';
 
 let currentIndex = 0;
 let items = [];
+let isFav = false;
 
-const lb          = document.getElementById('lightbox');
-const lbImg       = document.getElementById('lb-img');
-const lbVideo     = document.getElementById('lb-video');
-const lbFaces     = document.getElementById('lb-faces');
-const lbInfo      = document.getElementById('lb-info');
-const lbMetaPanel = document.getElementById('lb-meta-panel');
-const lbMetaCont  = document.getElementById('lb-meta-content');
+// ── Zoom-state ────────────────────────────────────────────────────────────────
+let zoomLevel = 1;
+let panX = 0;
+let panY = 0;
+const ZOOM_MIN = 1;
+const ZOOM_MAX = 8;
+const ZOOM_STEP = 0.25;
+
+const lb              = document.getElementById('lightbox');
+const lbImg           = document.getElementById('lb-img');
+const lbVideo         = document.getElementById('lb-video');
+const lbFaces         = document.getElementById('lb-faces');
+const lbInfo          = document.getElementById('lb-info');
+const lbMetaPanel     = document.getElementById('lb-meta-panel');
+const lbMetaCont      = document.getElementById('lb-meta-content');
+const lbMediaArea     = document.getElementById('lb-media-area');
+const lbZoomLabel     = document.getElementById('lb-zoom-label');
 
 const DRAWER_KEY = 'pm-drawer-open';
 
@@ -54,6 +65,41 @@ export function closeLightbox() {
   lbVideo.pause();
   lbVideo.src = '';
   lbMetaPanel.classList.add('hidden');
+  resetZoom();
+}
+
+function resetZoom() {
+  zoomLevel = 1; panX = 0; panY = 0;
+  applyZoom();
+}
+
+function applyZoom() {
+  const container = document.getElementById('lb-media-container');
+  if (!container) return;
+  container.style.transform = zoomLevel === 1
+    ? ''
+    : `translate(${panX}px, ${panY}px) scale(${zoomLevel})`;
+  container.style.transformOrigin = '0 0';
+  container.style.cursor = zoomLevel > 1 ? 'grab' : '';
+  if (lbMediaArea) lbMediaArea.style.cursor = zoomLevel > 1 ? 'grab' : '';
+  if (lbZoomLabel) lbZoomLabel.textContent = `${Math.round(zoomLevel * 100)}%`;
+}
+
+function zoomBy(delta, originX, originY) {
+  const container = document.getElementById('lb-media-container');
+  if (!container) return;
+  const newZoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, zoomLevel + delta));
+  if (newZoom === zoomLevel) return;
+
+  // Justera pan så att zoom sker mot en punkt
+  const scale = newZoom / zoomLevel;
+  panX = originX - scale * (originX - panX);
+  panY = originY - scale * (originY - panY);
+  zoomLevel = newZoom;
+
+  // Klamp pan så bilden inte drar iväg utanför
+  if (zoomLevel <= 1) { panX = 0; panY = 0; }
+  applyZoom();
 }
 
 function showItem(idx) {
@@ -83,6 +129,12 @@ function showItem(idx) {
   document.getElementById('lb-download').onclick = () => {
     window.location = `/api/assets/${asset.id}/original`;
   };
+
+  resetZoom();
+
+  // Favorit-state
+  isFav = !!(asset.is_favorite);
+  updateFavBtn();
 
   if (!lbMetaPanel.classList.contains('hidden')) {
     loadInfoDrawer(asset.id);
@@ -869,15 +921,35 @@ function showPersonSearchDialog(anchorOrBox, onSelect, initialQuery = '', rectCo
   }, 100);
 }
 
+// ── Favorit-hjälp ────────────────────────────────────────────────────────────
+function updateFavBtn() {
+  const btn = document.getElementById('lb-favorite');
+  if (!btn) return;
+  btn.title = isFav ? 'Ta bort från favoriter' : 'Lägg till som favorit';
+  btn.querySelector('svg').setAttribute('fill', isFav ? 'currentColor' : 'none');
+  btn.classList.toggle('text-yellow-400', isFav);
+  btn.classList.toggle('text-slate-400', !isFav);
+}
+
 // ── Övriga lightbox-kontroller ────────────────────────────────────────────────
+
+document.getElementById('lb-back').addEventListener('click', closeLightbox);
 
 document.getElementById('lb-favorite').addEventListener('click', async () => {
   const asset = items[currentIndex];
   if (!asset) return;
   try {
-    await api.addFav(asset.id);
-    toast('Tillagd som favorit', 'success');
-  } catch { toast('Kunde inte lägga till favorit', 'error'); }
+    if (isFav) {
+      await api.removeFav(asset.id);
+      isFav = false;
+      toast('Borttagen från favoriter', 'success');
+    } else {
+      await api.addFav(asset.id);
+      isFav = true;
+      toast('Tillagd som favorit', 'success');
+    }
+    updateFavBtn();
+  } catch { toast('Kunde inte uppdatera favorit', 'error'); }
 });
 
 document.getElementById('lb-share').addEventListener('click', async () => {
@@ -885,10 +957,14 @@ document.getElementById('lb-share').addEventListener('click', async () => {
   if (!asset) return;
   try {
     const { data } = await api.createShare({ shareType: 'public_link', assetId: asset.id });
-    const url = `${location.origin}${data.publicUrl}`;
-    await navigator.clipboard.writeText(url);
-    toast('Delningslänk kopierad!', 'success');
-  } catch { toast('Kunde inte skapa delningslänk', 'error'); }
+    const url = `${location.origin}/share/${data.token}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      toast('Delningslänk kopierad!', 'success');
+    } catch {
+      toast(`Dela: ${url}`, 'success');
+    }
+  } catch (e) { toast(`Kunde inte skapa delningslänk: ${e.message}`, 'error'); }
 });
 
 document.getElementById('lb-prev').addEventListener('click', () => {
@@ -898,11 +974,79 @@ document.getElementById('lb-next').addEventListener('click', () => {
   if (currentIndex < items.length - 1) showItem(currentIndex + 1);
 });
 
+// ── Zoom-kontroller ───────────────────────────────────────────────────────────
+document.getElementById('lb-zoom-in').addEventListener('click', () => {
+  const container = document.getElementById('lb-media-container');
+  const rect = container?.getBoundingClientRect();
+  const cx = rect ? rect.width / 2 : 0;
+  const cy = rect ? rect.height / 2 : 0;
+  zoomBy(ZOOM_STEP, cx, cy);
+});
+document.getElementById('lb-zoom-out').addEventListener('click', () => {
+  const container = document.getElementById('lb-media-container');
+  const rect = container?.getBoundingClientRect();
+  const cx = rect ? rect.width / 2 : 0;
+  const cy = rect ? rect.height / 2 : 0;
+  zoomBy(-ZOOM_STEP, cx, cy);
+});
+document.getElementById('lb-zoom-reset').addEventListener('click', resetZoom);
+
+// Drag-to-pan
+if (lbMediaArea) {
+  let isDragging = false;
+  let dragStartX = 0, dragStartY = 0;
+  let panStartX = 0, panStartY = 0;
+
+  lbMediaArea.addEventListener('mousedown', (e) => {
+    if (e.button !== 0 || zoomLevel <= 1) return;
+    isDragging = true;
+    dragStartX = e.clientX;
+    dragStartY = e.clientY;
+    panStartX  = panX;
+    panStartY  = panY;
+    lbMediaArea.style.cursor = 'grabbing';
+    e.preventDefault();
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (!isDragging) return;
+    panX = panStartX + (e.clientX - dragStartX);
+    panY = panStartY + (e.clientY - dragStartY);
+    applyZoom();
+  });
+
+  window.addEventListener('mouseup', () => {
+    if (!isDragging) return;
+    isDragging = false;
+    lbMediaArea.style.cursor = zoomLevel > 1 ? 'grab' : '';
+  });
+}
+
+// Scroll-zoom mot muspekaren
+if (lbMediaArea) {
+  lbMediaArea.addEventListener('wheel', (e) => {
+    if (!lb.classList.contains('open')) return;
+    e.preventDefault();
+    const container = document.getElementById('lb-media-container');
+    const rect = container?.getBoundingClientRect();
+    if (!rect) return;
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+    // Normalisera deltaY (pixlar/rad/sida → enhetsoberoende), cap vid 0.3 per event
+    const normalized = Math.min(Math.abs(e.deltaY) / 300, 0.3);
+    const delta = e.deltaY < 0 ? normalized : -normalized;
+    zoomBy(delta, mouseX, mouseY);
+  }, { passive: false });
+}
+
 window.addEventListener('keydown', (e) => {
   if (!lb.classList.contains('open')) return;
-  if (e.key === 'Escape')     closeLightbox();
+  if (e.key === 'Escape')     { closeLightbox(); return; }
   if (e.key === 'ArrowLeft')  { if (currentIndex > 0) showItem(currentIndex - 1); }
   if (e.key === 'ArrowRight') { if (currentIndex < items.length - 1) showItem(currentIndex + 1); }
+  if (e.key === '+' || e.key === '=') zoomBy(ZOOM_STEP, 0, 0);
+  if (e.key === '-') zoomBy(-ZOOM_STEP, 0, 0);
+  if (e.key === '0') resetZoom();
 });
 
 lb.addEventListener('click', (e) => { if (e.target === lb) closeLightbox(); });

@@ -81,3 +81,38 @@ async function loadCollections() {
     });
   } catch {}
 }
+
+export async function renderFavorites(container) {
+  container.innerHTML = `
+    <div class="p-4">
+      <h1 class="text-xl font-semibold text-white mb-4">❤️ Favoriter</h1>
+      <div id="fav-grid" class="grid gap-1" style="grid-template-columns: repeat(auto-fill, minmax(160px, 1fr))">
+        <div class="col-span-full text-slate-400 text-sm">Laddar…</div>
+      </div>
+    </div>`;
+
+  try {
+    const { data } = await api.favorites();
+    const grid = document.getElementById('fav-grid');
+    if (!data?.length) {
+      grid.innerHTML = '<div class="col-span-full text-slate-400 text-sm">Inga favoriter ännu.</div>';
+      return;
+    }
+    grid.innerHTML = data.map((a, i) => `
+      <div class="relative cursor-pointer group aspect-square overflow-hidden rounded" data-idx="${i}">
+        ${a.mime_type?.startsWith('video/')
+          ? `<div class="absolute inset-0 flex items-center justify-center bg-slate-900 text-slate-400 text-3xl">▶</div>`
+          : ''}
+        <img src="/thumbs/${a.thumb_small_path}" loading="lazy"
+             class="w-full h-full object-cover transition-transform group-hover:scale-105"
+             alt="${a.file_name ?? ''}">
+      </div>`).join('');
+
+    grid.querySelectorAll('[data-idx]').forEach((el) => {
+      el.addEventListener('click', () => openLightbox(data, +el.dataset.idx));
+    });
+  } catch (e) {
+    document.getElementById('fav-grid').innerHTML =
+      `<div class="col-span-full text-red-400 text-sm">Kunde inte ladda favoriter: ${e.message}</div>`;
+  }
+}

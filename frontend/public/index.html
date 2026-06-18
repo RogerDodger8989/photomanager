@@ -256,7 +256,14 @@
 <!-- Lightbox -->
 <div id="lightbox" class="fixed inset-0 bg-black/95 z-50 flex-col open:flex">
   <div class="flex items-center justify-between px-4 py-3 flex-shrink-0">
-    <div id="lb-info" class="text-sm text-slate-300"></div>
+    <div class="flex items-center gap-3">
+      <button id="lb-back" title="Tillbaka" class="text-slate-400 hover:text-white transition-colors flex items-center gap-1 text-sm">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+        </svg>
+      </button>
+      <div id="lb-info" class="text-sm text-slate-300"></div>
+    </div>
     <div class="flex items-center gap-3">
       <button id="lb-favorite" title="Favorit" class="text-slate-400 hover:text-yellow-400 transition-colors">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -290,14 +297,14 @@
   <div class="flex-1 flex overflow-hidden">
 
     <!-- Mediayta -->
-    <div class="flex-1 relative flex items-center justify-center overflow-hidden">
+    <div id="lb-media-area" class="flex-1 relative flex items-center justify-center overflow-hidden">
       <button id="lb-prev" class="absolute left-2 z-10 bg-black/50 hover:bg-black/80 text-white rounded-full p-2 transition-colors">
         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
         </svg>
       </button>
 
-      <div id="lb-media-container" class="relative max-h-full max-w-full">
+      <div id="lb-media-container" class="relative max-h-full max-w-full" style="will-change: transform; transition: transform 0.05s ease-out;">
         <img id="lb-img" class="max-h-[85vh] max-w-full object-contain hidden" alt="">
         <video id="lb-video" class="max-h-[85vh] max-w-full hidden" controls preload="metadata"></video>
         <div id="lb-faces" class="absolute inset-0 pointer-events-none"></div>
@@ -308,6 +315,15 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
         </svg>
       </button>
+
+      <!-- Zoom-kontroller -->
+      <div class="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1 bg-black/60 rounded-full px-2 py-1">
+        <button id="lb-zoom-out" title="Zooma ut" class="text-white hover:text-slate-300 w-8 h-8 flex items-center justify-center text-xl font-light transition-colors">−</button>
+        <span id="lb-zoom-label" class="text-xs text-slate-400 w-10 text-center">100%</span>
+        <button id="lb-zoom-in" title="Zooma in" class="text-white hover:text-slate-300 w-8 h-8 flex items-center justify-center text-xl font-light transition-colors">+</button>
+        <div class="w-px h-4 bg-slate-600 mx-1"></div>
+        <button id="lb-zoom-reset" title="Återställ zoom (0)" class="text-slate-400 hover:text-white text-xs font-medium px-2 h-8 flex items-center transition-colors">1:1</button>
+      </div>
     </div>
 
     <!-- Info Drawer (höger panel) -->
