@@ -1,7 +1,7 @@
 FROM node:20-alpine AS base
 
 # FFmpeg + libvips (krävs av sharp och fluent-ffmpeg)
-RUN apk add --no-cache ffmpeg vips-dev python3 make g++
+RUN apk add --no-cache ffmpeg vips-dev python3 make g++ exiftool
 
 WORKDIR /app
 

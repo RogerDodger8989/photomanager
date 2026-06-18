@@ -2,6 +2,53 @@ import { api } from '../api.js';
 import { openLightbox } from '../components/lightbox.js';
 import { toast } from '../utils.js';
 
+function showRenameModal(currentName, onSave) {
+  const overlay = document.createElement('div');
+  overlay.className = 'fixed inset-0 z-[300] flex items-center justify-center bg-black/60 backdrop-blur-sm';
+  overlay.innerHTML = `
+    <div id="rename-modal" class="bg-slate-800 border border-slate-700 rounded-2xl shadow-2xl w-80 p-6">
+      <h3 class="text-base font-semibold text-white mb-4">Byt namn</h3>
+      <input id="rename-input" type="text" value="${currentName.replace(/"/g, '&quot;')}"
+        class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 mb-5">
+      <div class="flex gap-2 justify-end">
+        <button id="rename-cancel" class="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors rounded-lg hover:bg-slate-700">Avbryt</button>
+        <button id="rename-ok" class="px-4 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors">OK</button>
+      </div>
+    </div>`;
+
+  document.body.appendChild(overlay);
+  const input = overlay.querySelector('#rename-input');
+  input.focus();
+  input.select();
+
+  let originalValue = currentName;
+
+  const doCancel = () => {
+    const current = input.value.trim();
+    if (current !== originalValue && current) {
+      if (!confirm('Du har osparade ändringar. Vill du ändå avbryta?')) return;
+    }
+    overlay.remove();
+  };
+
+  const doSave = () => {
+    const name = input.value.trim();
+    if (!name) return;
+    overlay.remove();
+    onSave(name);
+  };
+
+  overlay.querySelector('#rename-ok').addEventListener('click', doSave);
+  overlay.querySelector('#rename-cancel').addEventListener('click', doCancel);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') doSave();
+    if (e.key === 'Escape') doCancel();
+  });
+  overlay.addEventListener('mousedown', (e) => {
+    if (e.target === overlay) doCancel();
+  });
+}
+
 export async function renderPersons(container, personId = null) {
   if (personId) {
     await renderPersonDetail(container, personId);
@@ -91,14 +138,15 @@ async function renderPersonDetail(container, personId) {
         <button id="edit-name-btn" class="text-blue-400 hover:text-blue-300 text-sm mt-1">Byt namn</button>
       </div>`;
 
-    document.getElementById('edit-name-btn').addEventListener('click', async () => {
-      const name = window.prompt('Nytt namn:', person.name);
-      if (!name?.trim()) return;
-      try {
-        await api.patchPerson(personId, { name: name.trim() });
-        document.getElementById('person-name-display').textContent = name.trim();
-        toast('Namn uppdaterat', 'success');
-      } catch (e) { toast(e.message, 'error'); }
+    document.getElementById('edit-name-btn').addEventListener('click', () => {
+      showRenameModal(person.name, async (newName) => {
+        try {
+          await api.patchPerson(personId, { name: newName });
+          document.getElementById('person-name-display').textContent = newName;
+          person.name = newName;
+          toast('Namn uppdaterat', 'success');
+        } catch (e) { toast(e.message, 'error'); }
+      });
     });
 
     const grid = document.getElementById('person-grid');

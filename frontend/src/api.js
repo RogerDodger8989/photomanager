@@ -80,7 +80,8 @@ export const api = {
 
   // Assets
   assets:  (params = {})        => request('GET', `/api/assets?${qs(params)}`),
-  asset:   (id)                 => request('GET', `/api/assets/${id}`),
+  asset:         (id)           => request('GET', `/api/assets/${id}`),
+  assetMetadata: (id)           => request('GET', `/api/assets/${id}/metadata`),
   patchMeta: (id, body)         => request('PATCH', `/api/assets/${id}/metadata`, body),
   trash:   (id)                 => request('DELETE', `/api/assets/${id}`),
   restore: (id)                 => request('POST', `/api/trash/${id}/restore`),
@@ -105,8 +106,10 @@ export const api = {
   person:   (id, p = {})        => request('GET', `/api/persons/${id}?${qs(p)}`),
   patchPerson: (id, body)       => request('PATCH', `/api/persons/${id}`, body),
   mergePerson: (id, tid)        => request('POST', `/api/persons/${id}/merge/${tid}`),
-  faces:    (assetId)           => request('GET', `/api/faces/${assetId}`),
-  patchFace: (id, body)         => request('PATCH', `/api/faces/${id}`, body),
+  faces:      (assetId)         => request('GET', `/api/faces/${assetId}`),
+  patchFace:  (id, body)        => request('PATCH', `/api/faces/${id}`, body),
+  createFace: (body)            => request('POST', '/api/faces', body),
+  deleteFace: (id)              => request('DELETE', `/api/faces/${id}`),
 
   // Albums
   albums:   ()                  => request('GET', '/api/albums'),

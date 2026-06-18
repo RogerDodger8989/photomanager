@@ -1,4 +1,5 @@
 import { query } from '../db/pool.js';
+import { syncFacesToFile } from '../services/xmpService.js';
 
 export default async function personsRoutes(fastify) {
 
@@ -102,6 +103,69 @@ export default async function personsRoutes(fastify) {
     return reply.send({ data: { ok: true } });
   });
 
+  // POST /api/faces — skapa ny ansiktsregion (manuell taggning)
+  fastify.post('/api/faces', {
+    onRequest: [fastify.authenticate],
+    schema: {
+      body: {
+        type: 'object',
+        required: ['assetId', 'regionX', 'regionY', 'regionW', 'regionH'],
+        properties: {
+          assetId:    { type: 'string' },
+          personId:   { type: 'string' },
+          personName: { type: 'string' },
+          regionX:    { type: 'number' },
+          regionY:    { type: 'number' },
+          regionW:    { type: 'number' },
+          regionH:    { type: 'number' },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { assetId, personId: pid, personName, regionX, regionY, regionW, regionH } = request.body;
+
+    let personId = pid ?? null;
+    if (!personId && personName?.trim()) {
+      const existing = await query('SELECT id FROM persons WHERE name = $1', [personName.trim()]);
+      if (existing.rows[0]) {
+        personId = existing.rows[0].id;
+      } else {
+        const ins = await query('INSERT INTO persons (name) VALUES ($1) RETURNING id', [personName.trim()]);
+        personId = ins.rows[0].id;
+      }
+    }
+
+    const { rows } = await query(
+      `INSERT INTO faces (asset_id, person_id, source, region_x, region_y, region_w, region_h)
+       VALUES ($1, $2, 'manual', $3, $4, $5, $6) RETURNING id`,
+      [assetId, personId, regionX, regionY, regionW, regionH]
+    );
+
+    const { rows: personRows } = personId
+      ? await query('SELECT id, name FROM persons WHERE id = $1', [personId])
+      : { rows: [null] };
+
+    syncFacesToFile(assetId).catch(() => {});
+
+    return reply.status(201).send({ data: {
+      faceId: rows[0].id, personId, personName: personRows[0]?.name ?? null,
+      regionX, regionY, regionW, regionH,
+    }});
+  });
+
+  // DELETE /api/faces/:id — ta bort ansiktsregion
+  fastify.delete('/api/faces/:id', {
+    onRequest: [fastify.authenticate],
+  }, async (request, reply) => {
+    const { rows } = await query(
+      'DELETE FROM faces WHERE id = $1 RETURNING id, asset_id, person_id, source, region_x, region_y, region_w, region_h',
+      [request.params.id]
+    );
+    if (!rows[0]) return reply.status(404).send({ error: 'Ansikt hittades inte' });
+    syncFacesToFile(rows[0].asset_id).catch(() => {});
+    return reply.send({ data: rows[0] });
+  });
+
   // GET /api/faces/:assetId — hämta alla ansiktsregioner för en bild
   fastify.get('/api/faces/:assetId', {
     onRequest: [fastify.authenticate],
@@ -148,6 +212,8 @@ export default async function personsRoutes(fastify) {
     }
 
     await query('UPDATE faces SET person_id = $1 WHERE id = $2', [personId ?? null, id]);
+    const { rows: faceAsset } = await query('SELECT asset_id FROM faces WHERE id = $1', [id]);
+    if (faceAsset[0]) syncFacesToFile(faceAsset[0].asset_id).catch(() => {});
     return reply.send({ data: { ok: true, personId } });
   });
 }

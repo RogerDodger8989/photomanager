@@ -51,8 +51,8 @@ export async function indexFile(absolutePath) {
     `INSERT INTO assets
        (id, file_path, file_name, file_hash, mime_type, file_size,
         width, height, taken_at, file_created_at,
-        transcode_status)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+        transcode_status, rating, title, description)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
     [
       assetId,
       relPath,
@@ -65,6 +65,9 @@ export async function indexFile(absolutePath) {
       meta.takenAt,
       meta.fileCreatedAt,
       isVideo(mimeType) ? 'pending' : 'not_needed',
+      meta.rating ?? null,
+      meta.title ?? null,
+      meta.description ?? null,
     ]
   );
 

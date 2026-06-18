@@ -59,6 +59,32 @@
       background: rgba(96,165,250,.85); color: #fff;
       font-size: 10px; padding: 1px 4px; border-radius: 2px; white-space: nowrap;
     }
+    .face-box { pointer-events: auto; cursor: default; }
+    .face-box .face-edit-bar {
+      position: absolute; bottom: 100%; left: 0;
+      display: none; align-items: center; gap: 2px;
+      background: rgba(15,23,42,.95); border-radius: 3px 3px 0 0;
+      padding: 2px 5px; white-space: nowrap;
+      min-width: 100%; width: max-content; max-width: 220px;
+      z-index: 5;
+    }
+    .face-box:hover .face-edit-bar, .face-box.face-hovered .face-edit-bar { display: flex; }
+    .face-edit-bar .face-name-label {
+      font-size: 11px; color: #e2e8f0; flex: 1;
+      overflow: hidden; text-overflow: ellipsis; max-width: 160px;
+    }
+    .face-edit-bar .face-rename-btn, .face-edit-bar .face-delete-btn {
+      flex-shrink: 0; background: none; border: none; cursor: pointer;
+      font-size: 11px; padding: 1px 4px; border-radius: 2px; line-height: 1.4;
+      color: #94a3b8; transition: background .15s;
+    }
+    .face-edit-bar .face-rename-btn:hover { background: #1e40af; color: #fff; }
+    .face-edit-bar .face-delete-btn:hover { background: #991b1b; color: #fff; }
+    .face-box.face-highlight {
+      border-color: #f59e0b; border-width: 3px; z-index: 10;
+    }
+    .face-box.face-highlight .face-edit-bar { background: rgba(245,158,11,.9); }
+    .face-box.face-highlight .face-name-label { color: #000; font-weight: 600; }
 
     /* Toast */
     #toast-container { position: fixed; bottom: 1.5rem; right: 1.5rem; z-index: 9999; }
@@ -260,30 +286,46 @@
     </div>
   </div>
 
-  <div class="flex-1 relative flex items-center justify-center overflow-hidden">
-    <!-- Prev/Next knappar -->
-    <button id="lb-prev" class="absolute left-2 z-10 bg-black/50 hover:bg-black/80 text-white rounded-full p-2 transition-colors">
-      <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
-      </svg>
-    </button>
+  <!-- Rad: media till vänster, Info Drawer till höger -->
+  <div class="flex-1 flex overflow-hidden">
 
-    <div id="lb-media-container" class="relative max-h-full max-w-full">
-      <img id="lb-img" class="max-h-[80vh] max-w-[90vw] object-contain hidden" alt="">
-      <video id="lb-video" class="max-h-[80vh] max-w-[90vw] hidden" controls preload="metadata"></video>
-      <div id="lb-faces" class="absolute inset-0 pointer-events-none"></div>
+    <!-- Mediayta -->
+    <div class="flex-1 relative flex items-center justify-center overflow-hidden">
+      <button id="lb-prev" class="absolute left-2 z-10 bg-black/50 hover:bg-black/80 text-white rounded-full p-2 transition-colors">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+        </svg>
+      </button>
+
+      <div id="lb-media-container" class="relative max-h-full max-w-full">
+        <img id="lb-img" class="max-h-[85vh] max-w-full object-contain hidden" alt="">
+        <video id="lb-video" class="max-h-[85vh] max-w-full hidden" controls preload="metadata"></video>
+        <div id="lb-faces" class="absolute inset-0 pointer-events-none"></div>
+      </div>
+
+      <button id="lb-next" class="absolute right-2 z-10 bg-black/50 hover:bg-black/80 text-white rounded-full p-2 transition-colors">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+        </svg>
+      </button>
     </div>
 
-    <button id="lb-next" class="absolute right-2 z-10 bg-black/50 hover:bg-black/80 text-white rounded-full p-2 transition-colors">
-      <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
-      </svg>
-    </button>
-  </div>
+    <!-- Info Drawer (höger panel) -->
+    <div id="lb-meta-panel"
+         class="hidden w-80 xl:w-96 bg-slate-900 border-l border-slate-700 flex-shrink-0 flex flex-col overflow-hidden">
+      <!-- Drawer-header -->
+      <div class="flex items-center justify-between px-4 py-3 border-b border-slate-700 flex-shrink-0">
+        <span class="text-sm font-semibold text-white">Information</span>
+        <button id="lb-meta-close" class="text-slate-400 hover:text-white transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      <!-- Accordion-innehåll -->
+      <div id="lb-meta-content" class="flex-1 overflow-y-auto"></div>
+    </div>
 
-  <!-- Metadata-panel -->
-  <div id="lb-meta-panel" class="hidden bg-slate-900 border-t border-slate-700 p-4 max-h-48 overflow-y-auto flex-shrink-0">
-    <div id="lb-meta-content" class="grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm"></div>
   </div>
 </div>
 

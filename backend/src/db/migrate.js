@@ -11,6 +11,9 @@ const MIGRATIONS = [
   '002_ai_suggestions.sql',
   '003_push_subscriptions.sql',
   '004_watched_folders.sql',
+  '005_network_mounts.sql',
+  '006_rating.sql',
+  '007_asset_title_description.sql',
 ];
 
 async function migrate() {

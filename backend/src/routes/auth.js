@@ -110,13 +110,14 @@ export default async function authRoutes(fastify) {
   });
 
   // POST /api/auth/logout
-  fastify.post('/api/auth/logout', {
-    onRequest: [fastify.authenticate],
-  }, async (request, reply) => {
-    await logAudit(request.user.id, 'logout', null, null, null,
-      request.ip, request.headers['user-agent']);
-
+  fastify.post('/api/auth/logout', async (request, reply) => {
+    try {
+      await request.jwtVerify();
+      await logAudit(request.user.id, 'logout', null, null, null,
+        request.ip, request.headers['user-agent']);
+    } catch {}
     reply.clearCookie('refresh_token', { path: '/api/auth/refresh' });
+    reply.clearCookie('refresh_token', { path: '/' });
     return reply.send({ data: { message: 'Utloggad' } });
   });
 

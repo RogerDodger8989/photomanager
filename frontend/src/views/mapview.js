@@ -32,6 +32,14 @@ export function renderMap(container) {
     leafletMap.addLayer(markerGroup);
 
     leafletMap.on('moveend', loadClusters);
+
+    // Centrera på specifik plats om den är angiven (från lightbox stad-klick)
+    if (window._pmMapGoto) {
+      const { lat, lon, zoom } = window._pmMapGoto;
+      window._pmMapGoto = null;
+      leafletMap.setView([lat, lon], zoom ?? 12);
+    }
+
     loadClusters();
   });
 }

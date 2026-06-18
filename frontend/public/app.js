@@ -94,6 +94,19 @@ function navigate(hash) {
 
 window.addEventListener('hashchange', () => navigate(location.hash));
 
+// === LIGHTBOX NAVIGATION EVENTS ===
+
+window.addEventListener('pm:timeline-filter', (e) => {
+  if (currentCleanup) { currentCleanup(); currentCleanup = null; }
+  // pushState utan att trigga hashchange (undviker dubbel-render)
+  history.pushState(null, '', '#/photos');
+  updateActiveNav();
+  const container = document.getElementById('view-container');
+  container.innerHTML = '';
+  renderTimeline(container, e.detail);
+  currentCleanup = destroyTimeline;
+});
+
 // === SÖK ===
 
 const globalSearch = document.getElementById('global-search');

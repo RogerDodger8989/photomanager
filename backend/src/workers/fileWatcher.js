@@ -3,6 +3,7 @@ import { existsSync } from 'fs';
 import { config } from '../config.js';
 import { query } from '../db/pool.js';
 import { indexFile, removeFileFromIndex } from './indexer.js';
+import { mountCifsShare, isMounted } from '../services/mountService.js';
 
 const MEDIA_EXTENSIONS = /\.(jpg|jpeg|png|webp|heic|heif|tiff|tif|gif|avif|bmp|mp4|mov|avi|mkv|webm|mpg|mpeg|3gp|wmv|m4v)$/i;
 
@@ -81,9 +82,34 @@ export async function startFileWatcher() {
   // Ladda extra bevakade mappar från databasen
   try {
     const { rows } = await query(
-      `SELECT path FROM watched_folders WHERE enabled = true`
+      `SELECT path, mount_type, unc_path, cifs_username, cifs_password
+       FROM watched_folders WHERE enabled = true`
     );
-    for (const { path } of rows) {
+    for (const row of rows) {
+      const { path, mount_type, unc_path, cifs_username, cifs_password } = row;
+
+      // Återmontera CIFS-resurser som tappades vid omstart
+      if (mount_type === 'cifs' && unc_path) {
+        if (!isMounted(path)) {
+          try {
+            await mountCifsShare({
+              uncPath: unc_path,
+              mountPoint: path,
+              username: cifs_username || null,
+              password: cifs_password || null,
+            });
+            console.log(`FileWatcher: återmonterade ${unc_path} → ${path}`);
+          } catch (err) {
+            await query(
+              `UPDATE watched_folders SET status = 'error', error_msg = $1 WHERE path = $2`,
+              [`Återmontering misslyckades: ${err.message}`, path]
+            ).catch(() => {});
+            console.error(`FileWatcher: kunde inte återmontera ${path}:`, err.message);
+            continue;
+          }
+        }
+      }
+
       if (!existsSync(path)) {
         await query(
           `UPDATE watched_folders SET status = 'error', error_msg = 'Mappen hittades inte' WHERE path = $1`,
@@ -95,7 +121,6 @@ export async function startFileWatcher() {
       createWatcher(path);
     }
   } catch (err) {
-    // watched_folders-tabellen kanske inte finns ännu vid första uppstart
     console.warn('FileWatcher: kunde inte läsa watched_folders:', err.message);
   }
 }

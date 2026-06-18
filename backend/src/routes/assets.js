@@ -1,5 +1,8 @@
 import { query } from '../db/pool.js';
 import { logAudit } from '../services/authService.js';
+import { writeMetaToFile } from '../services/xmpService.js';
+import { join } from 'path';
+import { config } from '../config.js';
 
 export default async function assetsRoutes(fastify) {
 
@@ -106,9 +109,12 @@ export default async function assetsRoutes(fastify) {
       body: {
         type: 'object',
         properties: {
-          takenAt:    { type: 'string', format: 'date-time' },
-          tags:       { type: 'array', items: { type: 'string' } },
+          takenAt:       { type: 'string', format: 'date-time' },
+          tags:          { type: 'array', items: { type: 'string' } },
           locationLabel: { type: 'string' },
+          rating:        { type: ['integer', 'null'], minimum: 1, maximum: 5 },
+          title:         { type: ['string', 'null'] },
+          description:   { type: ['string', 'null'] },
         },
       },
     },
@@ -122,13 +128,37 @@ export default async function assetsRoutes(fastify) {
     if (!canWrite) return reply.status(403).send({ error: 'Saknar skrivrätt' });
 
     const { id } = request.params;
-    const { takenAt, tags, locationLabel } = request.body;
+    const { takenAt, tags, locationLabel, rating, title, description } = request.body;
 
     if (takenAt) {
       await query('UPDATE assets SET taken_at = $1 WHERE id = $2', [takenAt, id]);
     }
     if (locationLabel !== undefined) {
       await query('UPDATE assets SET location_label = $1 WHERE id = $2', [locationLabel, id]);
+    }
+    if (rating !== undefined) {
+      await query('UPDATE assets SET rating = $1 WHERE id = $2', [rating ?? null, id]);
+    }
+    if (title !== undefined) {
+      await query('UPDATE assets SET title = $1 WHERE id = $2', [title ?? null, id]);
+    }
+    if (description !== undefined) {
+      await query('UPDATE assets SET description = $1 WHERE id = $2', [description ?? null, id]);
+    }
+    if (rating !== undefined || title !== undefined || description !== undefined) {
+      const { rows: ar } = await query('SELECT file_path FROM assets WHERE id = $1', [id]);
+      if (ar[0]?.file_path) {
+        try {
+          const absPath = join(config.media.photosPath, ar[0].file_path);
+          const xmpFields = {};
+          if (rating !== undefined) xmpFields.rating = rating;
+          if (title !== undefined)  xmpFields.title  = title;
+          if (description !== undefined) xmpFields.description = description;
+          await writeMetaToFile(absPath, xmpFields);
+        } catch (err) {
+          fastify.log.warn(`Kunde inte skriva XMP till fil: ${err.message}`);
+        }
+      }
     }
 
     // Ersätt taggar
@@ -152,6 +182,116 @@ export default async function assetsRoutes(fastify) {
 
     await logAudit(request.user.id, 'edit_metadata', id, 'asset', null, request.ip);
     return reply.send({ data: { ok: true } });
+  });
+
+  // GET /api/assets/:id/metadata — fullständig metadata för Info Drawer
+  fastify.get('/api/assets/:id/metadata', {
+    onRequest: [fastify.authenticate],
+  }, async (request, reply) => {
+    const { id } = request.params;
+
+    const { rows } = await query(`
+      SELECT
+        a.id, a.file_name, a.file_size, a.mime_type, a.file_path,
+        a.width, a.height, a.taken_at, a.indexed_at, a.view_count,
+        a.file_hash, a.location_label, a.rating, a.title, a.description,
+        a.thumb_large_path,
+        ST_Y(a.location::geometry) AS lat,
+        ST_X(a.location::geometry) AS lon,
+        u.username AS owner_name,
+        (SELECT COALESCE(json_agg(json_build_object(
+           'faceId', f.id, 'personId', p.id, 'personName', p.name,
+           'x', f.region_x, 'y', f.region_y, 'w', f.region_w, 'h', f.region_h
+         )), '[]'::json)
+         FROM faces f LEFT JOIN persons p ON p.id = f.person_id
+         WHERE f.asset_id = a.id) AS faces,
+        (SELECT COALESCE(json_agg(t.name), '[]'::json)
+         FROM asset_tags at2 JOIN tags t ON t.id = at2.tag_id
+         WHERE at2.asset_id = a.id) AS tags,
+        (SELECT COALESCE(json_agg(json_build_object(
+           'shareType', s.share_type, 'sharedWith', su.username, 'expiresAt', s.expires_at
+         )), '[]'::json)
+         FROM shares s LEFT JOIN users su ON su.id = s.shared_with
+         WHERE s.asset_id = a.id) AS shared_with,
+        (SELECT COUNT(*) FROM assets
+         WHERE file_hash = a.file_hash AND status != 'deleted' AND id != a.id) AS duplicates_count
+      FROM assets a
+      LEFT JOIN users u ON u.id = a.owner_id
+      WHERE a.id = $1 AND a.status != 'deleted'
+    `, [id]);
+
+    if (!rows[0]) return reply.status(404).send({ error: 'Hittades inte' });
+    const a = rows[0];
+
+    // Hämta EXIF-data (numeriska TIFF-tag-nycklar)
+    const { rows: metaRows } = await query(
+      `SELECT key, value FROM asset_metadata WHERE asset_id = $1 AND source = 'exif'`, [id]
+    );
+    const exif = Object.fromEntries(metaRows.map(r => [r.key, r.value]));
+
+    const exifStr = (k) => exif[k] != null ? String(exif[k]).replace(/^"|"$/g, '') : null;
+    const exifNum = (k) => exif[k] != null ? parseFloat(exif[k]) : null;
+
+    const shutterSec = exifNum('33434');
+    const fNumber    = exifNum('33437');
+    const iso        = exifNum('34855');
+    const focalMm    = exifNum('37386');
+    const fl35mm     = exifNum('41989');
+    const flashVal   = exifNum('37385');
+
+    const filePath  = a.file_path ?? '';
+    const slashIdx  = filePath.lastIndexOf('/');
+    const folderPath = slashIdx > 0 ? filePath.substring(0, slashIdx) : '/';
+    const mp = (a.width && a.height) ? ((a.width * a.height) / 1_000_000).toFixed(1) : null;
+
+    return reply.send({ data: {
+      assetId: a.id,
+      fileInfo: {
+        fileName:      a.file_name,
+        fileSize:      mbytes(a.file_size),
+        mimeType:      a.mime_type,
+        folderPath,
+        dimensions:    (a.width && a.height) ? `${a.width} × ${a.height}` : null,
+        megaPixels:    mp ? `${mp} MP` : null,
+        uploadedBy:    a.owner_name ?? 'Okänd',
+        thumbLargePath: a.thumb_large_path ?? null,
+      },
+      organization: {
+        title:       a.title ?? null,
+        description: a.description ?? null,
+        rating:      a.rating ?? null,
+        label:       null,
+        keywords:    a.tags ?? [],
+      },
+      faces: (a.faces ?? []).map(f => ({
+        faceId:      f.faceId,
+        personId:    f.personId,
+        personName:  f.personName,
+        boundingBox: { x: f.x, y: f.y, width: f.w, height: f.h },
+      })),
+      temporalSpatial: {
+        capturedAt: a.taken_at ?? null,
+        gps: (a.lat != null && a.lon != null) ? { latitude: a.lat, longitude: a.lon } : null,
+        location: a.location_label ? parseLocationLabel(a.location_label) : null,
+      },
+      camera: {
+        make:         exifStr('271'),
+        model:        exifStr('272'),
+        lens:         exifStr('42036'),
+        shutterSpeed: shutterSec ? (shutterSec < 1 ? `1/${Math.round(1/shutterSec)}s` : `${shutterSec}s`) : null,
+        aperture:     fNumber    ? `f/${fNumber}`  : null,
+        iso:          iso        ? Math.round(iso) : null,
+        focalLength:  focalMm   ? `${focalMm} mm${fl35mm ? ` (${Math.round(fl35mm)} mm)` : ''}` : null,
+        flash:        flashVal != null ? ((flashVal & 1) ? 'Utlöstes' : 'Utlöstes inte') : null,
+      },
+      system: {
+        checksum:        a.file_hash,
+        duplicatesCount: parseInt(a.duplicates_count ?? 0),
+        viewCount:       a.view_count ?? 0,
+        sharedWith:      a.shared_with ?? [],
+        indexedAt:       a.indexed_at,
+      },
+    }});
   });
 
   // DELETE /api/assets/:id — flytta till papperskorg
@@ -218,7 +358,7 @@ export default async function assetsRoutes(fastify) {
     return reply.send({ data: { ok: true } });
   });
 
-  // GET /api/folders?path= — visa mappstruktur
+  // GET /api/folders?path= — visa mappstruktur (hjälpfunktioner definieras efter routern)
   fastify.get('/api/folders', {
     onRequest: [fastify.authenticate],
     schema: {
@@ -248,4 +388,19 @@ export default async function assetsRoutes(fastify) {
 
     return reply.send({ data: rows });
   });
+}
+
+function mbytes(bytes) {
+  const n = Number(bytes);
+  if (!n) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.min(Math.floor(Math.log(n) / Math.log(1024)), units.length - 1);
+  return `${(n / 1024 ** i).toFixed(2)} ${units[i]}`;
+}
+
+function parseLocationLabel(label) {
+  const parts = label.split(',').map(s => s.trim());
+  if (parts.length >= 3) return { city: parts[0], region: parts[1], country: parts[parts.length - 1] };
+  if (parts.length === 2) return { city: parts[0], region: null, country: parts[1] };
+  return { city: parts[0] ?? null, region: null, country: null };
 }

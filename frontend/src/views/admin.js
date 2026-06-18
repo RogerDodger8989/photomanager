@@ -306,48 +306,58 @@ async function renderWatchedFolders(content) {
   content.innerHTML = `
     <div class="space-y-4">
 
-      <!-- Montera Windows/nätverksmapp -->
+      <!-- SMB/CIFS-montering -->
       <div class="bg-slate-800 rounded-xl p-4">
-        <div class="text-sm font-medium text-white mb-3">Koppla in Windows- eller nätverksmapp</div>
+        <div class="text-sm font-medium text-white mb-1">Nätverksmapp (SMB/CIFS)</div>
+        <p class="text-xs text-slate-400 mb-3">
+          Anslut direkt till en NAS, nätverksresurs eller Windows-delad mapp.
+          Appen monterar resursen automatiskt — ingen Docker-omstart behövs.
+        </p>
 
-        <div class="space-y-3">
-          <!-- Windows-sökväg -->
-          <div>
-            <label class="block text-xs text-slate-400 mb-1">Sökväg på Windows-datorn</label>
-            <div class="flex gap-2">
-              <input id="wf-win-hostpath" type="text" placeholder="C:\\Bilder  eller  \\\\NAS\\photos"
-                class="flex-1 bg-slate-700 text-white text-sm rounded-lg px-3 py-2 border border-slate-600 focus:outline-none focus:border-blue-500 font-mono">
-              <button id="wf-winpick-btn"
-                class="px-3 py-2 bg-slate-600 hover:bg-slate-500 text-white text-sm rounded-lg transition-colors whitespace-nowrap">
-                Bläddra…
-              </button>
-            </div>
-          </div>
-
-          <!-- Container-sökväg (auto) -->
-          <div>
-            <label class="block text-xs text-slate-400 mb-1">Sökväg i Docker-containern</label>
-            <input id="wf-win-cpath" type="text" placeholder="/mnt/Bilder"
-              class="w-full bg-slate-700 text-white text-sm rounded-lg px-3 py-2 border border-slate-600 focus:outline-none focus:border-blue-500 font-mono">
-          </div>
-
-          <!-- Genererad docker-compose-rad -->
-          <div id="wf-win-compose-row" class="hidden">
-            <label class="block text-xs text-slate-400 mb-1">Lägg till denna rad i <span class="font-mono">docker-compose.dev.yml</span> → volumes</label>
-            <div class="flex items-center gap-2 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2">
-              <code id="wf-win-mountline" class="flex-1 text-xs text-green-300 font-mono break-all"></code>
-              <button id="wf-win-copy" class="flex-shrink-0 text-xs px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded transition-colors">Kopiera</button>
-            </div>
-            <p class="text-xs text-slate-500 mt-1.5">
-              Starta sedan om med:
-              <code class="text-green-400 font-mono">docker-compose -f docker-compose.dev.yml up -d</code>
-              — därefter klickar du <span class="text-blue-300">Använd</span> nedan och lägger till mappen.
+        <div class="grid grid-cols-2 gap-3">
+          <div class="col-span-2">
+            <label class="block text-xs text-slate-400 mb-1">Nätverkssökväg</label>
+            <input id="cifs-unc" type="text" placeholder="\\\\NAS\\photos  eller  \\\\192.168.1.100\\Bilder"
+              class="w-full bg-slate-700 text-white text-sm rounded-lg px-3 py-2 border border-slate-600 focus:outline-none focus:border-blue-500 font-mono"
+              autocomplete="off">
+            <p class="text-xs text-slate-500 mt-1">
+              Lokal Windows-mapp: aktivera fildelning i Windows Explorer → använd <span class="font-mono text-slate-300">\\\\host.docker.internal\\MappNamn</span>
             </p>
-            <button id="wf-win-use"
-              class="mt-2 px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded-lg transition-colors">
-              Använd container-sökvägen
-            </button>
           </div>
+
+          <div>
+            <label class="block text-xs text-slate-400 mb-1">Mount-namn (visas som /mnt/…)</label>
+            <input id="cifs-name" type="text" placeholder="Semester"
+              class="w-full bg-slate-700 text-white text-sm rounded-lg px-3 py-2 border border-slate-600 focus:outline-none focus:border-blue-500">
+          </div>
+
+          <div>
+            <label class="block text-xs text-slate-400 mb-1">Visningsnamn (valfritt)</label>
+            <input id="cifs-label" type="text" placeholder="Foton på NAS"
+              class="w-full bg-slate-700 text-white text-sm rounded-lg px-3 py-2 border border-slate-600 focus:outline-none focus:border-blue-500">
+          </div>
+
+          <div>
+            <label class="block text-xs text-slate-400 mb-1">Användarnamn (valfritt)</label>
+            <input id="cifs-user" type="text" placeholder="Lämna tomt för gäst"
+              class="w-full bg-slate-700 text-white text-sm rounded-lg px-3 py-2 border border-slate-600 focus:outline-none focus:border-blue-500"
+              autocomplete="off">
+          </div>
+
+          <div>
+            <label class="block text-xs text-slate-400 mb-1">Lösenord (valfritt)</label>
+            <input id="cifs-pass" type="password" placeholder=""
+              class="w-full bg-slate-700 text-white text-sm rounded-lg px-3 py-2 border border-slate-600 focus:outline-none focus:border-blue-500"
+              autocomplete="new-password">
+          </div>
+        </div>
+
+        <div class="flex items-center gap-3 mt-3">
+          <button id="cifs-mount-btn"
+            class="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors">
+            Montera och bevaka
+          </button>
+          <span id="cifs-status" class="text-xs text-slate-400 hidden">Ansluter…</span>
         </div>
       </div>
 
@@ -452,71 +462,56 @@ async function renderWatchedFolders(content) {
     } catch (e) { toast(e.message, 'error'); }
   });
 
-  // === Windows/nätverksmapp-konfiguration ===
-  const hostPathEl   = content.querySelector('#wf-win-hostpath');
-  const cpathEl      = content.querySelector('#wf-win-cpath');
-  const composeRowEl = content.querySelector('#wf-win-compose-row');
-  const mountLineEl  = content.querySelector('#wf-win-mountline');
+  // === SMB/CIFS-montering ===
+  const cifsUncEl    = content.querySelector('#cifs-unc');
+  const cifsNameEl   = content.querySelector('#cifs-name');
+  const cifsStatusEl = content.querySelector('#cifs-status');
 
-  function deriveContainerPath(hostPath) {
-    // Extrahera sista mappnamnet ur Windows-sökväg
-    const name = hostPath.replace(/\\/g, '/').replace(/\/$/, '').split('/').filter(Boolean).pop();
-    return name ? `/mnt/${name}` : '';
-  }
-
-  function updateComposeLine() {
-    const host  = hostPathEl.value.trim();
-    const cpath = cpathEl.value.trim();
-    if (!host || !cpath) { composeRowEl.classList.add('hidden'); return; }
-    mountLineEl.textContent = `- ${host}:${cpath}`;
-    composeRowEl.classList.remove('hidden');
-  }
-
-  hostPathEl.addEventListener('input', () => {
-    const derived = deriveContainerPath(hostPathEl.value.trim());
-    if (derived) cpathEl.value = derived;
-    updateComposeLine();
+  // Auto-fyll mount-namn från UNC-sökväg
+  cifsUncEl.addEventListener('input', () => {
+    if (cifsNameEl.value.trim()) return; // Rör inte om användaren redan fyllt i
+    const unc   = cifsUncEl.value.trim();
+    const parts = unc.replace(/\\/g, '/').split('/').filter(Boolean);
+    if (parts.length >= 2) cifsNameEl.value = parts[parts.length - 1];
   });
-  cpathEl.addEventListener('input', updateComposeLine);
 
-  // Bläddra-knapp: öppnar Windows-dialog, fyller i mappnamnet i host-fältet som hjälp
-  content.querySelector('#wf-winpick-btn').addEventListener('click', async () => {
-    if (!('showDirectoryPicker' in window)) {
-      toast('Ange sökvägen manuellt i fältet ovan.', 'info');
+  content.querySelector('#cifs-mount-btn').addEventListener('click', async () => {
+    const uncPath   = cifsUncEl.value.trim();
+    const mountName = cifsNameEl.value.trim();
+    const label     = content.querySelector('#cifs-label').value.trim();
+    const username  = content.querySelector('#cifs-user').value.trim();
+    const password  = content.querySelector('#cifs-pass').value;
+
+    if (!uncPath || !mountName) {
+      toast('Fyll i nätverkssökväg och mount-namn', 'warn');
       return;
     }
-    let handle;
-    try { handle = await window.showDirectoryPicker(); }
-    catch (e) { if (e.name !== 'AbortError') toast(e.message, 'error'); return; }
 
-    // Webbläsaren ger bara mappnamnet, inte fullständig sökväg
-    const name = handle.name;
-    if (!hostPathEl.value.trim()) {
-      hostPathEl.value = `C:\\${name}`;
-      hostPathEl.focus();
-      // Sätt markören på C:\ så det är lätt att skriva över
-      hostPathEl.setSelectionRange(0, 2);
+    const btn = content.querySelector('#cifs-mount-btn');
+    btn.disabled    = true;
+    btn.textContent = 'Ansluter…';
+    cifsStatusEl.textContent = 'Kontaktar servern, detta kan ta några sekunder…';
+    cifsStatusEl.classList.remove('hidden');
+
+    try {
+      await api.post('/api/admin/watched-folders/mount', {
+        uncPath, mountName, label, username, password,
+      });
+      toast(`✓ ${mountName} monterad och bevakas nu`, 'success');
+      // Töm formuläret
+      cifsUncEl.value = '';
+      cifsNameEl.value = '';
+      content.querySelector('#cifs-label').value = '';
+      content.querySelector('#cifs-user').value  = '';
+      content.querySelector('#cifs-pass').value  = '';
+      reload();
+    } catch (e) {
+      toast(e.message, 'error');
+    } finally {
+      btn.disabled    = false;
+      btn.textContent = 'Montera och bevaka';
+      cifsStatusEl.classList.add('hidden');
     }
-    cpathEl.value = `/mnt/${name}`;
-    updateComposeLine();
-    toast(`Mappnamn: ${name} — justera Windows-sökvägen om den skiljer sig`, 'info');
-  });
-
-  content.querySelector('#wf-win-copy').addEventListener('click', () => {
-    const line = mountLineEl.textContent.trim();
-    navigator.clipboard.writeText(line)
-      .then(() => toast('Kopierat!', 'success'))
-      .catch(() => toast('Markera texten och kopiera manuellt', 'warn'));
-  });
-
-  content.querySelector('#wf-win-use').addEventListener('click', () => {
-    const cpath = cpathEl.value.trim();
-    const name  = cpath.split('/').pop();
-    if (!cpath) return;
-    content.querySelector('#wf-path').value  = cpath;
-    content.querySelector('#wf-label').value = name;
-    content.querySelector('#wf-path').scrollIntoView({ behavior: 'smooth', block: 'center' });
-    content.querySelector('#wf-path').focus();
   });
 
   // === Mappbläddrare ===

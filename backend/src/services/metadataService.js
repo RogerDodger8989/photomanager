@@ -1,4 +1,5 @@
 import ExifReader from 'exifr';
+import sharp from 'sharp';
 import { stat } from 'fs/promises';
 
 // Filtyper som stöds
@@ -49,6 +50,9 @@ export async function extractMetadata(filePath) {
     xmp: {},
     faces: [],         // [{ name, regionX, regionY, regionW, regionH, source }]
     tags: [],          // nyckelord från IPTC/XMP
+    rating: null,      // 1–5 från XMP:Rating
+    title: null,       // XMP:Title / IPTC:ObjectName
+    description: null, // XMP:Description / IPTC:Caption-Abstract
   };
 
   if (!isImage(mimeType)) return result;
@@ -74,9 +78,18 @@ export async function extractMetadata(filePath) {
       ?? raw.ModifyDate
       ?? null;
 
-    // Bildstorlek
-    result.width  = raw.ExifImageWidth  ?? raw.ImageWidth  ?? raw.PixelXDimension ?? null;
-    result.height = raw.ExifImageHeight ?? raw.ImageHeight ?? raw.PixelYDimension ?? null;
+    // Konvertera till Date om exifr gav ett objekt med nested value
+    if (result.takenAt != null && !(result.takenAt instanceof Date)) {
+      const v = result.takenAt?.value ?? result.takenAt;
+      result.takenAt = v instanceof Date ? v : (typeof v === 'string' ? new Date(v) : null);
+      if (result.takenAt instanceof Date && isNaN(result.takenAt.getTime())) result.takenAt = null;
+    }
+
+    // Bildstorlek (exifr-nycklar varierar beroende på fil)
+    result.width  = raw.ExifImageWidth  ?? raw.ImageWidth  ?? raw.PixelXDimension
+                 ?? raw.ImageWidthInPixels ?? raw.OutputImageWidth ?? null;
+    result.height = raw.ExifImageHeight ?? raw.ImageHeight ?? raw.PixelYDimension
+                 ?? raw.ImageLengthInPixels ?? raw.OutputImageHeight ?? null;
 
     // GPS
     if (raw.latitude != null && raw.longitude != null) {
@@ -98,8 +111,35 @@ export async function extractMetadata(filePath) {
       }
     }
 
-    // Nyckelord (taggar) från IPTC Keywords eller XMP dc:subject
-    const kwRaw = raw.Keywords ?? raw['dc:subject'] ?? null;
+    // Hjälpfunktion: XMP language alternative → sträng
+    const xmpStr = (val) => {
+      if (val == null) return null;
+      if (typeof val === 'string') return val.trim() || null;
+      // Language alternative: { 'x-default': 'text' } eller { value: 'text' }
+      if (typeof val === 'object') {
+        const s = val['x-default'] ?? val.value ?? Object.values(val)[0] ?? null;
+        return s ? String(s).trim() || null : null;
+      }
+      return null;
+    };
+
+    // Titel: XMP dc:title / IPTC ObjectName
+    const titleRaw = raw['dc:title'] ?? raw.Title ?? raw.ObjectName ?? raw['xmp:Title'] ?? null;
+    result.title = xmpStr(titleRaw);
+
+    // Beskrivning: XMP dc:description / IPTC Caption-Abstract
+    const descRaw = raw['dc:description'] ?? raw.Description ?? raw['Caption-Abstract'] ?? raw.ImageDescription ?? raw['xmp:Description'] ?? null;
+    result.description = xmpStr(descRaw);
+
+    // Betyg: XMP Rating (standard 1–5)
+    const ratingRaw = raw.Rating ?? raw['xmp:Rating'] ?? null;
+    if (ratingRaw != null) {
+      const r = parseInt(ratingRaw, 10);
+      if (r >= 1 && r <= 5) result.rating = r;
+    }
+
+    // Nyckelord: XMP subject (UTF-8) prioriteras över IPTC tag 25 (Latin-1)
+    const kwRaw = raw.subject ?? raw[25] ?? raw.Keywords ?? raw['dc:subject'] ?? null;
     if (kwRaw) {
       const arr = Array.isArray(kwRaw) ? kwRaw : [kwRaw];
       result.tags = arr.map((k) => String(k).toLowerCase().trim()).filter(Boolean);
@@ -112,76 +152,133 @@ export async function extractMetadata(filePath) {
     result.faces = parseFaceRegions(raw, result.width, result.height);
 
   } catch (err) {
-    // Filen kan sakna EXIF — det är OK
     if (!err.message?.includes('No Exif data')) {
       console.warn(`Metadata-varning för ${filePath}:`, err.message);
     }
   }
 
+  // Sharp-fallback för dimensioner (JPEG-filer utan EXIF-dimensioner)
+  if (isImage(result.mimeType) && (!result.width || !result.height)) {
+    try {
+      const meta = await sharp(filePath).metadata();
+      result.width  = result.width  ?? meta.width  ?? null;
+      result.height = result.height ?? meta.height ?? null;
+    } catch {}
+  }
+
+  // Fallback 1: parsa datum ur filnamnet (Android, Windows Phone, etc.)
+  if (!result.takenAt) {
+    result.takenAt = parseDateFromFilename(filePath);
+  }
+
+  // Fallback 2: mtime är mer tillförlitlig än birthtime i Docker/Linux
+  const EPOCH = new Date('1970-01-02');
+  if (!result.fileCreatedAt || result.fileCreatedAt < EPOCH) {
+    result.fileCreatedAt = fileStat.mtime;
+  }
+  // Om takenAt fortfarande saknas, använd mtime
+  if (!result.takenAt && fileStat.mtime > EPOCH) {
+    result.takenAt = fileStat.mtime;
+  }
+
   return result;
+}
+
+// Parsar datum ur vanliga mobilfilnamn:
+//   IMG20250416171406.jpg  → 2025-04-16 17:14:06
+//   VID20250720184659.mp4  → 2025-07-20 18:46:59
+//   IMG_20250416_171406    → 2025-04-16 17:14:06  (Samsung)
+//   20250416_171406        → 2025-04-16 17:14:06
+//   2025-04-16 17.14.06    → 2025-04-16 17:14:06  (Windows)
+//   2025-04-16_17-14-06    → 2025-04-16 17:14:06
+function parseDateFromFilename(filePath) {
+  const name = filePath.split(/[\\/]/).pop() ?? '';
+
+  const patterns = [
+    // YYYYMMDDHHMMSS  (Android Camera, Huawei, etc.)
+    /(\d{4})(\d{2})(\d{2})[\s_\-T]?(\d{2})(\d{2})(\d{2})/,
+    // YYYY-MM-DD_HH-MM-SS  eller  YYYY-MM-DD HH.MM.SS
+    /(\d{4})[.\-](\d{2})[.\-](\d{2})[\s_T](\d{2})[.:h](\d{2})[.:m](\d{2})/,
+  ];
+
+  for (const re of patterns) {
+    const m = name.match(re);
+    if (!m) continue;
+    const [, y, mo, d, h = '0', mi = '0', s = '0'] = m;
+    const dt = new Date(`${y}-${mo}-${d}T${h}:${mi}:${s}`);
+    if (!isNaN(dt.getTime()) && dt.getFullYear() > 1900 && dt.getFullYear() <= new Date().getFullYear() + 1) {
+      return dt;
+    }
+  }
+  return null;
 }
 
 function parseFaceRegions(raw, imgWidth, imgHeight) {
   const faces = [];
 
-  // exifr levererar XMP face regions under olika nyckelnamn beroende på version
-  // Vi söker efter de vanligaste strukturerna från DigiKam och Lightroom
-  const regionSources = [
-    raw['mwg-rs:Regions'],
-    raw['Regions'],
-    raw['RegionInfo'],
-  ].filter(Boolean);
-
-  for (const regionInfo of regionSources) {
-    // Normalisera till array av region-objekt
+  // ── MWG-format (DigiKam, Lightroom, exifr) ──────────────────────────────
+  // raw.Regions eller raw['mwg-rs:Regions']
+  const mwgSource = raw['mwg-rs:Regions'] ?? raw['Regions'] ?? null;
+  if (mwgSource) {
     let regionList =
-      regionInfo?.['mwg-rs:RegionList']?.['mwg-rs:Region'] ??
-      regionInfo?.RegionList?.Region ??
-      regionInfo?.['rdf:Bag']?.['rdf:li'] ??
+      mwgSource?.['mwg-rs:RegionList']?.['mwg-rs:Region'] ??
+      mwgSource?.RegionList ??          // exifr: RegionList ÄR regionen/listan
+      mwgSource?.['rdf:Bag']?.['rdf:li'] ??
       null;
 
-    if (!regionList) continue;
-    if (!Array.isArray(regionList)) regionList = [regionList];
+    if (regionList) {
+      if (!Array.isArray(regionList)) regionList = [regionList];
 
-    for (const region of regionList) {
-      // Namn på person
-      const name =
-        region['mwg-rs:Name'] ??
-        region.Name ??
-        region['lr:name'] ??
-        null;
+      for (const region of regionList) {
+        const name =
+          region['mwg-rs:Name'] ?? region.Name ?? region['lr:name'] ?? null;
 
-      // Koordinater — exifr kan ge dem normaliserade (0–1) eller i pixlar
-      const area =
-        region['mwg-rs:Area'] ??
-        region.Area ??
-        null;
+        const area = region['mwg-rs:Area'] ?? region.Area ?? null;
+        if (!area) continue;
 
-      if (!area) continue;
+        // MWG: x/y = centrum, w/h = storlek (normaliserade 0–1)
+        const cx = parseFloat(area['stArea:x'] ?? area.x ?? 0);
+        const cy = parseFloat(area['stArea:y'] ?? area.y ?? 0);
+        const w  = parseFloat(area['stArea:w'] ?? area.w ?? 0);
+        const h  = parseFloat(area['stArea:h'] ?? area.h ?? 0);
+        if (!w || !h) continue;
 
-      // mwg-rs:Area använder x, y som centrum och w, h som storlek (alla 0–1)
-      const cx = parseFloat(area['stArea:x'] ?? area.x ?? 0);
-      const cy = parseFloat(area['stArea:y'] ?? area.y ?? 0);
-      const w  = parseFloat(area['stArea:w'] ?? area.w ?? 0);
-      const h  = parseFloat(area['stArea:h'] ?? area.h ?? 0);
+        faces.push({
+          name: name ?? null,
+          regionX: Math.max(0, cx - w / 2),
+          regionY: Math.max(0, cy - h / 2),
+          regionW: w,
+          regionH: h,
+          source: detectFaceSource(region, raw),
+        });
+      }
+    }
+  }
 
-      if (!w || !h) continue;
-
-      // Konvertera centrum+storlek → övre vänstra hörnet (x, y, w, h)
-      const regionX = cx - w / 2;
-      const regionY = cy - h / 2;
-
-      // Detektera källa baserat på metadata
-      const source = detectFaceSource(region, raw);
-
-      faces.push({
-        name: name ?? null,
-        regionX: Math.max(0, regionX),
-        regionY: Math.max(0, regionY),
-        regionW: w,
-        regionH: h,
-        source,
-      });
+  // ── Windows Photos-format ────────────────────────────────────────────────
+  // raw.RegionInfo.Regions  →  { PersonDisplayName, Rectangle: "left,top,w,h" }
+  const winSource = raw['RegionInfo'] ?? null;
+  if (winSource && faces.length === 0) {
+    let regions = winSource.Regions ?? null;
+    if (regions && !Array.isArray(regions)) regions = [regions];
+    if (regions) {
+      for (const r of regions) {
+        const name = r.PersonDisplayName ?? null;
+        const rect = r.Rectangle;         // "0.325, 0.088, 0.484, 0.826"
+        if (!rect) continue;
+        const parts = String(rect).split(',').map(Number);
+        if (parts.length < 4) continue;
+        const [left, top, w, h] = parts;
+        if (!w || !h) continue;
+        faces.push({
+          name: name ?? null,
+          regionX: Math.max(0, left),
+          regionY: Math.max(0, top),
+          regionW: w,
+          regionH: h,
+          source: 'windows',
+        });
+      }
     }
   }
 

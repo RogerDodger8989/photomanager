@@ -15,6 +15,7 @@ services:
       - ./backend/media/photos:/media/photos
       - ./backend/media/thumbs:/media/thumbs
       - ./backend/media/transcode:/media/transcode
+      - ./Bilder:/media/Bilder
     environment:
       NODE_ENV: development
       PORT: 3000
@@ -28,6 +29,8 @@ services:
       MEDIA_THUMBS_PATH: /media/thumbs
       MEDIA_TRANSCODE_PATH: /media/transcode
       TRASH_AUTO_CLEAN_DAYS: 30
+    cap_add:
+      - SYS_ADMIN   # Krävs för CIFS/SMB-montering inifrån containern
     depends_on:
       postgres:
         condition: service_healthy
