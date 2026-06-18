@@ -2,47 +2,79 @@
 
 > Self-hosted Google Photos-ersättare. Kör lokalt i Docker/Unraid — dina bilder stannar hemma.
 
-![Node.js](https://img.shields.io/badge/Node.js-20+-green) ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-pgvector%20%2B%20PostGIS-blue) ![Docker](https://img.shields.io/badge/Docker-ready-blue)
+![Node.js](https://img.shields.io/badge/Node.js-20+-339933?logo=nodedotjs&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-pgvector%20%2B%20PostGIS-4169E1?logo=postgresql&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)
+![PWA](https://img.shields.io/badge/PWA-installable-5A0FC8?logo=pwa&logoColor=white)
 
 ---
 
 ## Funktioner
 
-### Implementerat
+### Bibliotek & indexering
+- Automatisk bevakning av mediamappar via **chokidar** — nya filer indexeras direkt
+- Stöd för **JPEG, PNG, WebP, HEIC, GIF** och videofiler (MP4, MOV, MKV m.fl.)
+- Läser all **EXIF/IPTC/XMP**-metadata: datum, GPS, kamera, objektiv, taggar
+- **SHA-256**-hashning för dubblettdetektering
+- Administratörsgränssnitt för att hantera och lägga till bevakade mappar
 
-| Funktion | Beskrivning |
-|----------|-------------|
-| **Automatisk indexering** | Bevakar `/media/photos/` med chokidar — nya filer indexeras direkt |
-| **EXIF/XMP/IPTC** | Läser all metadata: datum, GPS, kamera, objektiv, taggar |
-| **Thumbnails** | Genererar WebP-thumbnails (400px + 1200px) via Sharp |
-| **HEIC-stöd** | Konverterar Apple HEIC till WebP automatiskt |
-| **Video-transkodning** | FFmpeg konverterar HEVC/MOV → H.264 MP4 för webbuppspelning |
-| **Video-streaming** | Range-requests med stöd för seek |
-| **Karta** | Visar bilder på karta med PostGIS-klustring (Leaflet.js) |
-| **Ansikten** | Ansiktsdetektering med ArcFace (ONNX Runtime) + pgvector-sökning |
-| **Sökning** | Full-text + fuzzy-sökning på filnamn, plats och taggar (pg_trgm) |
-| **Explore** | Auto-grupperade händelser från tidslinje |
-| **Album** | Manuella och smarta album med sorteringsordning |
-| **Favoriter** | Markera bilder som favoriter |
-| **Delning** | Intern delning + publika länkar med valfri giltighetstid och max-visningar |
-| **Uppladdning** | Direkt uppladdning via webbgränssnittet (multipart) |
-| **Papperskorg** | Mjuk-radering med automatisk rensning via cron |
-| **Export** | Ladda ner ZIP med original + XMP-sidecar |
-| **Push-notiser** | Web Push-notifikationer (t.ex. vid ny indexering) |
-| **Jobbkö** | BullMQ + Redis — thumbnailing, transkodning, AI och export körs asynkront |
-| **Admin** | Hantera användare, bevakade mappar, jobbstatus och audit-log |
-| **RBAC** | Rollbaserad åtkomstkontroll (admin / user / guest) med granulära rättigheter |
-| **PWA** | Installerbar webapp med Service Worker och offline-stöd |
-| **Auth** | JWT-sessioner med bcrypt, rate-limiting och httpOnly-cookies |
+### Bilder
+- Genererar **WebP-thumbnails** i två storlekar (400px + 1200px) via Sharp
+- **HEIC → WebP**-konvertering automatiskt vid indexering
+- Fullt stöd för **EXIF-rotation**
 
-### Planerat / under arbete
+### Video
+- **FFmpeg**-transkodning: HEVC/MOV → H.264 MP4 för sömlös webbuppspelning
+- **HTTP range-requests** — seek fungerar direkt i webbläsaren
 
-| Funktion | Status |
-|----------|--------|
-| Komplett PWA-frontend | Pågår |
-| Ansiktsigenkänning (clustering + namngivning) | Pågår |
-| Audit-log UI i admin | Planerat |
-| Säkerhetsgranskning inför release | Planerat |
+### Sökning
+- **Full-text + fuzzy-sökning** på filnamn, plats och taggar (PostgreSQL pg_trgm)
+- Filtrera på datum, plats, album, person, filtyp och favoriter
+- Tagghantering med normaliserade taggar
+
+### Utforska
+- **Tidslinje** grupperad per dag, månad och år
+- **Händelser** — auto-grupperade resor och tillfällen
+- **"Den här dagen"** — bilder från samma datum tidigare år
+- **Resor med GPS-spår** — automatisk rutt från geo-taggade bilder
+- **Platser** — klustring av bilder per geografiskt område
+- **Samlingar** — smarta grupper baserade på innehåll
+
+### Karta
+- Interaktiv karta med **PostGIS-klustring** (Leaflet.js)
+- Klicka på ett kluster för att zooma in och se bilder
+
+### Ansikten & AI
+- **Ansiktsdetektering** med ONNX Runtime (ArcFace, 512-dim embeddings)
+- **pgvector**-sökning för att hitta liknande ansikten
+- Förslag på personnamn med accept/avvisa per ansikte eller batch
+- Manuell hantering: skapa, namnge, slå ihop och ta bort personer
+- Graceful degradation — startar utan AI-modeller om de saknas
+
+### Album & delning
+- Skapa manuella och smarta **album** med valfri sorteringsordning
+- **Favoriter** — markera och filtrera dina bästa bilder
+- **Intern delning** med specifika användare
+- **Publika länkar** med valfri giltighetstid och max antal visningar
+- Se inkommande och utgående delningar
+
+### Export & backup
+- Ladda ner **ZIP-arkiv** med originalfiler + XMP-sidecar per bild
+- Jobb körs asynkront och är nedladdningsbara när de är klara
+
+### Admin & säkerhet
+- **Användarhantering**: skapa, redigera, aktivera/inaktivera konton
+- **RBAC** med tre roller (admin / user / guest) och granulära rättigheter per användare
+- **Audit-log** med CSV-export — spåra alla händelser (login, delete, share, download)
+- **Jobbkö** via BullMQ + Redis — se status, starta om misslyckade jobb
+- **Dubblettrapport** baserat på SHA-256
+- **Systemstatistik**: antal assets, lagringsutrymme, jobbstatus
+- Rate-limiting, httpOnly JWT-cookies och bcrypt lösenordshashning
+
+### PWA
+- **Installerbar** på mobil och desktop via webbläsaren
+- Service Worker för offline-stöd
+- **Web Push-notifikationer** vid t.ex. ny indexering
 
 ---
 
@@ -53,9 +85,9 @@
 | API | Node.js 20 + Fastify |
 | Databas | PostgreSQL med pgvector + PostGIS + pg_trgm |
 | Cache / Köer | Redis + BullMQ |
-| AI | ONNX Runtime (ArcFace 512-dim, worker_threads) |
+| AI | ONNX Runtime (ArcFace, worker_threads) |
 | Frontend | PWA — HTML + Tailwind CSS v4 + Vanilla JS |
-| Media | Sharp (bilder) + FFmpeg (video) |
+| Media | Sharp (bilder) · FFmpeg (video) |
 | Containers | Docker / Unraid |
 
 ---
@@ -65,14 +97,14 @@
 ### Förutsättningar
 
 - Docker + Docker Compose
-- (Unraid) Skapa dessa paths innan start:
+- (Unraid) Skapa dessa sökvägar innan start:
 
-```
-/mnt/user/photos          ← dina originalfiler
-/mnt/user/thumbs          ← thumbnails (skapas automatiskt)
-/mnt/user/transcode       ← transkodade videor (skapas automatiskt)
-/mnt/user/appdata/photomanager/models  ← ONNX-modeller
-```
+| Sökväg | Syfte |
+|--------|-------|
+| `/mnt/user/photos` | Dina originalfiler |
+| `/mnt/user/thumbs` | Thumbnails (skapas automatiskt) |
+| `/mnt/user/transcode` | Transkodade videor (skapas automatiskt) |
+| `/mnt/user/appdata/photomanager/models` | ONNX-modeller för AI |
 
 ### 1. Klona och konfigurera
 
@@ -80,7 +112,7 @@
 git clone <repo-url>
 cd PhotoManager
 cp backend/.env.example backend/.env
-# Redigera backend/.env med dina egna värden
+# Redigera backend/.env med dina värden
 ```
 
 ### 2. Starta
@@ -97,7 +129,7 @@ docker compose up -d
 docker compose exec photomanager npm run migrate
 ```
 
-Skapar alla tabeller och en admin-användare (se `.env` för lösenord).
+Skapar alla tabeller och en admin-användare (lösenord definieras i `.env`).
 
 ### Utvecklingsläge
 
@@ -105,7 +137,7 @@ Skapar alla tabeller och en admin-användare (se `.env` för lösenord).
 docker compose -f docker-compose.dev.yml up
 ```
 
-Använder `--watch` för hot-reload av backend.
+Kör backend med `--watch` för automatisk omstart vid filändringar.
 
 ---
 
@@ -114,41 +146,38 @@ Använder `--watch` för hot-reload av backend.
 ```
 PhotoManager/
 ├── backend/
-│   ├── src/
-│   │   ├── db/
-│   │   │   └── migrations/     # SQL-migrationer
-│   │   ├── plugins/            # Fastify-plugins (auth, cors, rate-limit)
-│   │   ├── routes/             # API-endpoints
-│   │   ├── services/           # Affärslogik
-│   │   ├── workers/            # Bakgrundsprocesser (watcher, thumbnailer, transcoder, AI)
-│   │   └── server.js
-│   └── package.json
-├── frontend/
-│   ├── public/                 # Statiska filer & PWA-manifest
 │   └── src/
-│       ├── views/              # Vyer (timeline, albums, map, persons, …)
-│       └── components/         # Komponenter (lightbox, nav)
+│       ├── db/
+│       │   └── migrations/        # SQL-migrationer (schema, AI, push, folders)
+│       ├── plugins/               # Fastify-plugins (auth, cors, rate-limit, static)
+│       ├── routes/                # API-endpoints (assets, albums, persons, search …)
+│       ├── services/              # Affärslogik (AI, geo, metadata, jobb, SSE)
+│       └── workers/               # Bakgrundsprocesser
+│           ├── fileWatcher.js     # Bevakar mediamappar
+│           ├── indexer.js         # Indexerar nya filer
+│           ├── thumbnailer.js     # Genererar thumbnails
+│           ├── transcoder.js      # Transkoderar video
+│           ├── aiEmbedder.js      # Skapar ansiktsembeddings
+│           └── trashCleaner.js    # Rensar papperskorgen via cron
+├── frontend/
+│   ├── public/                    # index.html, manifest.json, service worker
+│   └── src/
+│       ├── views/                 # timeline, albums, map, persons, explore, admin …
+│       └── components/            # lightbox, nav
 ├── postgres/
-│   └── Dockerfile              # PostgreSQL med pgvector + PostGIS
-└── docker-compose.yml
+│   └── Dockerfile                 # PostgreSQL med pgvector + PostGIS
+├── docker-compose.yml
+└── docker-compose.dev.yml
 ```
 
 ---
 
-## Volymer
+## Planerat
 
-| Host-sökväg | Container-sökväg | Syfte |
-|-------------|------------------|-------|
-| `/mnt/user/photos` | `/media/photos` | Originalfiler (skrivskyddad rekommenderas) |
-| `/mnt/user/thumbs` | `/media/thumbs` | Genererade thumbnails |
-| `/mnt/user/transcode` | `/media/transcode` | Transkodade videor |
-| `/mnt/user/appdata/photomanager/models` | `/models` | ONNX-modeller för AI |
-
----
-
-## Miljövariabler
-
-Se [backend/.env.example](backend/.env.example) för samtliga variabler.
+- [ ] Komplett PWA-frontend (pågår)
+- [ ] Ansiktsigenkänning med automatisk klustring
+- [ ] Audit-log UI i admingränssnittet
+- [ ] Säkerhetsgranskning inför release
 
 ---
 
