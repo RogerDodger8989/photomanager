@@ -1,7 +1,9 @@
 import { query } from '../db/pool.js';
 import { logAudit } from '../services/authService.js';
 import { writeMetaToFile } from '../services/xmpService.js';
-import { join } from 'path';
+import { join, dirname, basename } from 'path';
+import { rename, mkdir } from 'fs/promises';
+import { existsSync } from 'fs';
 import { config } from '../config.js';
 
 export default async function assetsRoutes(fastify) {
@@ -296,7 +298,7 @@ export default async function assetsRoutes(fastify) {
     }});
   });
 
-  // DELETE /api/assets/:id — flytta till papperskorg
+  // DELETE /api/assets/:id — flytta fil till .trash/ och markera som trashed i DB
   fastify.delete('/api/assets/:id', {
     onRequest: [fastify.authenticate],
   }, async (request, reply) => {
@@ -309,11 +311,35 @@ export default async function assetsRoutes(fastify) {
 
     const { id } = request.params;
     const { rows } = await query(
-      "UPDATE assets SET status = 'trashed', trashed_at = NOW() WHERE id = $1 AND status = 'active' RETURNING id",
+      "SELECT id, file_path FROM assets WHERE id = $1 AND status = 'active'",
       [id]
     );
     if (!rows[0]) return reply.status(404).send({ error: 'Hittades inte eller redan i papperskorgen' });
 
+    const relPath = rows[0].file_path; // relativ till photosPath
+    const absPath = join(config.media.photosPath, relPath);
+    let trashPath = null;
+
+    if (existsSync(absPath)) {
+      // Spegla katalogstrukturen under <photosPath>/.trash/
+      const trashDir = join(config.media.photosPath, '.trash', dirname(relPath));
+      await mkdir(trashDir, { recursive: true });
+      const file = basename(relPath);
+      trashPath = join(config.media.photosPath, '.trash', relPath);
+      // Namnkollision — lägg till tidsstämpel
+      if (existsSync(trashPath)) {
+        const ts  = Date.now();
+        const dot = file.lastIndexOf('.');
+        const name = dot >= 0 ? file.slice(0, dot) + `_${ts}` + file.slice(dot) : file + `_${ts}`;
+        trashPath = join(trashDir, name);
+      }
+      await rename(absPath, trashPath);
+    }
+
+    await query(
+      "UPDATE assets SET status = 'trashed', trashed_at = NOW(), trash_path = $2 WHERE id = $1",
+      [id, trashPath]
+    );
     await logAudit(request.user.id, 'trash', id, 'asset', null, request.ip);
     return reply.send({ data: { ok: true } });
   });
@@ -335,17 +361,30 @@ export default async function assetsRoutes(fastify) {
     return reply.send({ data: rows });
   });
 
-  // POST /api/trash/:id/restore — återställ från papperskorg
+  // POST /api/trash/:id/restore — flytta fil tillbaka och återställ i DB
   fastify.post('/api/trash/:id/restore', {
     onRequest: [fastify.authenticate],
   }, async (request, reply) => {
     const { id } = request.params;
     const { rows } = await query(
-      "UPDATE assets SET status = 'active', trashed_at = NULL WHERE id = $1 AND status = 'trashed' RETURNING id",
+      "SELECT id, file_path, trash_path FROM assets WHERE id = $1 AND status = 'trashed'",
       [id]
     );
     if (!rows[0]) return reply.status(404).send({ error: 'Hittades inte i papperskorgen' });
 
+    const { file_path, trash_path } = rows[0];
+    const absOriginal = join(config.media.photosPath, file_path);
+
+    // Flytta tillbaka filen om den finns i .trash
+    if (trash_path && existsSync(trash_path)) {
+      await mkdir(dirname(absOriginal), { recursive: true });
+      await rename(trash_path, absOriginal);
+    }
+
+    await query(
+      "UPDATE assets SET status = 'active', trashed_at = NULL, trash_path = NULL WHERE id = $1",
+      [id]
+    );
     await logAudit(request.user.id, 'restore', id, 'asset', null, request.ip);
     return reply.send({ data: { ok: true } });
   });

@@ -1,5 +1,6 @@
 import { api } from '../api.js';
 import { openLightbox } from '../components/lightbox.js';
+import { buildPhotoCell } from '../components/gridCell.js';
 import { toast, modal, confirm } from '../utils.js';
 
 export async function renderAlbums(container, albumId = null) {
@@ -90,10 +91,7 @@ async function renderAlbumDetail(container, albumId) {
 
     grid.innerHTML = '';
     data.assets.forEach((asset, i) => {
-      const cell = document.createElement('div');
-      cell.className = 'photo-cell';
-      cell.innerHTML = `<img src="/thumbs/${asset.thumb_small_path}" loading="lazy" alt="${asset.file_name}">`;
-      cell.addEventListener('click', () => openLightbox(data.assets, i));
+      const cell = buildPhotoCell(asset, () => openLightbox(data.assets, i));
       grid.appendChild(cell);
     });
   } catch (e) { toast(e.message, 'error'); }

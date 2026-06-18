@@ -41,7 +41,11 @@ function createWatcher(folderPath) {
   const watcher = chokidar.watch(folderPath, {
     persistent: true,
     ignoreInitial: false,
-    ignored: /(^|[\/\\])\../,
+    ignored: (p) => {
+      // Ignorera dolda filer/mappar (börjar med .) — detta täcker .trash automatiskt
+      const parts = p.replace(/\\/g, '/').split('/');
+      return parts.some((seg) => seg.startsWith('.'));
+    },
     awaitWriteFinish: { stabilityThreshold: 3000, pollInterval: 500 },
     depth: 20,
   });

@@ -101,6 +101,31 @@
       #bottom-nav { display: none; }
     }
 
+    /* Multi-select checkbox i gridcell */
+    .photo-cell .sel-checkbox {
+      position: absolute; top: 6px; left: 6px; z-index: 3;
+      width: 17px; height: 17px;
+      opacity: 0; transition: opacity .15s;
+      cursor: pointer;
+    }
+    .photo-cell:hover .sel-checkbox,
+    .photo-cell .sel-checkbox:checked { opacity: 1; }
+    .photo-cell.ring-2 { outline: 3px solid #3b82f6; outline-offset: -3px; }
+
+    /* Favorit-hjärta i gridcell */
+    .photo-cell .fav-heart {
+      position: absolute; top: 5px; right: 5px;
+      opacity: 0; transition: opacity .15s;
+      background: rgba(0,0,0,.45); border-radius: 50%;
+      width: 28px; height: 28px;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; z-index: 2;
+    }
+    .photo-cell:hover .fav-heart,
+    .photo-cell .fav-heart.is-fav { opacity: 1; }
+    .photo-cell .fav-heart.is-fav svg { fill: #f43f5e; stroke: #f43f5e; }
+    .photo-cell .fav-heart:hover svg { stroke: #f43f5e; }
+
     /* Skeleton loading */
     .skeleton { background: linear-gradient(90deg, #1e293b 25%, #334155 50%, #1e293b 75%);
       background-size: 200% 100%; animation: shimmer 1.5s infinite; }
@@ -179,19 +204,74 @@
 
   <!-- Avancerat sökpanel (dold) -->
   <div id="advanced-search-panel" class="hidden bg-slate-800 border-b border-slate-700 px-4 py-3 flex-shrink-0">
+    <!-- Rad 1: Taggar + Persontaggar -->
+    <div class="flex flex-wrap gap-4 mb-3">
+
+      <!-- Tagg-chip-input -->
+      <div class="flex-1 min-w-52">
+        <div class="flex items-center gap-2 mb-1">
+          <label class="text-xs text-slate-400">Taggar</label>
+          <button id="adv-tag-op-btn" data-op="AND"
+            class="text-xs px-2 py-0.5 rounded border border-slate-600 text-slate-300 hover:border-blue-500 hover:text-blue-400 transition-colors">
+            ALLA (AND)
+          </button>
+        </div>
+        <div id="adv-tag-chips" class="flex flex-wrap gap-1 mb-1"></div>
+        <div class="relative">
+          <input id="adv-tag-input" type="text" placeholder="Skriv tagg…"
+            class="bg-slate-700 border border-slate-600 rounded px-2 py-1 text-sm text-white w-full focus:outline-none focus:border-blue-500"
+            autocomplete="off">
+          <div id="adv-tag-dropdown"
+            class="absolute left-0 right-0 top-full mt-0.5 bg-slate-800 border border-slate-700 rounded shadow-xl z-50 hidden max-h-44 overflow-y-auto"></div>
+        </div>
+      </div>
+
+      <!-- Persontaggar-chip-input -->
+      <div class="flex-1 min-w-52">
+        <div class="flex items-center gap-2 mb-1">
+          <label class="text-xs text-slate-400">Ansikten / Personer</label>
+          <button id="adv-person-op-btn" data-op="AND"
+            class="text-xs px-2 py-0.5 rounded border border-slate-600 text-slate-300 hover:border-violet-500 hover:text-violet-400 transition-colors">
+            ALLA (AND)
+          </button>
+        </div>
+        <div id="adv-person-chips" class="flex flex-wrap gap-1 mb-1"></div>
+        <div class="relative">
+          <input id="adv-person-input" type="text" placeholder="Sök person…"
+            class="bg-slate-700 border border-slate-600 rounded px-2 py-1 text-sm text-white w-full focus:outline-none focus:border-blue-500"
+            autocomplete="off">
+          <div id="adv-person-dropdown"
+            class="absolute left-0 right-0 top-full mt-0.5 bg-slate-800 border border-slate-700 rounded shadow-xl z-50 hidden max-h-44 overflow-y-auto"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Rad 2: Datum + Typ + GPS + Knappar -->
     <div class="flex flex-wrap gap-3 items-end">
+
+      <!-- Datumläge-knappar -->
       <div>
-        <label class="text-xs text-slate-400 block mb-1">Fotodatum från</label>
-        <input type="date" id="adv-date-from" class="bg-slate-700 border border-slate-600 rounded px-2 py-1 text-sm text-white">
+        <label class="text-xs text-slate-400 block mb-1">Datumgranularitet</label>
+        <div class="flex rounded overflow-hidden border border-slate-600">
+          <button data-dmode="year"  class="adv-dmode-btn px-3 py-1 text-xs bg-blue-600 text-white">År</button>
+          <button data-dmode="month" class="adv-dmode-btn px-3 py-1 text-xs text-slate-300 hover:bg-slate-700">Mån</button>
+          <button data-dmode="date"  class="adv-dmode-btn px-3 py-1 text-xs text-slate-300 hover:bg-slate-700">Datum</button>
+        </div>
       </div>
-      <div>
-        <label class="text-xs text-slate-400 block mb-1">till</label>
-        <input type="date" id="adv-date-to" class="bg-slate-700 border border-slate-600 rounded px-2 py-1 text-sm text-white">
+
+      <!-- Datum-från (innehållet byts av JS) -->
+      <div id="adv-date-from-wrap">
+        <label class="text-xs text-slate-400 block mb-1">Från</label>
+        <input type="number" id="adv-date-from" min="1800" max="2099" placeholder="2020"
+          class="bg-slate-700 border border-slate-600 rounded px-2 py-1 text-sm text-white w-24">
       </div>
-      <div>
-        <label class="text-xs text-slate-400 block mb-1">Taggar</label>
-        <input type="text" id="adv-tags" placeholder="semester, familj…" class="bg-slate-700 border border-slate-600 rounded px-2 py-1 text-sm text-white w-32">
+      <div id="adv-date-to-wrap">
+        <label class="text-xs text-slate-400 block mb-1">Till</label>
+        <input type="number" id="adv-date-to" min="1800" max="2099" placeholder="2024"
+          class="bg-slate-700 border border-slate-600 rounded px-2 py-1 text-sm text-white w-24">
       </div>
+
+      <!-- Typ -->
       <div>
         <label class="text-xs text-slate-400 block mb-1">Typ</label>
         <select id="adv-mime" class="bg-slate-700 border border-slate-600 rounded px-2 py-1 text-sm text-white">
@@ -200,6 +280,8 @@
           <option value="video">Videor</option>
         </select>
       </div>
+
+      <!-- GPS -->
       <div>
         <label class="text-xs text-slate-400 block mb-1">GPS</label>
         <select id="adv-gps" class="bg-slate-700 border border-slate-600 rounded px-2 py-1 text-sm text-white">
@@ -208,7 +290,8 @@
           <option value="false">Utan plats</option>
         </select>
       </div>
-      <button id="adv-search-go" class="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-sm transition-colors">Sök</button>
+
+      <button id="adv-search-go" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-1.5 rounded text-sm font-medium transition-colors ml-auto">Sök</button>
       <button id="adv-search-clear" class="text-slate-400 hover:text-white text-sm px-2 py-1">Rensa</button>
     </div>
   </div>

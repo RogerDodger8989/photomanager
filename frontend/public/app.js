@@ -95,6 +95,21 @@ function navigate(hash) {
 
 window.addEventListener('hashchange', () => navigate(location.hash));
 
+// Klick på nav-länk navigerar alltid om — även om hash redan är korrekt
+document.addEventListener('click', (e) => {
+  const link = e.target.closest('#nav-links a, #bottom-nav-links a');
+  if (!link) return;
+  const href = link.getAttribute('href');
+  if (!href?.startsWith('#')) return;
+  e.preventDefault();
+  if (location.hash === href) {
+    // Samma hash — tvinga omnavigering
+    navigate(href);
+  } else {
+    location.hash = href;
+  }
+});
+
 // === LIGHTBOX NAVIGATION EVENTS ===
 
 window.addEventListener('pm:timeline-filter', (e) => {
@@ -183,26 +198,285 @@ globalSearch.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') doSearch(e.target.value);
 });
 
-// Avancerat filter
+// === AVANCERAT FILTER ===
+
 document.getElementById('advanced-search-btn').addEventListener('click', () => {
   document.getElementById('advanced-search-panel').classList.toggle('hidden');
 });
 
+// --- Chip-state ---
+let _filterTags      = []; // [{name}]
+let _filterPersons   = []; // [{id, name}]
+let _filterTagsOp    = 'AND'; // 'AND' | 'OR'
+let _filterPersonsOp = 'AND'; // 'AND' | 'OR'
+let _advDateMode     = 'year'; // 'year' | 'month' | 'date'
+
+function renderTagChips() {
+  const el = document.getElementById('adv-tag-chips');
+  el.innerHTML = _filterTags.map((t, i) => `
+    <span class="flex items-center gap-1 bg-blue-700/60 text-blue-200 text-xs rounded-full px-2 py-0.5">
+      ${t.name}
+      <button data-ti="${i}" class="adv-tag-remove hover:text-white leading-none">×</button>
+    </span>`).join('');
+  el.querySelectorAll('.adv-tag-remove').forEach((b) => {
+    b.addEventListener('click', () => { _filterTags.splice(+b.dataset.ti, 1); renderTagChips(); });
+  });
+}
+
+function renderPersonChips() {
+  const el = document.getElementById('adv-person-chips');
+  el.innerHTML = _filterPersons.map((p, i) => `
+    <span class="flex items-center gap-1 bg-violet-700/60 text-violet-200 text-xs rounded-full px-2 py-0.5">
+      ${p.name}
+      <button data-pi="${i}" class="adv-person-remove hover:text-white leading-none">×</button>
+    </span>`).join('');
+  el.querySelectorAll('.adv-person-remove').forEach((b) => {
+    b.addEventListener('click', () => { _filterPersons.splice(+b.dataset.pi, 1); renderPersonChips(); });
+  });
+}
+
+// --- AND/OR-toggles ---
+function setupOpToggle(btnId, getOp, setOp, activeColor) {
+  const btn = document.getElementById(btnId);
+  btn.addEventListener('click', () => {
+    const next = getOp() === 'AND' ? 'OR' : 'AND';
+    setOp(next);
+    btn.dataset.op = next;
+    btn.textContent = next === 'AND' ? 'ALLA (AND)' : 'NÅGON (OR)';
+    btn.classList.toggle(activeColor, next === 'OR');
+    btn.classList.toggle('border-slate-600', next === 'AND');
+    btn.classList.toggle('text-slate-300', next === 'AND');
+  });
+}
+setupOpToggle('adv-tag-op-btn',
+  () => _filterTagsOp, (v) => { _filterTagsOp = v; },
+  'border-blue-500 text-blue-400');
+setupOpToggle('adv-person-op-btn',
+  () => _filterPersonsOp, (v) => { _filterPersonsOp = v; },
+  'border-violet-500 text-violet-400');
+
+// --- Tangentbordsnavigation för dropdown (ESC / piltangenter / Enter) ---
+function attachDropdownKeys(input, dropdown, onSelect) {
+  input.addEventListener('keydown', (e) => {
+    const items = [...dropdown.querySelectorAll('button')];
+    const active = dropdown.querySelector('button.dd-active');
+    const idx = items.indexOf(active);
+
+    if (e.key === 'Escape') {
+      dropdown.classList.add('hidden');
+      input.value = '';
+      e.preventDefault();
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      const next = items[idx + 1] ?? items[0];
+      if (next) setActive(items, next);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      const prev = items[idx - 1] ?? items[items.length - 1];
+      if (prev) setActive(items, prev);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (active) { onSelect(active); dropdown.classList.add('hidden'); input.value = ''; }
+    }
+  });
+}
+
+function setActive(items, target) {
+  items.forEach((b) => b.classList.remove('dd-active', 'bg-slate-700'));
+  target.classList.add('dd-active', 'bg-slate-700');
+  target.scrollIntoView({ block: 'nearest' });
+}
+
+// --- Tag autocomplete ---
+const tagInput    = document.getElementById('adv-tag-input');
+const tagDropdown = document.getElementById('adv-tag-dropdown');
+
+async function fetchTagSuggestions(q) {
+  try {
+    const { data } = await api.get(`/api/tags?q=${encodeURIComponent(q)}`);
+    return data ?? [];
+  } catch { return []; }
+}
+
+function addTagChip(name) {
+  _filterTags.push({ name });
+  renderTagChips();
+  tagInput.value = '';
+  tagDropdown.classList.add('hidden');
+}
+
+const debouncedTagSearch = debounce(async (q) => {
+  if (!q) { tagDropdown.classList.add('hidden'); return; }
+  const rows = await fetchTagSuggestions(q);
+  const filtered = rows.filter((r) => !_filterTags.find((t) => t.name === r.name));
+  if (!filtered.length) { tagDropdown.classList.add('hidden'); return; }
+  tagDropdown.innerHTML = filtered.map((r) => `
+    <button data-tname="${r.name}" class="adv-tag-opt w-full text-left flex items-center justify-between px-3 py-1.5 hover:bg-slate-700 text-sm text-slate-200">
+      <span>${r.name}</span>
+      <span class="text-xs text-slate-500">${r.count}</span>
+    </button>`).join('');
+  tagDropdown.querySelectorAll('.adv-tag-opt').forEach((b) => {
+    b.addEventListener('click', () => addTagChip(b.dataset.tname));
+  });
+  tagDropdown.classList.remove('hidden');
+}, 250);
+
+tagInput.addEventListener('input', (e) => debouncedTagSearch(e.target.value));
+attachDropdownKeys(tagInput, tagDropdown, (b) => addTagChip(b.dataset.tname));
+document.addEventListener('click', (e) => {
+  if (!tagInput.contains(e.target) && !tagDropdown.contains(e.target)) tagDropdown.classList.add('hidden');
+});
+
+// --- Person autocomplete ---
+const personInput    = document.getElementById('adv-person-input');
+const personDropdown = document.getElementById('adv-person-dropdown');
+
+function addPersonChip(id, name) {
+  _filterPersons.push({ id, name });
+  renderPersonChips();
+  personInput.value = '';
+  personDropdown.classList.add('hidden');
+}
+
+function showAdvPersonDropdown(q) {
+  if (!q) { personDropdown.classList.add('hidden'); return; }
+  const matches = _personSuggestions
+    .filter((p) => p.name.toLowerCase().includes(q.toLowerCase()) && !_filterPersons.find((fp) => fp.id === p.id))
+    .slice(0, 8);
+  if (!matches.length) { personDropdown.classList.add('hidden'); return; }
+  personDropdown.innerHTML = matches.map((p) => `
+    <button data-pid="${p.id}" data-pname="${p.name}"
+      class="adv-person-opt w-full flex items-center gap-2 px-3 py-1.5 hover:bg-slate-700 text-sm text-slate-200">
+      <div class="w-6 h-6 rounded-full overflow-hidden bg-slate-600 flex-shrink-0">
+        ${p.cover_face_id
+          ? `<img src="/api/persons/${p.id}/face-thumb" class="w-full h-full object-cover">`
+          : p.cover_thumb
+            ? `<img src="/thumbs/${p.cover_thumb}" class="w-full h-full object-cover">`
+            : '👤'}
+      </div>
+      <span>${p.name}</span>
+    </button>`).join('');
+  personDropdown.querySelectorAll('.adv-person-opt').forEach((b) => {
+    b.addEventListener('click', () => addPersonChip(b.dataset.pid, b.dataset.pname));
+  });
+  personDropdown.classList.remove('hidden');
+}
+
+const debouncedPersonSearch = debounce(async (q) => {
+  await ensurePersonsLoaded();
+  showAdvPersonDropdown(q);
+}, 200);
+
+personInput.addEventListener('input', (e) => debouncedPersonSearch(e.target.value));
+attachDropdownKeys(personInput, personDropdown, (b) => addPersonChip(b.dataset.pid, b.dataset.pname));
+document.addEventListener('click', (e) => {
+  if (!personInput.contains(e.target) && !personDropdown.contains(e.target)) personDropdown.classList.add('hidden');
+});
+
+// --- Datumläge-knappar ---
+function setDateMode(mode) {
+  _advDateMode = mode;
+  document.querySelectorAll('.adv-dmode-btn').forEach((b) => {
+    const active = b.dataset.dmode === mode;
+    b.classList.toggle('bg-blue-600', active);
+    b.classList.toggle('text-white', active);
+    b.classList.toggle('text-slate-300', !active);
+  });
+
+  const fromWrap = document.getElementById('adv-date-from-wrap');
+  const toWrap   = document.getElementById('adv-date-to-wrap');
+
+  if (mode === 'year') {
+    fromWrap.querySelector('label').textContent = 'Från (år)';
+    toWrap.querySelector('label').textContent   = 'Till (år)';
+    replaceInput('adv-date-from', 'number', { min: '1800', max: '2099', placeholder: '2020', class: 'w-24' });
+    replaceInput('adv-date-to',   'number', { min: '1800', max: '2099', placeholder: '2024', class: 'w-24' });
+  } else if (mode === 'month') {
+    fromWrap.querySelector('label').textContent = 'Från (mån)';
+    toWrap.querySelector('label').textContent   = 'Till (mån)';
+    replaceInput('adv-date-from', 'month', { class: 'w-36' });
+    replaceInput('adv-date-to',   'month', { class: 'w-36' });
+  } else {
+    fromWrap.querySelector('label').textContent = 'Från';
+    toWrap.querySelector('label').textContent   = 'Till';
+    replaceInput('adv-date-from', 'date', { class: 'w-36' });
+    replaceInput('adv-date-to',   'date', { class: 'w-36' });
+  }
+}
+
+function replaceInput(id, type, attrs) {
+  const old = document.getElementById(id);
+  const el  = document.createElement('input');
+  el.id        = id;
+  el.type      = type;
+  el.className = `bg-slate-700 border border-slate-600 rounded px-2 py-1 text-sm text-white ${attrs.class ?? ''}`;
+  if (attrs.min)         el.min         = attrs.min;
+  if (attrs.max)         el.max         = attrs.max;
+  if (attrs.placeholder) el.placeholder = attrs.placeholder;
+  old.replaceWith(el);
+}
+
+document.querySelectorAll('.adv-dmode-btn').forEach((b) => {
+  b.addEventListener('click', () => setDateMode(b.dataset.dmode));
+});
+
+// --- Konvertera datum till ISO-sträng ---
+function dateFrom() {
+  const v = document.getElementById('adv-date-from')?.value;
+  if (!v) return undefined;
+  if (_advDateMode === 'year')  return `${v}-01-01`;
+  if (_advDateMode === 'month') return `${v}-01`;
+  return v;
+}
+function dateTo() {
+  const v = document.getElementById('adv-date-to')?.value;
+  if (!v) return undefined;
+  if (_advDateMode === 'year')  return `${v}-12-31`;
+  if (_advDateMode === 'month') {
+    // sista dagen i månaden
+    const [yr, mo] = v.split('-').map(Number);
+    const last = new Date(yr, mo, 0).getDate();
+    return `${v}-${String(last).padStart(2, '0')}`;
+  }
+  return v;
+}
+
+// --- Sök ---
 document.getElementById('adv-search-go').addEventListener('click', () => {
   const params = {
-    q:        globalSearch.value.trim() || undefined,
-    tags:     document.getElementById('adv-tags').value.trim() || undefined,
-    dateFrom: document.getElementById('adv-date-from').value || undefined,
-    dateTo:   document.getElementById('adv-date-to').value || undefined,
-    mimeType: document.getElementById('adv-mime').value || undefined,
-    hasGps:   document.getElementById('adv-gps').value || undefined,
+    q:           globalSearch.value.trim() || undefined,
+    tags:        _filterTags.map((t) => t.name).join(',') || undefined,
+    tagsOp:      _filterTags.length > 1 ? _filterTagsOp : undefined,
+    personIds:   _filterPersons.map((p) => p.id).join(',') || undefined,
+    personIdsOp: _filterPersons.length > 1 ? _filterPersonsOp : undefined,
+    dateFrom:    dateFrom(),
+    dateTo:      dateTo(),
+    mimeType:    document.getElementById('adv-mime').value || undefined,
+    hasGps:      document.getElementById('adv-gps').value || undefined,
   };
   renderTimeline(document.getElementById('view-container'), params);
   document.getElementById('advanced-search-panel').classList.add('hidden');
 });
 
+// --- Rensa ---
 document.getElementById('adv-search-clear').addEventListener('click', () => {
-  ['adv-tags','adv-date-from','adv-date-to'].forEach((id) => { document.getElementById(id).value = ''; });
+  _filterTags      = [];
+  _filterPersons   = [];
+  _filterTagsOp    = 'AND';
+  _filterPersonsOp = 'AND';
+  renderTagChips();
+  renderPersonChips();
+  ['adv-tag-op-btn','adv-person-op-btn'].forEach((id) => {
+    const b = document.getElementById(id);
+    b.dataset.op   = 'AND';
+    b.textContent  = 'ALLA (AND)';
+    b.className    = b.className.replace(/border-\w+-500|text-\w+-400/g, '').trim()
+      + ' border-slate-600 text-slate-300';
+  });
+  const fromEl = document.getElementById('adv-date-from');
+  const toEl   = document.getElementById('adv-date-to');
+  if (fromEl) fromEl.value = '';
+  if (toEl)   toEl.value   = '';
   document.getElementById('adv-mime').value = '';
   document.getElementById('adv-gps').value  = '';
   globalSearch.value = '';

@@ -1,5 +1,6 @@
 import { api } from '../api.js';
 import { openLightbox } from '../components/lightbox.js';
+import { buildPhotoCell, attachFavHeart } from '../components/gridCell.js';
 import { toast } from '../utils.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -19,8 +20,8 @@ function personAgeLabel(person) {
 }
 
 function coverSrc(p) {
-  if (p.cover_face_id) return `/api/persons/${p.id}/face-thumb`;
-  if (p.cover_thumb)   return `/thumbs/${p.cover_thumb}`;
+  const faceId = p.cover_face_id ?? p.fallback_face_id;
+  if (faceId) return `/api/faces/${faceId}/thumb`;
   return null;
 }
 
@@ -393,6 +394,7 @@ function renderPhotosTab(container, assets, person, personId, onCoverUpdated) {
       <img src="/thumbs/${asset.thumb_small_path}" loading="lazy" class="w-full aspect-square object-cover">
       ${age !== null ? `<div class="absolute bottom-0 left-0 right-0 bg-black/60 text-xs text-white text-center py-0.5 opacity-0 group-hover:opacity-100 transition-opacity">${age} år</div>` : ''}`;
 
+    attachFavHeart(cell, asset);
     cell.addEventListener('click', () => openLightbox(assets, i));
     cell.addEventListener('contextmenu', (e) => {
       e.preventDefault();
@@ -473,17 +475,16 @@ function renderTimelineTab(container, assets, person) {
       <div class="flex items-center gap-3 mb-2">
         <div class="text-base font-semibold text-white">${year}${age !== null && age >= 0 ? ` · ${age} år` : ''}</div>
         <div class="text-xs text-slate-500">${yearAssets.length} bilder</div>
-      </div>
-      <div class="grid gap-0.5" style="grid-template-columns: repeat(auto-fill, minmax(120px, 1fr))">
-        ${yearAssets.map((a) => `
-          <div class="photo-cell cursor-pointer" data-idx="${a._idx}">
-            <img src="/thumbs/${a.thumb_small_path}" loading="lazy" class="w-full aspect-square object-cover">
-          </div>`).join('')}
       </div>`;
 
-    section.querySelectorAll('[data-idx]').forEach((el) => {
-      el.addEventListener('click', () => openLightbox(assets, +el.dataset.idx));
+    const tlGrid = document.createElement('div');
+    tlGrid.className = 'grid gap-0.5 mb-4';
+    tlGrid.style.gridTemplateColumns = 'repeat(auto-fill, minmax(120px, 1fr))';
+    yearAssets.forEach((a) => {
+      const cell = buildPhotoCell(a, () => openLightbox(assets, a._idx));
+      tlGrid.appendChild(cell);
     });
+    section.appendChild(tlGrid);
     tc.appendChild(section);
   });
 

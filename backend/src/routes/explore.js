@@ -49,6 +49,78 @@ export default async function exploreRoutes(fastify) {
     return reply.send({ data: { event: eventRows[0], assets } });
   });
 
+  // GET /api/explore/trips — resor (händelser ≥2 dagar)
+  fastify.get('/api/explore/trips', {
+    onRequest: [fastify.authenticate],
+  }, async (request, reply) => {
+    const userId  = request.user.id;
+    const isAdmin = request.user.role === 'admin';
+    const ownerFilter = isAdmin ? 'TRUE' : `e.owner_id = '${userId}'`;
+    const { rows } = await query(
+      `SELECT e.id, e.name, e.date_from, e.date_to, e.location_label,
+              e.cover_asset_id,
+              a.thumb_large_path AS cover_thumb,
+              COUNT(ea.asset_id)::int AS asset_count,
+              (e.date_to::date - e.date_from::date) AS duration_days
+       FROM explore_events e
+       JOIN event_assets ea ON ea.event_id = e.id
+       LEFT JOIN assets a ON a.id = e.cover_asset_id
+       WHERE ${ownerFilter}
+         AND (e.date_to::date - e.date_from::date) >= 1
+       GROUP BY e.id, a.thumb_large_path
+       ORDER BY e.date_from DESC
+       LIMIT 20`
+    );
+    return reply.send({ data: rows });
+  });
+
+  // GET /api/explore/trips/:id/track — GPS-spår för en resa
+  fastify.get('/api/explore/trips/:id/track', {
+    onRequest: [fastify.authenticate],
+  }, async (request, reply) => {
+    const { id } = request.params;
+    const { rows } = await query(
+      `SELECT ST_Y(a.location::geometry) AS lat,
+              ST_X(a.location::geometry) AS lon,
+              a.taken_at
+       FROM assets a
+       JOIN event_assets ea ON ea.asset_id = a.id
+       WHERE ea.event_id = $1 AND a.location IS NOT NULL AND a.status = 'active'
+       ORDER BY a.taken_at ASC`,
+      [id]
+    );
+    return reply.send({ data: rows });
+  });
+
+  // GET /api/explore/places — topplatser grupperade på location_label
+  fastify.get('/api/explore/places', {
+    onRequest: [fastify.authenticate],
+  }, async (request, reply) => {
+    const userId  = request.user.id;
+    const isAdmin = request.user.role === 'admin';
+    const { rows } = await query(
+      `SELECT a.location_label,
+              COUNT(*)::int AS photo_count,
+              MAX(a.taken_at) AS latest_photo,
+              (SELECT a2.thumb_small_path
+               FROM assets a2
+               WHERE a2.location_label = a.location_label
+                 AND a2.status = 'active'
+                 AND a2.thumb_small_path IS NOT NULL
+                 AND ($2 OR a2.owner_id = $1)
+               ORDER BY RANDOM() LIMIT 1) AS cover_thumb
+       FROM assets a
+       WHERE a.status = 'active'
+         AND a.location_label IS NOT NULL
+         AND ($2 OR a.owner_id = $1)
+       GROUP BY a.location_label
+       ORDER BY photo_count DESC
+       LIMIT 24`,
+      [userId, isAdmin]
+    );
+    return reply.send({ data: rows });
+  });
+
   // POST /api/explore/rebuild — trigga ombyggnad av händelse-indexet (admin)
   fastify.post('/api/explore/rebuild', {
     onRequest: [fastify.requireAdmin],

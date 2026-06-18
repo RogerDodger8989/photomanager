@@ -14,6 +14,11 @@ export default async function personsRoutes(fastify) {
       `SELECT
          p.id, p.name, p.birth_year, p.death_year, p.cover_face_id, p.created_at,
          a.thumb_small_path AS cover_thumb,
+         (SELECT f3.id
+          FROM faces f3
+          JOIN assets a3 ON a3.id = f3.asset_id AND a3.status = 'active'
+          WHERE f3.person_id = p.id
+          LIMIT 1) AS fallback_face_id,
          COUNT(DISTINCT f.asset_id)::int AS photo_count
        FROM persons p
        LEFT JOIN faces f ON f.person_id = p.id
@@ -24,6 +29,41 @@ export default async function personsRoutes(fastify) {
        ORDER BY COUNT(DISTINCT f.asset_id) DESC`
     );
     return reply.send({ data: rows });
+  });
+
+  // GET /api/faces/:faceId/thumb — beskuren ansiktsbild för valfritt face-id (ingen auth)
+  fastify.get('/api/faces/:faceId/thumb', async (request, reply) => {
+    const { faceId } = request.params;
+    const { rows } = await query(
+      `SELECT f.region_x, f.region_y, f.region_w, f.region_h,
+              a.file_path, a.width, a.height
+       FROM faces f
+       JOIN assets a ON a.id = f.asset_id
+       WHERE f.id = $1`,
+      [faceId]
+    );
+    if (!rows[0]) return reply.status(404).send({ error: 'Ansikt hittades inte' });
+
+    const { region_x, region_y, region_w, region_h, file_path, width, height } = rows[0];
+    const fullPath = path.join(config.media.photosPath, file_path);
+
+    const imgW = width  ?? 1000;
+    const imgH = height ?? 1000;
+    const left   = Math.max(0, Math.round(region_x * imgW));
+    const top    = Math.max(0, Math.round(region_y * imgH));
+    const cropW  = Math.max(1, Math.round(region_w * imgW));
+    const cropH  = Math.max(1, Math.round(region_h * imgH));
+
+    reply.header('Content-Type', 'image/webp');
+    reply.header('Cache-Control', 'public, max-age=86400');
+
+    const imgBuf = await sharp(fullPath)
+      .extract({ left, top, width: cropW, height: cropH })
+      .resize(200, 200, { fit: 'cover' })
+      .webp({ quality: 85 })
+      .toBuffer();
+
+    return reply.send(imgBuf);
   });
 
   // GET /api/persons/:id/face-thumb — beskuren ansiktsbild (ingen auth)
@@ -79,7 +119,10 @@ export default async function personsRoutes(fastify) {
     const { limit = 50, cursor } = request.query;
 
     const { rows: personRows } = await query(
-      'SELECT id, name, birth_year, death_year, cover_face_id, created_at FROM persons WHERE id = $1',
+      `SELECT p.id, p.name, p.birth_year, p.death_year, p.cover_face_id, p.created_at,
+              (SELECT f.id FROM faces f JOIN assets a ON a.id = f.asset_id AND a.status = 'active'
+               WHERE f.person_id = p.id LIMIT 1) AS fallback_face_id
+       FROM persons p WHERE p.id = $1`,
       [id]
     );
     if (!personRows[0]) return reply.status(404).send({ error: 'Person hittades inte' });

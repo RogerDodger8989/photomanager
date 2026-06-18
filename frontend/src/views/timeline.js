@@ -1,5 +1,7 @@
 import { api } from '../api.js';
 import { openLightbox } from '../components/lightbox.js';
+import { buildPhotoCell } from '../components/gridCell.js';
+import { createSelectionManager } from '../components/selectionManager.js';
 import { thumbUrl, isVideo, formatDate, debounce } from '../utils.js';
 
 let cursor = null;
@@ -9,6 +11,7 @@ let allItems = [];
 let currentParams = {};
 let sentinel = null;
 let observer = null;
+let selection = null;
 
 export function renderTimeline(container, params = {}) {
   currentParams = params;
@@ -19,7 +22,7 @@ export function renderTimeline(container, params = {}) {
   container.innerHTML = `
     <div class="p-4">
       <!-- Sort-bar -->
-      <div class="flex items-center gap-3 mb-4 flex-wrap">
+      <div class="flex items-center gap-3 mb-2 flex-wrap">
         <span class="text-sm text-slate-400">Sortera:</span>
         ${[
           ['taken_at',   'Datum'],
@@ -31,10 +34,13 @@ export function renderTimeline(container, params = {}) {
             ${(params.sort ?? 'taken_at') === val ? 'bg-blue-600 border-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800'}">
             ${label}
           </button>`).join('')}
-        <button id="sort-order-toggle" class="ml-auto text-slate-400 hover:text-white text-sm flex items-center gap-1">
+        <button id="sort-order-toggle" class="text-slate-400 hover:text-white text-sm flex items-center gap-1">
           <span id="sort-order-label">${params.order === 'asc' ? '↑ Äldst' : '↓ Senast'}</span>
         </button>
       </div>
+
+      <!-- Urvals-toolbar -->
+      <div id="selection-toolbar" class="flex items-center gap-3 mb-3 flex-wrap min-h-[28px]"></div>
 
       <!-- Grid -->
       <div id="photo-grid" class="grid gap-0.5"
@@ -65,6 +71,13 @@ export function renderTimeline(container, params = {}) {
   observer = new IntersectionObserver(onSentinelVisible, { rootMargin: '200px' });
   observer.observe(sentinel);
 
+  // Urval
+  selection = createSelectionManager(
+    () => document.getElementById('photo-grid'),
+    () => allItems,
+  );
+  selection.mountToolbar(container.querySelector('#selection-toolbar'));
+
   loadMore();
 }
 
@@ -77,7 +90,7 @@ async function loadMore() {
 
   try {
     const isSearch = !!currentParams.q || !!currentParams.tags || !!currentParams.personId
-      || !!currentParams.dateFrom || !!currentParams.mimeType;
+      || !!currentParams.personIds || !!currentParams.dateFrom || !!currentParams.mimeType;
 
     const params = { ...currentParams, limit: 50 };
     if (cursor) params.cursor = cursor;
@@ -106,24 +119,11 @@ function appendToGrid(items) {
 
   items.forEach((asset, i) => {
     const globalIndex = allItems.length - items.length + i;
-    const cell = document.createElement('div');
-    cell.className = 'photo-cell relative group';
-    cell.innerHTML = `
-      <img src="/thumbs/${asset.thumb_small_path}"
-           loading="lazy"
-           alt="${asset.file_name}"
-           class="w-full h-full object-cover">
-      ${isVideo(asset.mime_type) ? `
-        <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div class="bg-black/50 rounded-full p-2">
-            <svg class="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M8 5v14l11-7z"/>
-            </svg>
-          </div>
-        </div>` : ''}
-      <div class="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors"></div>
-    `;
-    cell.addEventListener('click', () => openLightbox(allItems, globalIndex));
+    const cell = buildPhotoCell(
+      asset,
+      () => openLightbox(allItems, globalIndex),
+    );
+    selection?.attachToCell(cell, asset, globalIndex);
     grid.appendChild(cell);
   });
 }

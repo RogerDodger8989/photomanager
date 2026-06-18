@@ -16,6 +16,7 @@ const MIGRATIONS = [
   '007_asset_title_description.sql',
   '008_person_birth_year.sql',
   '009_person_death_year.sql',
+  '010_asset_trash_path.sql',
 ];
 
 async function migrate() {

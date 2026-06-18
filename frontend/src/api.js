@@ -89,8 +89,9 @@ export const api = {
   assetMetadata: (id)           => request('GET', `/api/assets/${id}/metadata`),
   patchMeta: (id, body)         => request('PATCH', `/api/assets/${id}/metadata`, body),
   trash:   (id)                 => request('DELETE', `/api/assets/${id}`),
-  restore: (id)                 => request('POST', `/api/trash/${id}/restore`),
+  restore: (id)                 => request('POST', `/api/trash/${id}/restore`, {}),
   trashList: ()                 => request('GET', '/api/trash'),
+  permanentDelete: (id)         => request('DELETE', `/api/trash/${id}/permanent`),
 
   // Search
   search:  (params = {})        => request('GET', `/api/search?${qs(params)}`),
@@ -99,6 +100,9 @@ export const api = {
   onThisDay:   ()               => request('GET', '/api/explore/on-this-day'),
   collections: ()               => request('GET', '/api/explore/collections'),
   collection:  (id)             => request('GET', `/api/explore/collections/${id}`),
+  trips:       ()               => request('GET', '/api/explore/trips'),
+  tripTrack:   (id)             => request('GET', `/api/explore/trips/${id}/track`),
+  places:      ()               => request('GET', '/api/explore/places'),
   favorites:   ()               => request('GET', '/api/explore/favorites'),
   addFav:      (id)             => request('POST', `/api/explore/favorites/${id}`, {}),
   removeFav:   (id)             => request('DELETE', `/api/explore/favorites/${id}`),

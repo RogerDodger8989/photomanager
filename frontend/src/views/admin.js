@@ -1,7 +1,7 @@
 import { api } from '../api.js';
 import { toast, formatDateTime, formatBytes, confirm } from '../utils.js';
 
-const TABS = ['stats', 'users', 'jobs', 'ai', 'audit', 'duplicates', 'folders'];
+const TABS = ['stats', 'users', 'jobs', 'ai', 'audit', 'duplicates', 'folders', 'trash'];
 
 export async function renderAdmin(container, tab = 'stats') {
   container.innerHTML = `
@@ -31,7 +31,7 @@ export async function renderAdmin(container, tab = 'stats') {
 }
 
 function tabLabel(t) {
-  return { stats:'Statistik', users:'Användare', jobs:'Jobb', ai:'AI-förslag', audit:'Logg', duplicates:'Duplikat', folders:'Mappar' }[t] ?? t;
+  return { stats:'Statistik', users:'Användare', jobs:'Jobb', ai:'AI-förslag', audit:'Logg', duplicates:'Duplikat', folders:'Mappar', trash:'🗑 Papperskorg' }[t] ?? t;
 }
 
 async function loadTab(tab, content) {
@@ -44,6 +44,7 @@ async function loadTab(tab, content) {
     if (tab === 'audit')      await renderAuditLog(content);
     if (tab === 'duplicates') await renderDuplicates(content);
     if (tab === 'folders')    await renderWatchedFolders(content);
+    if (tab === 'trash')      await renderTrash(content);
   } catch (e) { content.innerHTML = `<div class="text-red-400 text-sm">${e.message}</div>`; }
 }
 
@@ -595,3 +596,129 @@ async function renderWatchedFolders(content) {
     });
   });
 }
+
+async function renderTrash(content) {
+  content.innerHTML = '<div class="text-slate-400 text-sm">Laddar…</div>';
+  let data = [];
+  try { ({ data } = await api.trashList()); } catch (e) {
+    content.innerHTML = `<div class="text-red-400 text-sm">${e.message}</div>`; return;
+  }
+
+  if (!data.length) {
+    content.innerHTML = '<div class="text-slate-400 text-sm p-4">Papperskorgen är tom.</div>'; return;
+  }
+
+  // ── State ──
+  const selected = new Set();
+  let lastIdx = null;
+
+  // ── Render ──
+  function render() {
+    const count = selected.size;
+    content.innerHTML = `
+      <!-- Toolbar -->
+      <div class="flex items-center gap-3 mb-4 flex-wrap">
+        <label class="flex items-center gap-1.5 cursor-pointer text-sm text-slate-300 hover:text-white select-none">
+          <input id="trash-sel-all" type="checkbox" class="w-4 h-4 rounded accent-blue-500"
+            ${count === data.length ? 'checked' : ''}>
+          Markera alla
+        </label>
+        ${count > 0 ? `
+          <span class="text-sm font-medium text-white bg-blue-600 rounded-full px-2.5 py-0.5">${count} markerade</span>
+          <button id="trash-restore-sel" class="flex items-center gap-1 text-xs bg-blue-700 hover:bg-blue-600 text-white px-3 py-1.5 rounded-lg transition-colors">
+            ↩ Återställ markerade
+          </button>
+          <button id="trash-delete-sel" class="flex items-center gap-1 text-xs bg-red-900 hover:bg-red-800 text-red-300 px-3 py-1.5 rounded-lg transition-colors">
+            ✕ Radera permanent
+          </button>` : ''}
+        <button id="trash-empty-all" class="ml-auto text-xs px-3 py-1.5 bg-red-900/60 hover:bg-red-900 text-red-400 hover:text-red-300 rounded-lg transition-colors">
+          Töm papperskorg
+        </button>
+      </div>
+
+      <!-- Grid -->
+      <div id="trash-grid" class="grid gap-1" style="grid-template-columns: repeat(auto-fill, minmax(140px, 1fr))">
+        ${data.map((a, i) => `
+          <div class="trash-cell relative group bg-slate-800 rounded overflow-hidden cursor-pointer select-none
+            ${selected.has(a.id) ? 'ring-2 ring-blue-500' : ''}"
+            data-id="${a.id}" data-idx="${i}">
+            ${a.thumb_small_path
+              ? `<img src="/thumbs/${a.thumb_small_path}" class="w-full aspect-square object-cover ${selected.has(a.id) ? 'opacity-80' : 'opacity-50'}">`
+              : `<div class="w-full aspect-square bg-slate-700 flex items-center justify-center text-slate-500 text-2xl">🎥</div>`}
+            <!-- Checkbox -->
+            <div class="absolute top-1.5 left-1.5 w-5 h-5 rounded border-2 flex items-center justify-center transition-all
+              ${selected.has(a.id)
+                ? 'bg-blue-500 border-blue-500'
+                : 'bg-black/40 border-white/60 opacity-0 group-hover:opacity-100'}">
+              ${selected.has(a.id) ? '<svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>' : ''}
+            </div>
+            <div class="p-1.5">
+              <div class="text-xs text-slate-300 truncate">${a.file_name}</div>
+              <div class="text-xs text-slate-500">${new Date(a.trashed_at).toLocaleDateString('sv-SE')}</div>
+            </div>
+          </div>`).join('')}
+      </div>`;
+
+    // Cell-klick (Ctrl / Shift / normal)
+    content.querySelectorAll('.trash-cell').forEach((cell) => {
+      cell.addEventListener('click', (e) => {
+        const id  = cell.dataset.id;
+        const idx = +cell.dataset.idx;
+
+        if (e.shiftKey && lastIdx !== null) {
+          const from = Math.min(lastIdx, idx);
+          const to   = Math.max(lastIdx, idx);
+          for (let i = from; i <= to; i++) selected.add(data[i].id);
+        } else if (e.ctrlKey || e.metaKey) {
+          selected.has(id) ? selected.delete(id) : selected.add(id);
+          lastIdx = idx;
+        } else {
+          selected.has(id) ? selected.delete(id) : selected.add(id);
+          lastIdx = idx;
+        }
+        render();
+      });
+    });
+
+    // Markera alla
+    content.querySelector('#trash-sel-all')?.addEventListener('change', (e) => {
+      if (e.target.checked) data.forEach((a) => selected.add(a.id));
+      else selected.clear();
+      render();
+    });
+
+    // Återställ markerade
+    content.querySelector('#trash-restore-sel')?.addEventListener('click', async () => {
+      const ids = [...selected];
+      try {
+        await Promise.all(ids.map((id) => api.restore(id)));
+        toast(`${ids.length} bild${ids.length > 1 ? 'er' : ''} återställd${ids.length > 1 ? 'a' : ''}`, 'success');
+        renderTrash(content);
+      } catch (e) { toast(e.message, 'error'); }
+    });
+
+    // Radera permanent markerade
+    content.querySelector('#trash-delete-sel')?.addEventListener('click', async () => {
+      const ids = [...selected];
+      if (!await confirm(`Radera ${ids.length} bild${ids.length > 1 ? 'er' : ''} permanent? Detta går inte att ångra.`)) return;
+      try {
+        await Promise.all(ids.map((id) => api.permanentDelete(id)));
+        toast(`${ids.length} bild${ids.length > 1 ? 'er' : ''} permanent raderad${ids.length > 1 ? 'e' : ''}`, 'success');
+        renderTrash(content);
+      } catch (e) { toast(e.message, 'error'); }
+    });
+
+    // Töm allt
+    content.querySelector('#trash-empty-all')?.addEventListener('click', async () => {
+      if (!await confirm(`Töm papperskorgen? ${data.length} bilder raderas permanent.`)) return;
+      try {
+        await Promise.all(data.map((a) => api.permanentDelete(a.id).catch(() => {})));
+        toast('Papperskorgen tömd', 'success');
+        renderTrash(content);
+      } catch (e) { toast(e.message, 'error'); }
+    });
+  }
+
+  render();
+}
+
