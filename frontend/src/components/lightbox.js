@@ -847,7 +847,7 @@ function showPersonSearchDialog(anchorOrBox, onSelect, initialQuery = '', rectCo
 
   const dialog = document.createElement('div');
   dialog.id = 'pm-person-dialog';
-  dialog.className = 'fixed z-[200] bg-slate-800 border border-slate-600 rounded-xl shadow-2xl w-72 p-3';
+  dialog.className = 'fixed z-[9500] bg-slate-800 border border-slate-600 rounded-xl shadow-2xl w-72 p-3';
 
   // Positionera dialogen
   if (rectCoords) {

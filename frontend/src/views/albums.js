@@ -301,7 +301,7 @@ async function loadAlbumDetail(container, albumId) {
 
 export async function openAddToAlbumModal(assetIds) {
   const overlay = document.createElement('div');
-  overlay.className = 'fixed inset-0 z-[200] flex items-center justify-center bg-black/70';
+  overlay.className = 'fixed inset-0 z-[9500] flex items-center justify-center bg-black/70';
 
   let albums = [];
   try { ({ data: albums } = await api.albums()); } catch {}
