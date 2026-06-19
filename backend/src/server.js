@@ -3,6 +3,7 @@ import cookie from '@fastify/cookie';
 import multipart from '@fastify/multipart';
 import { config } from './config.js';
 import { pool } from './db/pool.js';
+import { runMigrations } from './db/runMigrations.js';
 
 // Plugins
 import corsPlugin from './plugins/cors.js';
@@ -89,8 +90,13 @@ fastify.setErrorHandler((error, request, reply) => {
 // Starta servern
 const start = async () => {
   try {
-    // Verifiera DB-anslutning
-    await pool.query('SELECT 1');
+    // Verifiera DB-anslutning + kör migrationer automatiskt
+    const migClient = await pool.connect();
+    try {
+      await runMigrations(migClient);
+    } finally {
+      migClient.release();
+    }
     fastify.log.info('Databasanslutning OK');
 
     await fastify.listen({ port: config.port, host: config.host });

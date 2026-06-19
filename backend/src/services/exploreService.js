@@ -16,7 +16,7 @@ export async function getOnThisDay(userId, isAdmin) {
          json_build_object(
            'id', a.id, 'thumb_small_path', a.thumb_small_path,
            'taken_at', a.taken_at, 'location_label', a.location_label
-         ) ORDER BY RANDOM() LIMIT 5
+         ) ORDER BY RANDOM()
        ) AS samples
      FROM assets a
      WHERE a.status = 'active'

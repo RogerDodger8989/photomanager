@@ -11,7 +11,7 @@ import { broadcast } from '../services/sseService.js';
 import { processAssetFaces, isAiAvailable } from '../services/aiService.js';
 
 // Kallas från fileWatcher när en ny fil detekteras
-export async function indexFile(absolutePath) {
+export async function indexFile(absolutePath, sourceFolderPath = null) {
   const mimeType = getMimeType(absolutePath);
 
   // Filtrera bort icke-mediafiler (t.ex. .DS_Store, .tmp)
@@ -22,10 +22,72 @@ export async function indexFile(absolutePath) {
 
   // 1. Kolla om filen redan är indexerad (t.ex. server-restart)
   const existing = await query(
-    "SELECT id FROM assets WHERE file_path = $1 AND status != 'deleted'",
+    `SELECT a.id, a.source_folder, a.thumb_small_path, a.location,
+            (SELECT COUNT(*) FROM faces f WHERE f.asset_id = a.id)::int AS face_count
+     FROM assets a WHERE a.file_path = $1 AND a.status != 'deleted'`,
     [relPath]
   );
-  if (existing.rows.length > 0) return; // Redan indexerad
+  if (existing.rows.length > 0) {
+    const row = existing.rows[0];
+    // Koppla till den mapp som nu bevakar filen (om den saknas eller skiljer sig)
+    if (sourceFolderPath && row.source_folder !== sourceFolderPath) {
+      await query('UPDATE assets SET source_folder = $1 WHERE id = $2', [sourceFolderPath, row.id]);
+    }
+    // Generera thumbnail om den saknas
+    if (!row.thumb_small_path && isImage(mimeType)) {
+      try {
+        await generateThumbnails(row.id, absolutePath, mimeType);
+      } catch (err) {
+        console.warn(`Thumbnail misslyckades (befintlig) för ${relPath}:`, err.message);
+      }
+    }
+    // Fyll i GPS och ansikten om de saknas (kan ha missats vid ursprungsindexeringen)
+    const needsGps   = !row.location && isImage(mimeType);
+    const needsFaces = row.face_count === 0 && isImage(mimeType);
+    if (needsGps || needsFaces) {
+      try {
+        const meta = await extractMetadata(absolutePath);
+        if (needsGps && meta.gps) {
+          await upsertAssetLocation(row.id, meta.gps.lat, meta.gps.lon);
+          (async () => {
+            for (let attempt = 0; attempt < 3; attempt++) {
+              if (attempt > 0) await new Promise((r) => setTimeout(r, 5000));
+              const label = await reverseGeocode(meta.gps.lat, meta.gps.lon);
+              if (label) {
+                await query('UPDATE assets SET location_label = $1 WHERE id = $2', [label, row.id]).catch(() => {});
+                break;
+              }
+            }
+          })().catch(() => {});
+        }
+        if (needsFaces && meta.faces.length > 0) {
+          for (const face of meta.faces) {
+            let personId = null;
+            if (face.name) {
+              const { rows: pRows } = await query(
+                `INSERT INTO persons (name) VALUES ($1) ON CONFLICT DO NOTHING RETURNING id`,
+                [face.name]
+              );
+              if (pRows.length > 0) {
+                personId = pRows[0].id;
+              } else {
+                const { rows: existRows } = await query('SELECT id FROM persons WHERE name = $1 LIMIT 1', [face.name]);
+                personId = existRows[0]?.id ?? null;
+              }
+            }
+            await query(
+              `INSERT INTO faces (asset_id, person_id, source, region_x, region_y, region_w, region_h)
+               VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT DO NOTHING`,
+              [row.id, personId, face.source, face.regionX, face.regionY, face.regionW, face.regionH]
+            );
+          }
+        }
+      } catch (err) {
+        console.warn(`Backfill GPS/faces misslyckades för ${relPath}:`, err.message);
+      }
+    }
+    return;
+  }
 
   // 2. SHA-256 hash + duplikat-kontroll
   let fileHash;
@@ -51,8 +113,8 @@ export async function indexFile(absolutePath) {
     `INSERT INTO assets
        (id, file_path, file_name, file_hash, mime_type, file_size,
         width, height, taken_at, file_created_at,
-        transcode_status, rating, title, description)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+        transcode_status, rating, title, description, source_folder)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
     [
       assetId,
       relPath,
@@ -68,6 +130,7 @@ export async function indexFile(absolutePath) {
       meta.rating ?? null,
       meta.title ?? null,
       meta.description ?? null,
+      sourceFolderPath,
     ]
   );
 
@@ -79,12 +142,14 @@ export async function indexFile(absolutePath) {
   ];
 
   for (const row of metaRows) {
-    await query(
-      `INSERT INTO asset_metadata (asset_id, source, key, value)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (asset_id, source, key) DO UPDATE SET value = EXCLUDED.value`,
-      [assetId, row.source, row.key, row.value]
-    );
+    try {
+      await query(
+        `INSERT INTO asset_metadata (asset_id, source, key, value)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (asset_id, source, key) DO UPDATE SET value = EXCLUDED.value`,
+        [assetId, row.source, row.key, String(row.value).slice(0, 4096)]
+      );
+    } catch { /* hoppa över ogiltiga metadata-värden */ }
   }
 
   // 6. Taggar (nyckelord)
@@ -105,12 +170,17 @@ export async function indexFile(absolutePath) {
   // 7. GPS + reverse geocoding
   if (meta.gps) {
     await upsertAssetLocation(assetId, meta.gps.lat, meta.gps.lon);
-    // Geocoding körs asynkront utan att blockera indexeringen
-    reverseGeocode(meta.gps.lat, meta.gps.lon).then(async (label) => {
-      if (label) {
-        await query('UPDATE assets SET location_label = $1 WHERE id = $2', [label, assetId]);
+    // Geocoding körs asynkront — försök 3 gånger med 5 sek mellanrum
+    (async () => {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        if (attempt > 0) await new Promise((r) => setTimeout(r, 5000));
+        const label = await reverseGeocode(meta.gps.lat, meta.gps.lon);
+        if (label) {
+          await query('UPDATE assets SET location_label = $1 WHERE id = $2', [label, assetId]).catch(() => {});
+          break;
+        }
       }
-    }).catch(() => {});
+    })().catch(() => {});
   }
 
   // 8. Face regions (från DigiKam/Lightroom XMP)

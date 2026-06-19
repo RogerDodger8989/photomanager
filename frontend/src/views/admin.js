@@ -173,12 +173,16 @@ async function renderJobs(content) {
   const { stats, recent } = data;
 
   content.innerHTML = `
-    <div class="mb-4 flex flex-wrap gap-2">
+    <div class="mb-4 flex flex-wrap gap-2 items-center">
       ${stats.map((s) => `
         <div class="bg-slate-800 rounded-lg px-3 py-2 text-xs">
           <span class="text-slate-400">${s.job_type} / ${s.status}</span>
           <span class="ml-2 font-medium text-white">${s.count}</span>
         </div>`).join('')}
+      <button id="requeue-thumbs-btn"
+        class="ml-auto px-4 py-2 bg-blue-700 hover:bg-blue-600 text-white text-xs font-medium rounded-lg transition-colors">
+        Återköa saknade thumbnails
+      </button>
     </div>
     <div class="space-y-1.5">
       ${recent.map((j) => `
@@ -204,6 +208,21 @@ async function renderJobs(content) {
         renderJobs(content);
       } catch (e) { toast(e.message, 'error'); }
     });
+  });
+
+  content.querySelector('#requeue-thumbs-btn').addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    btn.textContent = 'Köar…';
+    try {
+      const { data } = await api.requeueThumbnails();
+      toast(`${data.queued} thumbnails köade för generering`, data.queued > 0 ? 'success' : 'info');
+      renderJobs(content);
+    } catch (err) {
+      toast(err.message, 'error');
+      btn.disabled = false;
+      btn.textContent = 'Återköa saknade thumbnails';
+    }
   });
 }
 
@@ -367,7 +386,7 @@ async function renderWatchedFolders(content) {
         <div class="text-sm font-medium text-white mb-3">Lägg till bevakad mapp</div>
         <div class="flex gap-2 mb-2">
           <div class="flex-1 flex gap-1">
-            <input id="wf-path" type="text" placeholder="/media/photos"
+            <input id="wf-path" type="text" placeholder="/media/Bilder"
               class="flex-1 bg-slate-700 text-white text-sm rounded-lg px-3 py-2 border border-slate-600 focus:outline-none focus:border-blue-500">
             <button id="wf-browse-btn"
               class="px-3 py-2 bg-slate-600 hover:bg-slate-500 text-white text-sm rounded-lg transition-colors whitespace-nowrap">
@@ -398,7 +417,7 @@ async function renderWatchedFolders(content) {
           <!-- Snabbknappar -->
           <div class="px-4 py-2 border-b border-slate-800 flex gap-2 flex-wrap flex-shrink-0">
             <span class="text-xs text-slate-500 self-center mr-1">Snabbval:</span>
-            ${['/media/photos','/media/thumbs','/mnt','/'].map((p) =>
+            ${['/media/Bilder','/media','/mnt','/'].map((p) =>
               `<button class="quick-path text-xs px-2 py-1 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-md"
                 data-path="${p}">${p}</button>`).join('')}
           </div>
@@ -559,7 +578,7 @@ async function renderWatchedFolders(content) {
 
   content.querySelector('#wf-browse-btn').addEventListener('click', () => {
     modal.classList.remove('hidden');
-    browseTo(pathInput.value.trim() || '/media/photos');
+    browseTo(pathInput.value.trim() || '/media');
   });
 
   content.querySelectorAll('.quick-path').forEach((btn) => {

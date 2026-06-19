@@ -108,7 +108,9 @@ export const api = {
   removeFav:   (id)             => request('DELETE', `/api/explore/favorites/${id}`),
 
   // Map
-  clusters: (params)            => request('GET', `/api/map/clusters?${qs(params)}`),
+  clusters:      (params)       => request('GET', `/api/map/clusters?${qs(params)}`),
+  mapExtent:     ()             => request('GET', '/api/map/extent'),
+  clusterPhotos: (params)       => request('GET', `/api/map/cluster-photos?${qs(params)}`),
 
   // Persons
   persons:  ()                  => request('GET', '/api/persons'),
@@ -156,9 +158,10 @@ export const api = {
   pushUnsubscribe: (endpoint)   => request('DELETE', '/api/push/subscribe', { endpoint }),
 
   // Admin
-  adminStats:   ()              => request('GET', '/api/admin/stats'),
-  adminJobs:    ()              => request('GET', '/api/admin/jobs'),
-  retryJob:     (id)            => request('POST', `/api/admin/jobs/${id}/retry`),
+  adminStats:         ()        => request('GET', '/api/admin/stats'),
+  adminJobs:          ()        => request('GET', '/api/admin/jobs'),
+  retryJob:           (id)      => request('POST', `/api/admin/jobs/${id}/retry`),
+  requeueThumbnails:  ()        => request('POST', '/api/admin/requeue-thumbnails', {}),
   adminUsers:   ()              => request('GET', '/api/admin/users'),
   createUser:   (body)          => request('POST', '/api/admin/users', body),
   updateUser:   (id, body)      => request('PATCH', `/api/admin/users/${id}`, body),

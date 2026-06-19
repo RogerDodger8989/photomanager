@@ -1,4 +1,4 @@
-import { getMapClusters, getAssetsInBounds } from '../services/geoService.js';
+import { getMapClusters, getAssetsInBounds, getMapExtent, getClusterPhotos } from '../services/geoService.js';
 
 export default async function mapRoutes(fastify) {
 
@@ -21,14 +21,47 @@ export default async function mapRoutes(fastify) {
   }, async (request, reply) => {
     const { minLat, maxLat, minLon, maxLon, zoom } = request.query;
     const bounds = { minLat, maxLat, minLon, maxLon };
+    const userId  = request.user.id;
+    const isAdmin = request.user.role === 'admin';
 
-    // Vid hög zoom visas individuella assets istället för kluster
     if (zoom >= 14) {
-      const assets = await getAssetsInBounds(bounds);
+      const assets = await getAssetsInBounds(bounds, userId, isAdmin);
       return reply.send({ data: { type: 'assets', items: assets } });
     }
 
-    const clusters = await getMapClusters(bounds, zoom);
+    const clusters = await getMapClusters(bounds, zoom, userId, isAdmin);
     return reply.send({ data: { type: 'clusters', items: clusters } });
+  });
+
+  // GET /api/map/extent — bounding box för alla foton med GPS
+  fastify.get('/api/map/extent', {
+    onRequest: [fastify.authenticate],
+  }, async (request, reply) => {
+    const userId  = request.user.id;
+    const isAdmin = request.user.role === 'admin';
+    const data = await getMapExtent(userId, isAdmin);
+    return reply.send({ data });
+  });
+
+  // GET /api/map/cluster-photos?lat=&lon=&radiusMeters=
+  fastify.get('/api/map/cluster-photos', {
+    onRequest: [fastify.authenticate],
+    schema: {
+      querystring: {
+        type: 'object',
+        required: ['lat', 'lon', 'radiusMeters'],
+        properties: {
+          lat:          { type: 'number' },
+          lon:          { type: 'number' },
+          radiusMeters: { type: 'number' },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { lat, lon, radiusMeters } = request.query;
+    const userId  = request.user.id;
+    const isAdmin = request.user.role === 'admin';
+    const photos = await getClusterPhotos(lat, lon, radiusMeters, userId, isAdmin);
+    return reply.send({ data: photos });
   });
 }

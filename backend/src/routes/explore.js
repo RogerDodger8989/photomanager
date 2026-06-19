@@ -62,7 +62,7 @@ export default async function exploreRoutes(fastify) {
               a.thumb_large_path AS cover_thumb,
               COUNT(ea.asset_id)::int AS asset_count,
               (e.date_to::date - e.date_from::date) AS duration_days
-       FROM explore_events e
+       FROM events e
        JOIN event_assets ea ON ea.event_id = e.id
        LEFT JOIN assets a ON a.id = e.cover_asset_id
        WHERE ${ownerFilter}

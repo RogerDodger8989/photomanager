@@ -35,6 +35,22 @@ export default async function adminRoutes(fastify) {
     return reply.send({ data: { ok: true } });
   });
 
+  // POST /api/admin/requeue-thumbnails — köa om alla bilder utan thumbnail
+  fastify.post('/api/admin/requeue-thumbnails', async (request, reply) => {
+    const { rows } = await query(
+      `SELECT id FROM assets WHERE thumb_small_path IS NULL AND status = 'active'
+       AND mime_type LIKE 'image/%'`
+    );
+    for (const row of rows) {
+      await query(
+        `INSERT INTO jobs (job_type, asset_id) VALUES ('thumbnail', $1)
+         ON CONFLICT DO NOTHING`,
+        [row.id]
+      );
+    }
+    return reply.send({ data: { queued: rows.length } });
+  });
+
   // GET /api/admin/duplicates — lista duplikat
   fastify.get('/api/admin/duplicates', async (request, reply) => {
     const { rows } = await query(

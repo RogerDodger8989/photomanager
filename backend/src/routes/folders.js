@@ -53,7 +53,9 @@ export default async function foldersAdminRoutes(fastify) {
       },
     },
   }, async (request, reply) => {
-    const { path: folderPath, label = '' } = request.body;
+    const { path: rawFolderPath, label = '' } = request.body;
+    // Normalisera: ta bort dubbla snedstreck och avslutande snedstreck
+    const folderPath = rawFolderPath.replace(/\/+/g, '/').replace(/\/$/, '') || '/';
     if (folderPath.includes('..')) return reply.status(400).send({ error: 'Ogiltig sökväg' });
 
     if (!existsSync(folderPath)) {
@@ -180,6 +182,17 @@ export default async function foldersAdminRoutes(fastify) {
     if (mount_type === 'cifs') {
       await unmountShare(folderPath);
     }
+
+    // Remove all assets from this folder from the index (files on disk are untouched)
+    await query('DELETE FROM assets WHERE source_folder = $1', [folderPath]);
+
+    // Remove persons who no longer have any linked images
+    await query(`
+      DELETE FROM persons
+      WHERE id NOT IN (
+        SELECT DISTINCT person_id FROM faces WHERE person_id IS NOT NULL
+      )
+    `);
 
     return reply.status(204).send();
   });

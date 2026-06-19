@@ -267,6 +267,8 @@ export async function renderFavorites(container) {
 
     const assets = data.map((a) => ({ ...a, is_favorite: true }));
 
+    grid.innerHTML = '';
+
     const selection = createSelectionManager(
       () => document.getElementById('fav-grid'),
       () => assets,

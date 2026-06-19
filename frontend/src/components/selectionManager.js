@@ -1,5 +1,6 @@
 import { api } from '../api.js';
 import { showUndoToast } from './lightbox.js';
+import { openAddToAlbumModal } from '../views/albums.js';
 
 /**
  * Hanterar multi-select för ett fotogalleri.
@@ -36,6 +37,9 @@ export function createSelectionManager(getGrid, getAllAssets) {
       ${count > 0 ? `
         <span class="text-sm font-medium text-white bg-blue-600 rounded-full px-2.5 py-0.5">${count} markerade</span>
         <button id="sel-clear" class="text-xs text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-700 transition-colors">Avmarkera alla</button>
+        <button id="sel-add-album" class="flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 px-2 py-1 rounded hover:bg-slate-700 transition-colors">
+          📁 Lägg till i album
+        </button>
         <button id="sel-delete" class="flex items-center gap-1.5 text-xs text-red-400 hover:text-red-300 px-2 py-1 rounded hover:bg-slate-700 transition-colors">
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
@@ -47,6 +51,9 @@ export function createSelectionManager(getGrid, getAllAssets) {
       if (e.target.checked) selectAll(); else clearAll();
     });
     toolbarEl.querySelector('#sel-clear')?.addEventListener('click', clearAll);
+    toolbarEl.querySelector('#sel-add-album')?.addEventListener('click', () => {
+      openAddToAlbumModal([...selected]);
+    });
     toolbarEl.querySelector('#sel-delete')?.addEventListener('click', deleteSelected);
   }
 

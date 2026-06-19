@@ -11,27 +11,27 @@ export async function upsertAssetLocation(assetId, lat, lon) {
 }
 
 // Hämta kluster för kartvyn
-// bounds = { minLat, maxLat, minLon, maxLon }, zoom avgör kluster-radien
-export async function getMapClusters(bounds, zoom) {
-  // Klusterradie i meter baserat på zoom-nivå
+export async function getMapClusters(bounds, zoom, userId, isAdmin) {
   const radiusMeters = zoomToRadius(zoom);
+  const ownerFilter = isAdmin ? 'TRUE' : `owner_id = '${userId}'`;
 
   const { rows } = await query(
     `SELECT
        cluster_id,
-       COUNT(*)::int                                           AS count,
-       ST_Y(ST_Centroid(ST_Collect(location::geometry)))      AS lat,
-       ST_X(ST_Centroid(ST_Collect(location::geometry)))      AS lon,
-       MIN(id)                                                AS sample_asset_id
+       COUNT(*)::int                                                    AS count,
+       ST_Y(ST_Centroid(ST_Collect(location::geometry)))               AS lat,
+       ST_X(ST_Centroid(ST_Collect(location::geometry)))               AS lon,
+       (array_agg(id            ORDER BY id))[1]                       AS sample_asset_id,
+       (array_agg(thumb_small_path ORDER BY id))[1]                    AS sample_thumb
      FROM (
        SELECT
-         id,
-         location,
+         id, location, thumb_small_path,
          ST_ClusterDBSCAN(location::geometry, eps := $5, minpoints := 1)
            OVER () AS cluster_id
        FROM assets
        WHERE status = 'active'
          AND location IS NOT NULL
+         AND ${ownerFilter}
          AND location && ST_MakeEnvelope($1, $2, $3, $4, 4326)
      ) clustered
      GROUP BY cluster_id
@@ -40,16 +40,18 @@ export async function getMapClusters(bounds, zoom) {
   );
 
   return rows.map((r) => ({
-    clusterId: r.cluster_id,
-    count: r.count,
-    lat: r.lat,
-    lon: r.lon,
+    clusterId:     r.cluster_id,
+    count:         r.count,
+    lat:           r.lat,
+    lon:           r.lon,
     sampleAssetId: r.sample_asset_id,
+    sampleThumb:   r.sample_thumb,
   }));
 }
 
 // Hämta enskilda assets inom en bounding box (vid hög zoom)
-export async function getAssetsInBounds(bounds, limit = 200) {
+export async function getAssetsInBounds(bounds, userId, isAdmin, limit = 200) {
+  const ownerFilter = isAdmin ? 'TRUE' : `owner_id = '${userId}'`;
   const { rows } = await query(
     `SELECT id, file_name, thumb_small_path,
             ST_Y(location::geometry) AS lat,
@@ -58,10 +60,47 @@ export async function getAssetsInBounds(bounds, limit = 200) {
      FROM assets
      WHERE status = 'active'
        AND location IS NOT NULL
+       AND ${ownerFilter}
        AND location && ST_MakeEnvelope($1, $2, $3, $4, 4326)
      ORDER BY taken_at DESC
      LIMIT $5`,
     [bounds.minLon, bounds.minLat, bounds.maxLon, bounds.maxLat, limit]
+  );
+  return rows;
+}
+
+// Bounding box för alla foton med GPS — används för auto-centrering
+export async function getMapExtent(userId, isAdmin) {
+  const { rows } = await query(
+    `SELECT
+       ST_YMin(ST_Extent(location::geometry)) AS min_lat,
+       ST_YMax(ST_Extent(location::geometry)) AS max_lat,
+       ST_XMin(ST_Extent(location::geometry)) AS min_lon,
+       ST_XMax(ST_Extent(location::geometry)) AS max_lon,
+       COUNT(*)::int AS total
+     FROM assets
+     WHERE status = 'active'
+       AND location IS NOT NULL
+       AND ($2 OR owner_id = $1)`,
+    [userId, isAdmin]
+  );
+  return rows[0];
+}
+
+// Foton inom en given radial area — används för kluster-panelen
+export async function getClusterPhotos(lat, lon, radiusMeters, userId, isAdmin) {
+  const { rows } = await query(
+    `SELECT id, thumb_small_path, taken_at, file_name,
+            ST_Y(location::geometry) AS lat,
+            ST_X(location::geometry) AS lon
+     FROM assets
+     WHERE status = 'active'
+       AND location IS NOT NULL
+       AND ($5 OR owner_id = $4)
+       AND ST_DWithin(location, ST_MakePoint($2, $1)::geography, $3)
+     ORDER BY taken_at DESC
+     LIMIT 30`,
+    [lat, lon, radiusMeters, userId, isAdmin]
   );
   return rows;
 }
@@ -90,7 +129,6 @@ export async function reverseGeocode(lat, lon) {
 }
 
 function zoomToRadius(zoom) {
-  // Approximate cluster radius in meters per zoom level
   const radii = {
     1: 5_000_000, 2: 2_000_000, 3: 1_000_000, 4: 500_000,
     5: 200_000,   6: 100_000,   7: 50_000,    8: 20_000,

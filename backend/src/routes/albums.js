@@ -9,7 +9,15 @@ export default async function albumsRoutes(fastify) {
   }, async (request, reply) => {
     const { rows } = await query(
       `SELECT al.id, al.name, al.description, al.created_at, al.updated_at,
-              al.cover_asset_id, a.thumb_small_path AS cover_thumb,
+              al.cover_asset_id,
+              COALESCE(
+                a.thumb_small_path,
+                (SELECT a2.thumb_small_path
+                 FROM album_assets aa2
+                 JOIN assets a2 ON a2.id = aa2.asset_id AND a2.status = 'active'
+                 WHERE aa2.album_id = al.id
+                 ORDER BY aa2.sort_order, a2.taken_at LIMIT 1)
+              ) AS cover_thumb,
               COUNT(aa.asset_id)::int AS asset_count
        FROM albums al
        LEFT JOIN album_assets aa ON aa.album_id = al.id
@@ -107,12 +115,12 @@ export default async function albumsRoutes(fastify) {
         [name, id, request.user.id]);
     }
     if (description !== undefined) {
-      await query('UPDATE albums SET description = $1, updated_at = NOW() WHERE id = $2',
-        [description, id]);
+      await query('UPDATE albums SET description = $1, updated_at = NOW() WHERE id = $2 AND owner_id = $3',
+        [description, id, request.user.id]);
     }
     if (coverAssetId !== undefined) {
-      await query('UPDATE albums SET cover_asset_id = $1, updated_at = NOW() WHERE id = $2',
-        [coverAssetId, id]);
+      await query('UPDATE albums SET cover_asset_id = $1, updated_at = NOW() WHERE id = $2 AND owner_id = $3',
+        [coverAssetId, id, request.user.id]);
     }
     return reply.send({ data: { ok: true } });
   });

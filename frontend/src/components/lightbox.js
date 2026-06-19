@@ -1,6 +1,7 @@
 import { api } from '../api.js';
 import { toast, formatDate, formatDateTime, isVideo } from '../utils.js';
 import { state } from '../state.js';
+import { openAddToAlbumModal } from '../views/albums.js';
 
 let currentIndex = 0;
 let items = [];
@@ -942,6 +943,12 @@ function updateFavBtn() {
 // ── Övriga lightbox-kontroller ────────────────────────────────────────────────
 
 document.getElementById('lb-back').addEventListener('click', closeLightbox);
+
+document.getElementById('lb-add-album').addEventListener('click', () => {
+  const asset = items[currentIndex];
+  if (!asset) return;
+  openAddToAlbumModal([asset.id]);
+});
 
 document.getElementById('lb-favorite').addEventListener('click', async () => {
   const asset = items[currentIndex];

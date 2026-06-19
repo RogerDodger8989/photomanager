@@ -12,13 +12,13 @@ const processingQueue = new Set();
 // Map: sökväg → chokidar-instans
 const watchers = new Map();
 
-async function handleAdd(filePath) {
+async function handleAdd(filePath, sourceFolderKey = null) {
   if (!MEDIA_EXTENSIONS.test(filePath)) return;
   if (processingQueue.has(filePath)) return;
   processingQueue.add(filePath);
   try {
     await new Promise((r) => setTimeout(r, 2000));
-    await indexFile(filePath);
+    await indexFile(filePath, sourceFolderKey);
   } catch (err) {
     console.error(`Indexeringsfel för ${filePath}:`, err.message);
   } finally {
@@ -35,24 +35,30 @@ async function handleUnlink(filePath) {
   }
 }
 
-function createWatcher(folderPath) {
+function createWatcher(folderPath, sourceFolderKey = null) {
   if (watchers.has(folderPath)) return; // redan bevakad
+
+  // usePolling krävs när mappen är en Docker-volym monterad från Windows/macOS —
+  // inotify-events når aldrig containern vid ändringar från hosten.
+  const usePolling = process.env.CHOKIDAR_USEPOLLING !== 'false';
+  const pollInterval = parseInt(process.env.CHOKIDAR_INTERVAL ?? '3000');
 
   const watcher = chokidar.watch(folderPath, {
     persistent: true,
     ignoreInitial: false,
     ignored: (p) => {
-      // Ignorera dolda filer/mappar (börjar med .) — detta täcker .trash automatiskt
       const parts = p.replace(/\\/g, '/').split('/');
       return parts.some((seg) => seg.startsWith('.'));
     },
-    awaitWriteFinish: { stabilityThreshold: 3000, pollInterval: 500 },
+    usePolling,
+    interval: pollInterval,
+    awaitWriteFinish: { stabilityThreshold: 2000, pollInterval: 500 },
     depth: 20,
   });
 
   watcher
-    .on('add', handleAdd)
-    .on('unlink', handleUnlink)
+    .on('add',    (fp) => handleAdd(fp, sourceFolderKey))
+    .on('unlink', (fp) => handleUnlink(fp))
     .on('error', async (err) => {
       console.error(`FileWatcher-fel (${folderPath}):`, err.message);
       await query(
@@ -122,7 +128,7 @@ export async function startFileWatcher() {
         console.warn(`FileWatcher: mappen finns inte — ${path}`);
         continue;
       }
-      createWatcher(path);
+      createWatcher(path, path);
     }
   } catch (err) {
     console.warn('FileWatcher: kunde inte läsa watched_folders:', err.message);
@@ -134,7 +140,7 @@ export async function addWatchedFolder(folderPath) {
   if (!existsSync(folderPath)) {
     throw new Error(`Mappen finns inte: ${folderPath}`);
   }
-  createWatcher(folderPath);
+  createWatcher(folderPath, folderPath);
 }
 
 // Anropas från API när en mapp tas bort

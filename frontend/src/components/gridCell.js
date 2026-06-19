@@ -18,10 +18,14 @@ export function buildPhotoCell(asset, onClick, onFavChange) {
   cell.className = 'photo-cell relative group';
   cell.dataset.id = asset.id;
 
+  const thumbSrc = asset.thumb_small_path
+    ? `/thumbs/${asset.thumb_small_path}`
+    : '/icons/placeholder.svg';
+
   cell.innerHTML = `
-    <img src="/thumbs/${asset.thumb_small_path}"
+    <img src="${thumbSrc}"
          loading="lazy" alt="${asset.file_name ?? ''}"
-         class="w-full h-full object-cover">
+         class="w-full h-full object-cover bg-slate-800">
     ${isVideo(asset.mime_type) ? `
       <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
         <div class="bg-black/50 rounded-full p-2">
