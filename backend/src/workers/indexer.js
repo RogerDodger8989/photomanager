@@ -23,7 +23,8 @@ export async function indexFile(absolutePath, sourceFolderPath = null) {
   // 1. Kolla om filen redan är indexerad (t.ex. server-restart)
   const existing = await query(
     `SELECT a.id, a.source_folder, a.thumb_small_path, a.location,
-            (SELECT COUNT(*) FROM faces f WHERE f.asset_id = a.id)::int AS face_count
+            (SELECT COUNT(*) FROM faces f WHERE f.asset_id = a.id)::int AS face_count,
+            (SELECT COUNT(*) FROM faces f WHERE f.asset_id = a.id AND f.person_id IS NULL AND f.source != 'ai')::int AS unassigned_faces
      FROM assets a WHERE a.file_path = $1 AND a.status != 'deleted'`,
     [relPath]
   );
@@ -41,9 +42,10 @@ export async function indexFile(absolutePath, sourceFolderPath = null) {
         console.warn(`Thumbnail misslyckades (befintlig) för ${relPath}:`, err.message);
       }
     }
-    // Fyll i GPS och ansikten om de saknas (kan ha missats vid ursprungsindexeringen)
+    // Fyll i GPS och ansikten om de saknas eller saknar orientationskorrigering
     const needsGps   = !row.location && isImage(mimeType);
-    const needsFaces = row.face_count === 0 && isImage(mimeType);
+    // Uppdatera ansikten om: saknas helt ELLER om befintliga ansikten saknar person (XMP-faces som kan ha fel koordinater)
+    const needsFaces = isImage(mimeType) && (row.face_count === 0 || row.unassigned_faces > 0);
     if (needsGps || needsFaces) {
       try {
         const meta = await extractMetadata(absolutePath);
@@ -61,6 +63,13 @@ export async function indexFile(absolutePath, sourceFolderPath = null) {
           })().catch(() => {});
         }
         if (needsFaces && meta.faces.length > 0) {
+          // Ta bort gamla XMP-faces utan person-tilldelning (dessa kan ha felaktiga koordinater)
+          if (row.unassigned_faces > 0) {
+            await query(
+              `DELETE FROM faces WHERE asset_id = $1 AND person_id IS NULL AND source != 'ai'`,
+              [row.id]
+            );
+          }
           for (const face of meta.faces) {
             let personId = null;
             if (face.name) {

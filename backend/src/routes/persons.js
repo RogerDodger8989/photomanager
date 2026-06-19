@@ -47,17 +47,24 @@ export default async function personsRoutes(fastify) {
     const { region_x, region_y, region_w, region_h, file_path, width, height } = rows[0];
     const fullPath = path.join(config.media.photosPath, file_path);
 
-    const imgW = width  ?? 1000;
-    const imgH = height ?? 1000;
-    const left   = Math.max(0, Math.round(region_x * imgW));
-    const top    = Math.max(0, Math.round(region_y * imgH));
-    const cropW  = Math.max(1, Math.round(region_w * imgW));
-    const cropH  = Math.max(1, Math.round(region_h * imgH));
+    // Face coords are stored in display space (after orientation correction).
+    // Use display dims: for 90°/270° EXIF rotations (5-8), w/h are swapped.
+    const sharpMeta = await sharp(fullPath).metadata();
+    const orientation = sharpMeta.orientation ?? 1;
+    const isRotated90 = orientation >= 5 && orientation <= 8;
+    const dispW = isRotated90 ? (height ?? sharpMeta.height ?? 1000) : (width ?? sharpMeta.width ?? 1000);
+    const dispH = isRotated90 ? (width  ?? sharpMeta.width  ?? 1000) : (height ?? sharpMeta.height ?? 1000);
+
+    const left  = Math.max(0, Math.round(region_x * dispW));
+    const top   = Math.max(0, Math.round(region_y * dispH));
+    const cropW = Math.max(1, Math.round(region_w * dispW));
+    const cropH = Math.max(1, Math.round(region_h * dispH));
 
     reply.header('Content-Type', 'image/webp');
     reply.header('Cache-Control', 'public, max-age=86400');
 
     const imgBuf = await sharp(fullPath)
+      .rotate()
       .extract({ left, top, width: cropW, height: cropH })
       .resize(200, 200, { fit: 'cover' })
       .webp({ quality: 85 })
@@ -83,17 +90,22 @@ export default async function personsRoutes(fastify) {
     const { region_x, region_y, region_w, region_h, file_path, width, height } = rows[0];
     const fullPath = path.join(config.media.photosPath, file_path);
 
-    const imgW = width  ?? 1000;
-    const imgH = height ?? 1000;
-    const left   = Math.max(0, Math.round(region_x * imgW));
-    const top    = Math.max(0, Math.round(region_y * imgH));
-    const cropW  = Math.max(1, Math.round(region_w * imgW));
-    const cropH  = Math.max(1, Math.round(region_h * imgH));
+    const sharpMeta = await sharp(fullPath).metadata();
+    const orientation = sharpMeta.orientation ?? 1;
+    const isRotated90 = orientation >= 5 && orientation <= 8;
+    const dispW = isRotated90 ? (height ?? sharpMeta.height ?? 1000) : (width ?? sharpMeta.width ?? 1000);
+    const dispH = isRotated90 ? (width  ?? sharpMeta.width  ?? 1000) : (height ?? sharpMeta.height ?? 1000);
+
+    const left  = Math.max(0, Math.round(region_x * dispW));
+    const top   = Math.max(0, Math.round(region_y * dispH));
+    const cropW = Math.max(1, Math.round(region_w * dispW));
+    const cropH = Math.max(1, Math.round(region_h * dispH));
 
     reply.header('Content-Type', 'image/webp');
     reply.header('Cache-Control', 'public, max-age=86400');
 
     const imgBuf = await sharp(fullPath)
+      .rotate()
       .extract({ left, top, width: cropW, height: cropH })
       .resize(200, 200, { fit: 'cover' })
       .webp({ quality: 85 })

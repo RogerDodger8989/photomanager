@@ -157,12 +157,19 @@ export async function extractMetadata(filePath) {
     }
   }
 
-  // Sharp-fallback för dimensioner (JPEG-filer utan EXIF-dimensioner)
-  if (isImage(result.mimeType) && (!result.width || !result.height)) {
+  // Sharp-fallback för dimensioner + ansiktskoordinat-korrigering baserat på EXIF-orientering
+  // Sharp genererar thumbnails med rotationen inbakad (auto-roterar).
+  // Ansiktskoordinater från exifr är i det LAGRADE (ej roterade) koordinatrymden
+  // och måste transformeras till VISNINGSUTRYMMET för att matcha thumbnails.
+  if (isImage(result.mimeType)) {
     try {
-      const meta = await sharp(filePath).metadata();
-      result.width  = result.width  ?? meta.width  ?? null;
-      result.height = result.height ?? meta.height ?? null;
+      const sharpMeta = await sharp(filePath).metadata();
+      result.width  = result.width  ?? sharpMeta.width  ?? null;
+      result.height = result.height ?? sharpMeta.height ?? null;
+      const orient = sharpMeta.orientation ?? 1;
+      if (orient !== 1 && result.faces.length > 0) {
+        result.faces = result.faces.map(f => applyOrientationToFace(f, orient));
+      }
     } catch {}
   }
 
@@ -291,4 +298,37 @@ function detectFaceSource(region, raw) {
   // Lightroom använder lr:hierarchicalSubject
   if (raw['lr:hierarchicalSubject'] != null) return 'lightroom';
   return 'manual';
+}
+
+// Transformerar ansiktskoordinater (normaliserade 0-1, lagrad pixelrymd) till
+// den visningsrymd som Sharp-genererade thumbnails använder (rotation inbakad).
+// EXIF orientation 1-8 — vi hanterar de vanligaste: 1, 3, 6, 8.
+function applyOrientationToFace(face, orientation) {
+  const cx = face.regionX + face.regionW / 2;
+  const cy = face.regionY + face.regionH / 2;
+  const w  = face.regionW;
+  const h  = face.regionH;
+
+  let nx, ny, nw, nh;
+  switch (orientation) {
+    case 3: // 180°
+      nx = 1 - cx; ny = 1 - cy; nw = w; nh = h;
+      break;
+    case 6: // 90° CW (liggande → stående)  px = 1-cy, py = cx
+      nx = 1 - cy; ny = cx; nw = h; nh = w;
+      break;
+    case 8: // 90° CCW (liggande → stående)  px = cy, py = 1-cx
+      nx = cy; ny = 1 - cx; nw = h; nh = w;
+      break;
+    default:
+      return face;
+  }
+
+  return {
+    ...face,
+    regionX: Math.max(0, Math.min(1, nx - nw / 2)),
+    regionY: Math.max(0, Math.min(1, ny - nh / 2)),
+    regionW: Math.min(nw, 1),
+    regionH: Math.min(nh, 1),
+  };
 }
