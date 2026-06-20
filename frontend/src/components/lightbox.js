@@ -1073,12 +1073,66 @@ if (lbMediaArea) {
 window.addEventListener('keydown', (e) => {
   if (!lb.classList.contains('open')) return;
   if (e.key === 'Escape')     { closeLightbox(); return; }
+  if (e.key === 'Delete')     { trashCurrentInLightbox(); return; }
   if (e.key === 'ArrowLeft')  { if (currentIndex > 0) showItem(currentIndex - 1); }
   if (e.key === 'ArrowRight') { if (currentIndex < items.length - 1) showItem(currentIndex + 1); }
   if (e.key === '+' || e.key === '=') zoomBy(ZOOM_STEP, 0, 0);
   if (e.key === '-') zoomBy(-ZOOM_STEP, 0, 0);
   if (e.key === '0') resetZoom();
 });
+
+async function trashCurrentInLightbox() {
+  const asset = items[currentIndex];
+  if (!asset) return;
+
+  // Optimistisk UI: ta bort ur listan och navigera direkt
+  const removedIndex = currentIndex;
+  const removedAsset = asset;
+  items.splice(removedIndex, 1);
+
+  if (items.length === 0) {
+    closeLightbox();
+  } else {
+    showItem(Math.min(removedIndex, items.length - 1));
+  }
+
+  try {
+    await api.trash(removedAsset.id);
+  } catch (err) {
+    // Återställ vid fel
+    items.splice(removedIndex, 0, removedAsset);
+    if (!lb.classList.contains('open')) {
+      lb.classList.add('open');
+      document.body.style.overflow = 'hidden';
+    }
+    showItem(removedIndex);
+    toast('Kunde inte radera: ' + err.message, 'error');
+    return;
+  }
+
+  // Meddela gridvyer att ta bort bilden ur listan
+  window.dispatchEvent(new CustomEvent('pm:asset-trashed', { detail: { id: removedAsset.id } }));
+
+  showUndoToast(
+    `"${removedAsset.file_name}" raderad`,
+    async () => {
+      try {
+        await api.restore(removedAsset.id);
+        // Sätt tillbaka i lightbox-listan
+        items.splice(removedIndex, 0, removedAsset);
+        if (!lb.classList.contains('open')) {
+          lb.classList.add('open');
+          document.body.style.overflow = 'hidden';
+        }
+        showItem(removedIndex);
+        // Meddela gridvyer att lägga tillbaka bilden
+        window.dispatchEvent(new CustomEvent('pm:asset-restored', { detail: { asset: removedAsset, index: removedIndex } }));
+      } catch (err) {
+        toast('Kunde inte ångra: ' + err.message, 'error');
+      }
+    },
+  );
+}
 
 lb.addEventListener('click', (e) => { if (e.target === lb) closeLightbox(); });
 document.getElementById('lb-close').addEventListener('click', closeLightbox);

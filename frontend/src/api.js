@@ -142,6 +142,7 @@ export const api = {
   // Folders
   folders:    (path = '')       => request('GET', `/api/folders?path=${encodeURIComponent(path)}`),
   folderTree:    ()             => request('GET', '/api/folders/tree'),
+  createFolder:  (body)        => request('POST', '/api/files/create-folder', body),
   moveFiles:     (body)        => request('POST', '/api/files/move', body),
   renameFolder:  (body)        => request('PATCH', '/api/files/rename-folder', body),
   moveFolderTo:  (body)        => request('POST', '/api/files/move-folder', body),

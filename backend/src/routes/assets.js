@@ -2,7 +2,7 @@ import { query } from '../db/pool.js';
 import { logAudit } from '../services/authService.js';
 import { writeMetaToFile } from '../services/xmpService.js';
 import { join, dirname, basename, relative } from 'path';
-import { rename, mkdir } from 'fs/promises';
+import { rename, mkdir, copyFile, unlink } from 'fs/promises';
 import { existsSync } from 'fs';
 import { config } from '../config.js';
 
@@ -350,29 +350,40 @@ export default async function assetsRoutes(fastify) {
 
     const { id } = request.params;
     const { rows } = await query(
-      "SELECT id, file_path FROM assets WHERE id = $1 AND status = 'active'",
+      "SELECT id, file_path, source_folder FROM assets WHERE id = $1 AND status = 'active'",
       [id]
     );
     if (!rows[0]) return reply.status(404).send({ error: 'Hittades inte eller redan i papperskorgen' });
 
-    const relPath = rows[0].file_path; // relativ till photosPath
-    const absPath = join(config.media.photosPath, relPath);
+    const relPath      = rows[0].file_path;
+    const sourceFolder = rows[0].source_folder;                    // absolut: /media/Bilder
+    const absPath      = join(config.media.photosPath, relPath);   // absolut sökväg till filen
     let trashPath = null;
 
     if (existsSync(absPath)) {
-      // Spegla katalogstrukturen under <photosPath>/.trash/
-      const trashDir = join(config.media.photosPath, '.trash', dirname(relPath));
+      // .trash ligger inuti den bevakade mappen: <sourceFolder>/.trash/<subPath>
+      const subPath   = relative(sourceFolder, absPath).replace(/\\/g, '/');
+      const trashDir  = join(sourceFolder, '.trash', dirname(subPath));
+      const trashFile = basename(subPath);
+      trashPath = join(sourceFolder, '.trash', subPath);
+
       await mkdir(trashDir, { recursive: true });
-      const file = basename(relPath);
-      trashPath = join(config.media.photosPath, '.trash', relPath);
+
       // Namnkollision — lägg till tidsstämpel
       if (existsSync(trashPath)) {
         const ts  = Date.now();
-        const dot = file.lastIndexOf('.');
-        const name = dot >= 0 ? file.slice(0, dot) + `_${ts}` + file.slice(dot) : file + `_${ts}`;
+        const dot = trashFile.lastIndexOf('.');
+        const name = dot >= 0 ? trashFile.slice(0, dot) + `_${ts}` + trashFile.slice(dot) : trashFile + `_${ts}`;
         trashPath = join(trashDir, name);
       }
-      await rename(absPath, trashPath);
+
+      try {
+        await rename(absPath, trashPath);
+      } catch (mvErr) {
+        if (mvErr.code !== 'EXDEV') throw mvErr;
+        await copyFile(absPath, trashPath);
+        await unlink(absPath);
+      }
     }
 
     await query(

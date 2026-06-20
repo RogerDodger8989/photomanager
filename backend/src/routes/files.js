@@ -4,6 +4,12 @@ import { existsSync } from 'fs';
 import { basename, join, dirname, relative } from 'path';
 import { config } from '../config.js';
 
+function toRelPath(absolutePath) {
+  const root = config.media.photosPath.replace(/\\/g, '/').replace(/\/$/, '');
+  const abs  = absolutePath.replace(/\\/g, '/').replace(/\/$/, '');
+  return relative(root, abs).replace(/\\/g, '/');
+}
+
 export default async function filesRoutes(fastify) {
 
   // GET /api/folders/tree — bevakade mappar + undermappar (alla inloggade)
@@ -158,6 +164,41 @@ export default async function filesRoutes(fastify) {
     return reply.send({ data: { moved, errors } });
   });
 
+  // POST /api/files/create-folder — skapar en ny undermapp på disk
+  fastify.post('/api/files/create-folder', {
+    onRequest: [fastify.authenticate],
+    schema: {
+      body: {
+        type: 'object',
+        required: ['parentPath', 'folderName'],
+        properties: {
+          parentPath: { type: 'string', minLength: 1 },
+          folderName: { type: 'string', minLength: 1 },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { parentPath, folderName } = request.body;
+    const isAdmin = request.user.role === 'admin';
+    if (!isAdmin) return reply.status(403).send({ error: 'Kräver admin' });
+
+    const { rows: wfRows } = await query('SELECT path FROM watched_folders');
+    const isWatched = wfRows.some((wf) => parentPath.startsWith(wf.path + '/') || parentPath === wf.path);
+    if (!isWatched) return reply.status(400).send({ error: 'Föräldern är inte under en bevakad mapp' });
+
+    if (!existsSync(parentPath)) return reply.status(404).send({ error: 'Föräldermappen finns inte på disk' });
+
+    const safeName = folderName.replace(/[/\\]/g, '').replace(/^\.*$/, '').trim();
+    if (!safeName) return reply.status(400).send({ error: 'Ogiltigt mappnamn' });
+
+    const newPath = join(parentPath, safeName);
+    if (existsSync(newPath)) return reply.status(409).send({ error: 'En mapp med det namnet finns redan' });
+
+    await mkdir(newPath, { recursive: true });
+
+    return reply.send({ data: { path: newPath } });
+  });
+
   // PATCH /api/files/rename-folder — byter namn på en undermapp på disk + uppdaterar DB
   fastify.patch('/api/files/rename-folder', {
     onRequest: [fastify.authenticate],
@@ -192,13 +233,15 @@ export default async function filesRoutes(fastify) {
 
     await rename(oldPath, newPath);
 
-    // Uppdatera alla assets som har oldPath som prefix i file_path
+    // file_path i DB är relativ till photosPath — konvertera sökvägar
+    const relOld = toRelPath(oldPath);
+    const relNew = toRelPath(newPath);
     await query(
       `UPDATE assets SET
-         file_path    = $2 || substring(file_path from length($1)+1),
-         source_folder = CASE WHEN source_folder = $1 THEN $2 ELSE source_folder END
-       WHERE file_path LIKE $3`,
-      [oldPath, newPath, oldPath + '%']
+         file_path     = $2 || substring(file_path from length($1)+1),
+         source_folder = CASE WHEN source_folder = $3 THEN $4 ELSE source_folder END
+       WHERE file_path LIKE $5`,
+      [relOld, relNew, oldPath, newPath, relOld + '/%']
     );
 
     return reply.send({ data: { oldPath, newPath } });
@@ -240,13 +283,15 @@ export default async function filesRoutes(fastify) {
       return reply.status(400).send({ error: 'Flytt mellan enheter stöds inte för mappar' });
     }
 
-    // Uppdatera assets
+    // file_path i DB är relativ till photosPath — konvertera sökvägar
+    const relOld = toRelPath(folderPath);
+    const relNew = toRelPath(newPath);
     await query(
       `UPDATE assets SET
          file_path     = $2 || substring(file_path from length($1)+1),
          source_folder = $3
        WHERE file_path LIKE $4`,
-      [folderPath, newPath, targetRoot, folderPath + '%']
+      [relOld, relNew, targetRoot, relOld + '/%']
     );
 
     return reply.send({ data: { folderPath, newPath } });
@@ -273,11 +318,12 @@ export default async function filesRoutes(fastify) {
     const isWatched = wfRows.some((wf) => folderPath.startsWith(wf.path + '/') || folderPath === wf.path);
     if (!isWatched) return reply.status(400).send({ error: 'Mappen är inte under en bevakad mapp' });
 
+    const relFolder = toRelPath(folderPath);
     const { rows } = await query(
       `UPDATE assets SET status = 'trashed', trashed_at = NOW()
        WHERE file_path LIKE $1 AND status = 'active'
        RETURNING id`,
-      [folderPath + '%']
+      [relFolder + '/%']
     );
 
     return reply.send({ data: { trashedCount: rows.length } });

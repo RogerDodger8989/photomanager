@@ -176,5 +176,5 @@ export function createSelectionManager(getGrid, getAllAssets, customActions = []
     }, true); // capture — körs innan lightbox-klick
   }
 
-  return { mountToolbar, attachToCell, clearAll, selectAll, syncCellVisuals };
+  return { mountToolbar, attachToCell, clearAll, selectAll, syncCellVisuals, deleteSelected };
 }

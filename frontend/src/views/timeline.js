@@ -13,6 +13,35 @@ let sentinel = null;
 let observer = null;
 let selection = null;
 
+// DEL-tangent: radera markerade bilder när lightbox är stängd och inget inputfält är aktivt
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Delete') return;
+  if (document.getElementById('lightbox')?.classList.contains('open')) return;
+  const tag = document.activeElement?.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+  if (selection) selection.deleteSelected();
+});
+
+// Synka grid när lightbox raderar/återställer en bild
+window.addEventListener('pm:asset-trashed', (e) => {
+  const id = e.detail?.id;
+  if (!id) return;
+  allItems = allItems.filter((a) => a.id !== id);
+  document.getElementById('photo-grid')?.querySelector(`[data-id="${id}"]`)?.remove();
+});
+
+window.addEventListener('pm:asset-restored', (e) => {
+  const { asset, index } = e.detail ?? {};
+  if (!asset) return;
+  const insertAt = typeof index === 'number' ? index : allItems.length;
+  allItems.splice(insertAt, 0, asset);
+  const grid = document.getElementById('photo-grid');
+  if (!grid) return;
+  const cell = buildPhotoCell(asset, () => openLightbox(allItems, allItems.indexOf(asset)));
+  selection?.attachToCell(cell, asset, insertAt);
+  grid.insertBefore(cell, grid.children[insertAt] ?? null);
+});
+
 export function renderTimeline(container, params = {}) {
   currentParams = params;
   cursor  = null;

@@ -14,6 +14,37 @@ let _treeData  = [];
 let _container = null;
 let _recursive = true; // inkludera undermappar
 
+// DEL-tangent: radera markerade bilder i mappvyn
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Delete') return;
+  if (document.getElementById('lightbox')?.classList.contains('open')) return;
+  const tag = document.activeElement?.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+  if (sel && activeFolderKey) sel.deleteSelected();
+});
+
+// Synka grid när lightbox raderar/återställer en bild
+window.addEventListener('pm:asset-trashed', (e) => {
+  const id = e.detail?.id;
+  if (!id) return;
+  allAssets = allAssets.filter((a) => a.id !== id);
+  document.getElementById('folder-grid')?.querySelector(`[data-id="${id}"]`)?.remove();
+  document.getElementById('folder-list')?.querySelector(`[data-id="${id}"]`)?.remove();
+});
+
+window.addEventListener('pm:asset-restored', (e) => {
+  const { asset, index } = e.detail ?? {};
+  if (!asset || !activeFolderKey) return;
+  const insertAt = typeof index === 'number' ? index : allAssets.length;
+  allAssets.splice(insertAt, 0, asset);
+  const grid = document.getElementById('folder-grid');
+  if (!grid) return;
+  const cell = buildPhotoCell(asset, () => openLightbox(allAssets, allAssets.indexOf(asset)));
+  sel?.attachToCell(cell, asset, insertAt);
+  makeDraggable(cell, asset);
+  grid.insertBefore(cell, grid.children[insertAt] ?? null);
+});
+
 export async function renderFolders(container) {
   _container = container;
   container.innerHTML = `
@@ -135,6 +166,10 @@ function renderTree(container, tree) {
       <span class="truncate flex-1">${esc(wf.label)}</span>
       <span class="text-slate-500 text-xs shrink-0">(${wf.totalAssetCount})</span>`;
     rootBtn.addEventListener('click', () => selectFolder(rootKey, tree));
+    rootBtn.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      showFolderContextMenu(e, { label: wf.label, fullPath: wf.watchedFolder, watchedFolder: wf.watchedFolder }, tree);
+    });
     makeDropTarget(rootBtn, wf.watchedFolder, wf.label);
     inner.appendChild(rootBtn);
 
@@ -438,6 +473,7 @@ function showFolderContextMenu(event, folder, tree) {
     box-shadow:0 8px 32px rgba(0,0,0,.6);min-width:180px;overflow:hidden;`;
 
   const items = [
+    { icon: '📁', label: 'Ny mapp här', action: () => showCreateFolderDialog(folder, tree) },
     { icon: '✏️', label: 'Byt namn', action: () => showRenameDialog(folder, tree) },
     { icon: '📂', label: 'Flytta mapp till...', action: () => showMoveFolderModal(folder, tree) },
     { icon: '🗑️', label: 'Radera mapp', action: () => showDeleteFolderDialog(folder, tree), danger: true },
@@ -462,16 +498,78 @@ function showFolderContextMenu(event, folder, tree) {
   });
 }
 
-function showRenameDialog(folder, tree) {
-  const newName = prompt(`Nytt namn för "${folder.label}":`, folder.label);
-  if (!newName || newName.trim() === folder.label) return;
+function showInputModal({ title, label, defaultValue = '', confirmText = 'OK', onConfirm }) {
+  const overlay = document.createElement('div');
+  overlay.className = 'fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm';
 
-  api.renameFolder({ oldPath: folder.fullPath, newName: newName.trim() })
-    .then(() => {
-      toast(`Mapp bytte namn till "${newName.trim()}"`, 'success');
-      return refreshTree();
-    })
-    .catch((err) => toast('Kunde inte byta namn: ' + err.message, 'error'));
+  const modal = document.createElement('div');
+  modal.className = 'bg-slate-800 border border-slate-600 rounded-xl shadow-2xl w-96 flex flex-col';
+  modal.innerHTML = `
+    <div class="flex items-center justify-between px-4 py-3 border-b border-slate-700">
+      <h3 class="text-white font-medium text-sm">${esc(title)}</h3>
+      <button class="modal-close text-slate-400 hover:text-white text-lg leading-none">✕</button>
+    </div>
+    <div class="px-4 py-4">
+      <label class="block text-xs text-slate-400 mb-1">${esc(label)}</label>
+      <input class="modal-input w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+             type="text" value="${esc(defaultValue)}" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="px-4 py-3 border-t border-slate-700 flex justify-end gap-2">
+      <button class="modal-cancel px-3 py-1.5 text-sm text-slate-300 hover:text-white rounded hover:bg-slate-700">Avbryt</button>
+      <button class="modal-ok px-4 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded">${esc(confirmText)}</button>
+    </div>`;
+
+  const close = () => overlay.remove();
+  const input = modal.querySelector('.modal-input');
+  const ok    = modal.querySelector('.modal-ok');
+
+  const submit = () => {
+    const val = input.value.trim();
+    if (!val) { input.focus(); return; }
+    close();
+    onConfirm(val);
+  };
+
+  modal.querySelector('.modal-close').addEventListener('click', close);
+  modal.querySelector('.modal-cancel').addEventListener('click', close);
+  ok.addEventListener('click', submit);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') submit();
+    if (e.key === 'Escape') close();
+  });
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+  requestAnimationFrame(() => { input.focus(); input.select(); });
+}
+
+function showCreateFolderDialog(folder, tree) {
+  showInputModal({
+    title: `Ny mapp i "${folder.label}"`,
+    label: 'Mappnamn',
+    confirmText: 'Skapa',
+    onConfirm: (name) => {
+      api.createFolder({ parentPath: folder.fullPath, folderName: name })
+        .then(() => { toast(`Mappen "${name}" skapades`, 'success'); return refreshTree(); })
+        .catch((err) => toast('Kunde inte skapa mapp: ' + err.message, 'error'));
+    },
+  });
+}
+
+function showRenameDialog(folder, tree) {
+  showInputModal({
+    title: `Byt namn på "${folder.label}"`,
+    label: 'Nytt namn',
+    defaultValue: folder.label,
+    confirmText: 'Byt namn',
+    onConfirm: (newName) => {
+      if (newName === folder.label) return;
+      api.renameFolder({ oldPath: folder.fullPath, newName })
+        .then(() => { toast(`Mapp bytte namn till "${newName}"`, 'success'); return refreshTree(); })
+        .catch((err) => toast('Kunde inte byta namn: ' + err.message, 'error'));
+    },
+  });
 }
 
 function showMoveFolderModal(folder, tree) {
@@ -537,21 +635,49 @@ function showMoveFolderModal(folder, tree) {
 }
 
 function showDeleteFolderDialog(folder, tree) {
-  const ok = confirm(`Radera mappen "${folder.label}"?\n\nAlla foton i mappen skickas till papperskorgen. Filerna på disk tas inte bort.`);
-  if (!ok) return;
+  const overlay = document.createElement('div');
+  overlay.className = 'fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm';
 
-  api.trashFolder({ folderPath: folder.fullPath })
-    .then(({ data }) => {
-      toast(`${data.trashedCount} foto${data.trashedCount !== 1 ? 'n' : ''} skickade till papperskorgen`, 'success');
-      // Rensa grid om vi visade denna mapp
-      if (activeFolderKey?.includes(folder.fullPath.replace(folder.watchedFolder, ''))) {
-        document.getElementById('folder-grid').innerHTML = '';
-        document.getElementById('folder-list').innerHTML = '';
-        allAssets = [];
-      }
-      refreshTree();
-    })
-    .catch((err) => toast('Kunde inte radera: ' + err.message, 'error'));
+  const modal = document.createElement('div');
+  modal.className = 'bg-slate-800 border border-slate-600 rounded-xl shadow-2xl w-96 flex flex-col';
+  modal.innerHTML = `
+    <div class="flex items-center justify-between px-4 py-3 border-b border-slate-700">
+      <h3 class="text-white font-medium text-sm">Radera mapp</h3>
+      <button class="modal-close text-slate-400 hover:text-white text-lg leading-none">✕</button>
+    </div>
+    <div class="px-4 py-4 text-sm text-slate-300 space-y-2">
+      <p>Radera mappen <span class="text-white font-medium">"${esc(folder.label)}"</span>?</p>
+      <p class="text-slate-400 text-xs">Alla foton i mappen skickas till papperskorgen. Filerna på disk tas inte bort.</p>
+    </div>
+    <div class="px-4 py-3 border-t border-slate-700 flex justify-end gap-2">
+      <button class="modal-cancel px-3 py-1.5 text-sm text-slate-300 hover:text-white rounded hover:bg-slate-700">Avbryt</button>
+      <button class="modal-ok px-4 py-1.5 text-sm bg-red-600 hover:bg-red-500 text-white rounded">Radera</button>
+    </div>`;
+
+  const close = () => overlay.remove();
+  modal.querySelector('.modal-close').addEventListener('click', close);
+  modal.querySelector('.modal-cancel').addEventListener('click', close);
+  overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+  modal.querySelector('.modal-ok').addEventListener('click', () => {
+    close();
+    api.trashFolder({ folderPath: folder.fullPath })
+      .then(({ data }) => {
+        toast(`${data.trashedCount} foto${data.trashedCount !== 1 ? 'n' : ''} skickade till papperskorgen`, 'success');
+        if (activeFolderKey?.includes(folder.fullPath.replace(folder.watchedFolder, ''))) {
+          document.getElementById('folder-grid').innerHTML = '';
+          document.getElementById('folder-list').innerHTML = '';
+          allAssets = [];
+        }
+        refreshTree();
+      })
+      .catch((err) => toast('Kunde inte radera: ' + err.message, 'error'));
+  });
+
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+  requestAnimationFrame(() => modal.querySelector('.modal-ok').focus());
 }
 
 // Laddar om trädet utan att störa vald mapp
