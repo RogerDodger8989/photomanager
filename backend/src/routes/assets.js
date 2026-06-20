@@ -1,7 +1,7 @@
 import { query } from '../db/pool.js';
 import { logAudit } from '../services/authService.js';
 import { writeMetaToFile } from '../services/xmpService.js';
-import { join, dirname, basename } from 'path';
+import { join, dirname, basename, relative } from 'path';
 import { rename, mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import { config } from '../config.js';
@@ -15,16 +15,20 @@ export default async function assetsRoutes(fastify) {
       querystring: {
         type: 'object',
         properties: {
-          cursor:  { type: 'string' },         // ISO-datum för cursor
-          limit:   { type: 'integer', default: 50, maximum: 200 },
-          sort:    { type: 'string', enum: ['taken_at', 'file_size', 'view_count', 'indexed_at'], default: 'taken_at' },
-          order:   { type: 'string', enum: ['asc', 'desc'], default: 'desc' },
-          ownOnly: { type: 'boolean', default: false },
+          cursor:       { type: 'string' },
+          limit:        { type: 'integer', default: 50, maximum: 200 },
+          sort:         { type: 'string', enum: ['taken_at', 'file_size', 'view_count', 'indexed_at'], default: 'taken_at' },
+          order:        { type: 'string', enum: ['asc', 'desc'], default: 'desc' },
+          ownOnly:      { type: 'boolean', default: false },
+          sourceFolder: { type: 'string' },
+          subpath:      { type: 'string' },
+          recursive:    { type: 'boolean', default: true },
+          folderPath:   { type: 'string' },
         },
       },
     },
   }, async (request, reply) => {
-    const { cursor, limit = 50, sort = 'taken_at', order = 'desc', ownOnly } = request.query;
+    const { cursor, limit = 50, sort = 'taken_at', order = 'desc', ownOnly, sourceFolder, subpath, recursive = true, folderPath } = request.query;
     const userId = request.user.id;
     const isAdmin = request.user.role === 'admin';
 
@@ -34,6 +38,37 @@ export default async function assetsRoutes(fastify) {
     // Gäster och icke-admins ser bara sina egna bilder om ownOnly är satt
     if (ownOnly || (!isAdmin && request.user.role !== 'user')) {
       conditions.push(`a.owner_id = $${params.push(userId)}`);
+    }
+
+    // Mappfiltrering — folderPath tar företräde över sourceFolder+subpath
+    // file_path i DB är relativ till photosPath; konvertera absolut folderPath till relativ
+    if (folderPath) {
+      const photosRoot = config.media.photosPath.replace(/\\/g, '/').replace(/\/$/, '');
+      const fpAbs      = folderPath.replace(/\\/g, '/').replace(/\/$/, '');
+      let   fp;
+      if (fpAbs.startsWith(photosRoot + '/') || fpAbs === photosRoot) {
+        fp = fpAbs.slice(photosRoot.length + 1) || '.';
+      } else {
+        fp = relative(photosRoot, fpAbs).replace(/\\/g, '/');
+      }
+      if (recursive) {
+        conditions.push(`a.file_path LIKE $${params.push(fp + '/%')}`);
+      } else {
+        conditions.push(`regexp_replace(a.file_path, '/[^/]+$', '') = $${params.push(fp)}`);
+      }
+    } else if (sourceFolder) {
+      // Bakåtkompatibelt stöd via sourceFolder + subpath
+      conditions.push(`a.source_folder = $${params.push(sourceFolder)}`);
+      if (subpath) {
+        const prefix = sourceFolder.replace(/\/$/, '') + '/' + subpath.replace(/\/$/, '') + '/';
+        if (recursive) {
+          conditions.push(`a.file_path LIKE $${params.push(prefix + '%')}`);
+        } else {
+          conditions.push(`regexp_replace(a.file_path, '/[^/]+$', '') = $${params.push(prefix.replace(/\/$/, ''))}`);
+        }
+      } else if (!recursive) {
+        conditions.push(`regexp_replace(a.file_path, '/[^/]+$', '') = $${params.push(sourceFolder.replace(/\/$/, ''))}`);
+      }
     }
 
     // Cursor-baserad paginering

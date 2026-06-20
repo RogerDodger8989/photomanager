@@ -10,6 +10,7 @@ import { renderPersons }              from '/src/views/persons.js';
 import { renderSharing }              from '/src/views/sharing.js';
 import { renderAdmin }                from '/src/views/admin.js';
 import { renderUpload }              from '/src/views/upload.js';
+import { renderFolders }            from '/src/views/folders.js';
 
 // Service Worker
 if ('serviceWorker' in navigator) {
@@ -86,7 +87,7 @@ function navigate(hash) {
   else if (route === 'faces')     renderPersons(container, rest[0]);
   else if (route === 'sharing')   renderSharing(container);
   else if (route === 'favorites') renderFavorites(container);
-  else if (route === 'folders')   renderFolders(container, rest.join('/'));
+  else if (route === 'folders')   renderFolders(container);
   else if (route === 'upload')     renderUpload(container);
   else if (route === 'admin')     renderAdmin(container, rest[0] ?? 'stats');
   else if (route === 'share')     renderSharePage(container, rest[0]);
@@ -512,33 +513,6 @@ document.getElementById('menu-toggle').addEventListener('click', () => {
 });
 
 // === FOLDERS-VY (inline, liten) ===
-
-async function renderFolders(container, path = '') {
-  container.innerHTML = `
-    <div class="p-4">
-      <h1 class="text-xl font-semibold text-white mb-1">Mappar</h1>
-      ${path ? `<div class="text-sm text-slate-400 mb-3">📁 ${path}</div>` : ''}
-      <div id="folder-list" class="space-y-1"></div>
-    </div>`;
-
-  try {
-    const { data } = await api.folders(path);
-    const list = document.getElementById('folder-list');
-    list.innerHTML = data.map((item) => `
-      <button class="folder-item flex items-center gap-2 w-full text-left px-3 py-2 rounded-lg hover:bg-slate-800 text-slate-300 text-sm"
-              data-seg="${item.segment}">
-        📁 <span>${item.segment}</span>
-        <span class="ml-auto text-slate-500 text-xs">${item.asset_count}</span>
-      </button>`).join('');
-
-    list.querySelectorAll('.folder-item').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const newPath = path ? `${path}/${btn.dataset.seg}` : btn.dataset.seg;
-        location.hash = `#/folders/${newPath}`;
-      });
-    });
-  } catch (e) { toast(e.message, 'error'); }
-}
 
 // === SSE (realtid) ===
 

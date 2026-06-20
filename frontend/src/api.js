@@ -140,7 +140,12 @@ export const api = {
   getPublicShare: (token)       => fetch(`/api/share/${token}`).then(r => r.json()),
 
   // Folders
-  folders: (path = '')          => request('GET', `/api/folders?path=${encodeURIComponent(path)}`),
+  folders:    (path = '')       => request('GET', `/api/folders?path=${encodeURIComponent(path)}`),
+  folderTree:    ()             => request('GET', '/api/folders/tree'),
+  moveFiles:     (body)        => request('POST', '/api/files/move', body),
+  renameFolder:  (body)        => request('PATCH', '/api/files/rename-folder', body),
+  moveFolderTo:  (body)        => request('POST', '/api/files/move-folder', body),
+  trashFolder:   (body)        => request('POST', '/api/files/trash-folder', body),
 
   // AI
   aiStatus:       ()            => request('GET', '/api/ai/status'),
