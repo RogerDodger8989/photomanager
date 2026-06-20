@@ -131,10 +131,11 @@ def analyze():
         embedding = face.embedding.tolist() if face.embedding is not None else []
 
         faces_out.append({
-            "region_x": round(rx, 6),
-            "region_y": round(ry, 6),
-            "region_w": round(rw, 6),
-            "region_h": round(rh, 6),
+            "region_x":  round(rx, 6),
+            "region_y":  round(ry, 6),
+            "region_w":  round(rw, 6),
+            "region_h":  round(rh, 6),
+            "det_score": round(float(face.det_score), 4) if face.det_score is not None else 1.0,
             "embedding": embedding,
         })
 

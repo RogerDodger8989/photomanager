@@ -21,6 +21,7 @@ import { query } from '../db/pool.js';
 import { analyzeFaces, waitForInsightFace, toVectorString } from './faceRecognition.js';
 
 const MATCH_THRESHOLD = 0.6;
+const DEFAULT_QUALITY_THRESHOLD = 0.5;
 
 let aiReady = false;
 
@@ -56,7 +57,7 @@ export async function initAiWorker() {
  * @param {string} assetId       — UUID för assets-raden
  * @param {string} absolutePath  — absolut sökväg till bildfilen på servern
  */
-export async function processAssetFaces(assetId, absolutePath) {
+export async function processAssetFaces(assetId, absolutePath, qualityThreshold = DEFAULT_QUALITY_THRESHOLD) {
   if (!aiReady) return;
 
   // --- Hämta befintliga faces för denna asset ---
@@ -79,9 +80,13 @@ export async function processAssetFaces(assetId, absolutePath) {
 
     if (detected.face_count === 0) return;
 
+    // Filtrera bort ansikten med för låg detektionskvalitet
+    const qualityFaces = detected.faces.filter(f => (f.det_score ?? 1) >= qualityThreshold);
+    if (qualityFaces.length === 0) return;
+
     // Spara detekterade ansikten i DB och samla ihop för embedding-steget
     facesToProcess = [];
-    for (const face of detected.faces) {
+    for (const face of qualityFaces) {
       // Spara embedding direkt — InsightFace ger oss bbox + embedding i ett anrop
       const vectorStr = face.embedding.length === 512
         ? toVectorString(face.embedding)

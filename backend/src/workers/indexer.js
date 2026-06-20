@@ -10,6 +10,24 @@ import { createJob } from '../services/jobService.js';
 import { broadcast } from '../services/sseService.js';
 import { processAssetFaces, isAiAvailable } from '../services/aiService.js';
 
+// Hämtar om ansiktsigenkänning är aktiverad för ägaren av given bevakad mapp
+async function getFaceSettings(sourceFolderPath) {
+  if (!sourceFolderPath) return { enabled: true, qualityThreshold: 0.5 };
+  const { rows } = await query(
+    `SELECT us.settings
+     FROM watched_folders wf
+     LEFT JOIN user_settings us ON us.user_id = wf.added_by
+     WHERE wf.path = $1
+     LIMIT 1`,
+    [sourceFolderPath]
+  );
+  const settings = rows[0]?.settings ?? {};
+  return {
+    enabled: settings.face_detection_enabled !== false,
+    qualityThreshold: settings.face_quality_threshold ?? 0.5,
+  };
+}
+
 // Kallas från fileWatcher när en ny fil detekteras
 export async function indexFile(absolutePath, sourceFolderPath = null) {
   const mimeType = getMimeType(absolutePath);
@@ -235,7 +253,9 @@ export async function indexFile(absolutePath, sourceFolderPath = null) {
 
   // AI-ansiktsanalys (körs asynkront i bakgrunden, blockerar inte indexeringen)
   if (isImage(mimeType) && isAiAvailable()) {
-    processAssetFaces(assetId, absolutePath).catch(console.error);
+    getFaceSettings(sourceFolderPath).then(({ enabled, qualityThreshold }) => {
+      if (enabled) processAssetFaces(assetId, absolutePath, qualityThreshold).catch(console.error);
+    }).catch(console.error);
   }
 
   // Notifiera alla inloggade klienter om ny fil

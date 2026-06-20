@@ -1,7 +1,7 @@
 import { api } from '../api.js';
 import { toast, formatDateTime, formatBytes, confirm } from '../utils.js';
 
-const TABS = ['stats', 'users', 'jobs', 'ai', 'audit', 'duplicates', 'folders', 'trash'];
+const TABS = ['stats', 'users', 'jobs', 'ai', 'audit', 'duplicates', 'folders', 'trash', 'settings'];
 
 export async function renderAdmin(container, tab = 'stats') {
   container.innerHTML = `
@@ -31,7 +31,7 @@ export async function renderAdmin(container, tab = 'stats') {
 }
 
 function tabLabel(t) {
-  return { stats:'Statistik', users:'Användare', jobs:'Jobb', ai:'AI-förslag', audit:'Logg', duplicates:'Duplikat', folders:'Mappar', trash:'🗑 Papperskorg' }[t] ?? t;
+  return { stats:'Statistik', users:'Användare', jobs:'Jobb', ai:'AI-förslag', audit:'Logg', duplicates:'Duplikat', folders:'Mappar', trash:'🗑 Papperskorg', settings:'Inställningar' }[t] ?? t;
 }
 
 async function loadTab(tab, content) {
@@ -45,6 +45,7 @@ async function loadTab(tab, content) {
     if (tab === 'duplicates') await renderDuplicates(content);
     if (tab === 'folders')    await renderWatchedFolders(content);
     if (tab === 'trash')      await renderTrash(content);
+    if (tab === 'settings')   await renderUserSettings(content);
   } catch (e) { content.innerHTML = `<div class="text-red-400 text-sm">${e.message}</div>`; }
 }
 
@@ -941,3 +942,64 @@ async function renderTrash(content) {
   render();
 }
 
+async function renderUserSettings(content) {
+  const { data: settings } = await api.getSettings();
+
+  content.innerHTML = `
+    <div class="max-w-lg space-y-4">
+      <h2 class="text-base font-semibold text-white">Mina inställningar</h2>
+
+      <!-- Ansiktsigenkänning toggle -->
+      <div class="bg-slate-800 border border-slate-700 rounded-xl p-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="text-sm font-medium text-white">Automatisk ansiktsigenkänning vid import</div>
+            <div class="text-xs text-slate-400 mt-0.5">AI analyserar ansikten i nya bilder som läggs till i bevakade mappar</div>
+          </div>
+          <button id="face-toggle" role="switch"
+            aria-checked="${settings.face_detection_enabled ? 'true' : 'false'}"
+            class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${settings.face_detection_enabled ? 'bg-blue-600' : 'bg-slate-600'}">
+            <span class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings.face_detection_enabled ? 'translate-x-6' : 'translate-x-1'}"></span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Ansiktskvalitetsfilter -->
+      <div class="bg-slate-800 border border-slate-700 rounded-xl p-4">
+        <div class="text-sm font-medium text-white mb-1">Lägsta ansiktskvalitet</div>
+        <div class="text-xs text-slate-400 mb-3">Ansikten med lägre kvalitetsscore ignoreras. Högt värde = bara tydliga ansikten. Lågt värde = fler träffar men mer brus.</div>
+        <div class="flex items-center gap-3">
+          <input id="quality-slider" type="range" min="0" max="1" step="0.05"
+            value="${settings.face_quality_threshold ?? 0.5}"
+            class="flex-1 accent-blue-500">
+          <span id="quality-label" class="text-sm text-white w-10 text-right">${Math.round((settings.face_quality_threshold ?? 0.5) * 100)}%</span>
+        </div>
+        <button id="quality-save" class="mt-3 px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors">Spara</button>
+      </div>
+    </div>`;
+
+  let enabled = settings.face_detection_enabled;
+  content.querySelector('#face-toggle').addEventListener('click', async () => {
+    enabled = !enabled;
+    try {
+      await api.patchSettings({ faceDetectionEnabled: enabled });
+      const btn = content.querySelector('#face-toggle');
+      btn.setAttribute('aria-checked', String(enabled));
+      btn.className = `relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${enabled ? 'bg-blue-600' : 'bg-slate-600'}`;
+      btn.querySelector('span').className = `inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${enabled ? 'translate-x-6' : 'translate-x-1'}`;
+      toast(enabled ? 'Ansiktsigenkänning aktiverad' : 'Ansiktsigenkänning inaktiverad', 'success');
+    } catch (e) { toast(e.message, 'error'); }
+  });
+
+  const slider = content.querySelector('#quality-slider');
+  const label  = content.querySelector('#quality-label');
+  slider.addEventListener('input', () => {
+    label.textContent = `${Math.round(slider.value * 100)}%`;
+  });
+  content.querySelector('#quality-save').addEventListener('click', async () => {
+    try {
+      await api.patchSettings({ faceQualityThreshold: parseFloat(slider.value) });
+      toast('Kvalitetsgräns sparad', 'success');
+    } catch (e) { toast(e.message, 'error'); }
+  });
+}

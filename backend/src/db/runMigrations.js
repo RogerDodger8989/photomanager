@@ -16,6 +16,8 @@ const MIGRATIONS = [
   '009_person_death_year.sql',
   '010_asset_trash_path.sql',
   '011_source_folder.sql',
+  '012_user_settings.sql',
+  '013_person_relations.sql',
 ];
 
 export async function runMigrations(client) {

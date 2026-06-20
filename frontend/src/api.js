@@ -112,8 +112,19 @@ export const api = {
   mapExtent:     ()             => request('GET', '/api/map/extent'),
   clusterPhotos: (params)       => request('GET', `/api/map/cluster-photos?${qs(params)}`),
 
+  // Settings
+  getSettings:   ()             => request('GET', '/api/settings'),
+  patchSettings: (body)         => request('PATCH', '/api/settings', body),
+  personsExport: (id)           => `/api/persons/${id}/export`,
+  personsDuplicates: ()         => request('GET', '/api/persons/duplicates'),
+  personRelations:   (id)       => request('GET', `/api/persons/${id}/relations`),
+  addRelation:       (id, body) => request('POST', `/api/persons/${id}/relations`, body),
+  deleteRelation:    (relId)    => request('DELETE', `/api/persons/relations/${relId}`),
+  personStats:   (id)           => request('GET', `/api/persons/${id}/stats`),
+  faceSearchByImage: (formData) => fetch('/api/faces/search-by-image', { method: 'POST', headers: { 'Authorization': `Bearer ${window.__pmToken}` }, body: formData }).then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(new Error(e.error)))),
+
   // Persons
-  persons:  ()                  => request('GET', '/api/persons'),
+  persons:  (p = {})            => request('GET', `/api/persons?${qs(p)}`),
   person:   (id, p = {})        => request('GET', `/api/persons/${id}?${qs(p)}`),
   patchPerson: (id, body)       => request('PATCH', `/api/persons/${id}`, body),
   mergePerson:  (id, tid)        => request('POST', `/api/persons/${id}/merge/${tid}`),
@@ -122,6 +133,8 @@ export const api = {
   patchFace:  (id, body)        => request('PATCH', `/api/faces/${id}`, body),
   createFace: (body)            => request('POST', '/api/faces', body),
   deleteFace: (id)              => request('DELETE', `/api/faces/${id}`),
+  unassignedFaces: ()           => request('GET', '/api/faces/unassigned'),
+  assignFaces: (body)           => request('POST', '/api/faces/assign', body),
 
   // Albums
   albums:   (p = {})            => request('GET', p.assetId ? `/api/albums?assetId=${p.assetId}` : '/api/albums'),

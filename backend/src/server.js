@@ -29,6 +29,7 @@ import uploadRoutes  from './routes/upload.js';
 import pushRoutes    from './routes/push.js';
 import foldersAdminRoutes from './routes/folders.js';
 import filesRoutes        from './routes/files.js';
+import settingsRoutes     from './routes/settings.js';
 
 // Workers
 import { startFileWatcher }     from './workers/fileWatcher.js';
@@ -72,6 +73,7 @@ await fastify.register(uploadRoutes);
 await fastify.register(pushRoutes);
 await fastify.register(foldersAdminRoutes);
 await fastify.register(filesRoutes);
+await fastify.register(settingsRoutes);
 
 // Health check
 fastify.get('/api/health', async () => ({
