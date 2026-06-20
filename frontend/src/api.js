@@ -124,7 +124,7 @@ export const api = {
   deleteFace: (id)              => request('DELETE', `/api/faces/${id}`),
 
   // Albums
-  albums:   ()                  => request('GET', '/api/albums'),
+  albums:   (p = {})            => request('GET', p.assetId ? `/api/albums?assetId=${p.assetId}` : '/api/albums'),
   album:    (id, p = {})        => request('GET', `/api/albums/${id}?${qs(p)}`),
   createAlbum:  (body)          => request('POST', '/api/albums', body),
   updateAlbum:  (id, body)      => request('PUT', `/api/albums/${id}`, body),

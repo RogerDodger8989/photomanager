@@ -229,7 +229,7 @@ function buildDrawerHTML(m) {
       icon: '📄',
       title: 'Allmän info',
       open: true,
-      custom: buildFileSection(m.fileInfo),
+      custom: buildFileSection(m.fileInfo, m.albums ?? []),
     },
     {
       id: 'temporal',
@@ -317,7 +317,7 @@ function buildRowList(rows) {
     </div>`).join('');
 }
 
-function buildFileSection(fi) {
+function buildFileSection(fi, albums = []) {
   const copyBtn = (text) => `
     <button data-copy="${text}" title="Kopiera"
       class="flex-shrink-0 text-slate-500 hover:text-white transition-colors mt-0.5">
@@ -346,6 +346,13 @@ function buildFileSection(fi) {
         <div class="flex items-start gap-1 min-w-0">
           <span class="text-xs text-slate-200 leading-5 break-all flex-1">${fi.folderPath}</span>
           ${copyBtn(fi.folderPath)}
+        </div>
+      </div>` : ''}
+      ${albums.length ? `
+      <div class="grid grid-cols-[6.5rem_1fr] gap-2 items-start">
+        <span class="text-xs text-slate-500 leading-5">Album</span>
+        <div class="flex flex-wrap gap-x-2 gap-y-0.5">
+          ${albums.map(al => `<button data-album-nav="${al.id}" class="text-xs text-blue-400 hover:text-blue-300 hover:underline transition-colors text-left leading-5">${al.name}</button>`).join('')}
         </div>
       </div>` : ''}
     </div>`;
@@ -537,6 +544,15 @@ function initAccordions(container) {
 }
 
 function initDrawerInteractions(container, assetId, m) {
+  // ── Album-navigering ─────────────────────────────────────────────────────────
+  container.querySelectorAll('[data-album-nav]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const albumId = btn.dataset.albumNav;
+      closeLightbox();
+      location.hash = `#/albums/${albumId}`;
+    });
+  });
+
   // ── Kopiera till urklipp ─────────────────────────────────────────────────────
   container.querySelectorAll('[data-copy]').forEach(btn => {
     btn.addEventListener('click', async (e) => {

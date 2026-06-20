@@ -265,7 +265,7 @@ function renderPersonGrid(persons, mergeMode) {
             ${sel ? 'bg-blue-500 border-blue-500 text-white' : 'bg-black/60 border-slate-400 text-transparent'}">✓</div>` : ''}
         <div class="w-24 h-24 mx-auto rounded-full overflow-hidden bg-slate-700 mb-2 border-2 transition-colors
           ${sel ? 'border-blue-500' : 'border-slate-600 group-hover:border-blue-500'}">
-          ${src ? `<img src="${src}" class="w-full h-full object-cover">` : '<div class="w-full h-full flex items-center justify-center text-3xl">👤</div>'}
+          ${src ? `<img src="${src}" class="w-full h-full object-cover" onerror="this.outerHTML='<div class=\\'w-full h-full flex items-center justify-center text-3xl\\'>👤</div>'">` : '<div class="w-full h-full flex items-center justify-center text-3xl">👤</div>'}
         </div>
         <div class="text-sm font-medium text-white truncate">${p.name}</div>
         <div class="text-xs text-slate-400">${p.photo_count} bilder${p.birth_year ? ` · f. ${p.birth_year}` : ''}</div>
@@ -332,7 +332,7 @@ async function renderPersonDetail(container, personId) {
     const ageLabel = personAgeLabel(person);
     document.getElementById('person-header').innerHTML = `
       <div class="w-20 h-20 rounded-full overflow-hidden bg-slate-700 flex-shrink-0 border-2 border-slate-600">
-        ${src ? `<img src="${src}" class="w-full h-full object-cover">` : '<div class="w-full h-full flex items-center justify-center text-4xl">👤</div>'}
+        ${src ? `<img src="${src}" class="w-full h-full object-cover" onerror="this.outerHTML='<div class=\\'w-full h-full flex items-center justify-center text-4xl\\'>👤</div>'">` : '<div class="w-full h-full flex items-center justify-center text-4xl">👤</div>'}
       </div>
       <div>
         <div class="text-xl font-semibold text-white">${person.name}</div>
@@ -391,7 +391,9 @@ function renderPhotosTab(container, assets, person, personId, onCoverUpdated) {
     cell.className = 'photo-cell relative group cursor-pointer';
     const age = ageAtPhoto(person.birth_year, asset.taken_at);
     cell.innerHTML = `
-      <img src="/thumbs/${asset.thumb_small_path}" loading="lazy" class="w-full aspect-square object-cover">
+      ${asset.thumb_small_path
+        ? `<img src="/thumbs/${asset.thumb_small_path}" loading="lazy" class="w-full aspect-square object-cover">`
+        : `<div class="w-full aspect-square bg-slate-700"></div>`}
       ${age !== null ? `<div class="absolute bottom-0 left-0 right-0 bg-black/60 text-xs text-white text-center py-0.5 opacity-0 group-hover:opacity-100 transition-opacity">${age} år</div>` : ''}`;
 
     attachFavHeart(cell, asset);

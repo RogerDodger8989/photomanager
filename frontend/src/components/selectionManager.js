@@ -10,7 +10,7 @@ import { openAddToAlbumModal } from '../views/albums.js';
  *   // sedan i buildPhotoCell: sel.attachToCell(cell, asset, idx)
  *   // och i vyn: sel.mountToolbar(toolbarEl)
  */
-export function createSelectionManager(getGrid, getAllAssets) {
+export function createSelectionManager(getGrid, getAllAssets, customActions = []) {
   const selected = new Set(); // asset-id → true
   let lastIdx = null;         // för shift-click range
   let toolbarEl = null;
@@ -45,7 +45,8 @@ export function createSelectionManager(getGrid, getAllAssets) {
             <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
           </svg>
           Radera markerade
-        </button>` : ''}`;
+        </button>
+        ${customActions.map((a, i) => `<button data-custom-action="${i}" class="${a.className || 'flex items-center gap-1.5 text-xs text-amber-400 hover:text-amber-300 px-2 py-1 rounded hover:bg-slate-700 transition-colors'}">${a.label}</button>`).join('')}` : ''}`;
 
     toolbarEl.querySelector('#sel-toggle-all')?.addEventListener('change', (e) => {
       if (e.target.checked) selectAll(); else clearAll();
@@ -55,6 +56,9 @@ export function createSelectionManager(getGrid, getAllAssets) {
       openAddToAlbumModal([...selected]);
     });
     toolbarEl.querySelector('#sel-delete')?.addEventListener('click', deleteSelected);
+    customActions.forEach((a, i) => {
+      toolbarEl.querySelector(`[data-custom-action="${i}"]`)?.addEventListener('click', () => a.onClick([...selected]));
+    });
   }
 
   // ── Select / deselect ────────────────────────────────────────────────────────

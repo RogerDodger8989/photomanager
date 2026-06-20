@@ -1,6 +1,7 @@
 import { api } from '../api.js';
 import { openLightbox } from '../components/lightbox.js';
 import { buildPhotoCell } from '../components/gridCell.js';
+import { createSelectionManager } from '../components/selectionManager.js';
 import { toast, confirm } from '../utils.js';
 
 export async function renderAlbums(container, albumId = null) {
@@ -181,6 +182,7 @@ async function renderAlbumDetail(container, albumId) {
         <div id="album-title-row" class="flex items-center gap-2 flex-wrap"></div>
         <div id="album-desc-row" class="mt-1"></div>
       </div>
+      <div id="album-sel-toolbar" class="flex items-center gap-2 flex-wrap mb-3 min-h-[2rem]"></div>
       <div id="album-grid" class="grid gap-0.5 flex-1" style="grid-template-columns: repeat(auto-fill, minmax(160px, 1fr))">
         <div class="col-span-full text-slate-400 text-sm p-2">Laddar…</div>
       </div>
@@ -249,6 +251,33 @@ async function loadAlbumDetail(container, albumId) {
       return;
     }
 
+    // Selection manager med "Ta bort från album"-action
+    const sel = createSelectionManager(
+      () => document.getElementById('album-grid'),
+      () => allAssets,
+      [{
+        label: '✕ Ta bort markerade från album',
+        className: 'flex items-center gap-1.5 text-xs text-amber-400 hover:text-amber-300 px-2 py-1 rounded hover:bg-slate-700 transition-colors',
+        onClick: async (ids) => {
+          const count = ids.length;
+          await Promise.all(ids.map((id) => api.removeFromAlbum(albumId, id).catch(() => {})));
+          ids.forEach((id) => {
+            document.getElementById('album-grid')?.querySelector(`[data-id="${id}"]`)?.remove();
+          });
+          allAssets = allAssets.filter((a) => !ids.includes(a.id));
+          sel.clearAll();
+          const g = document.getElementById('album-grid');
+          if (g && !g.querySelector('[data-id]')) {
+            g.innerHTML = '<div class="col-span-full text-slate-400 text-sm p-2">Albumet är tomt.</div>';
+          }
+          toast(`${count} bild${count > 1 ? 'er' : ''} borttagen${count > 1 ? 'a' : ''} från albumet`, 'success');
+        },
+      }],
+    );
+
+    const toolbarEl = document.getElementById('album-sel-toolbar');
+    if (toolbarEl) sel.mountToolbar(toolbarEl);
+
     grid.innerHTML = '';
     allAssets.forEach((asset, i) => {
       const cell = buildPhotoCell(
@@ -256,6 +285,8 @@ async function loadAlbumDetail(container, albumId) {
         () => openLightbox(allAssets, i),
         null,
       );
+
+      sel.attachToCell(cell, asset, i);
 
       // Hover-overlay: ta bort + sätt som omslag
       const overlay = document.createElement('div');
@@ -304,7 +335,10 @@ export async function openAddToAlbumModal(assetIds) {
   overlay.className = 'fixed inset-0 z-[9500] flex items-center justify-center bg-black/70';
 
   let albums = [];
-  try { ({ data: albums } = await api.albums()); } catch {}
+  try {
+    const params = assetIds.length === 1 ? { assetId: assetIds[0] } : {};
+    ({ data: albums } = await api.albums(params));
+  } catch {}
 
   overlay.innerHTML = `
     <div class="bg-slate-800 rounded-2xl p-6 w-full max-w-md shadow-2xl border border-slate-700">
@@ -340,10 +374,11 @@ export async function openAddToAlbumModal(assetIds) {
             ? `<img src="/thumbs/${al.cover_thumb}" class="w-full h-full object-cover">`
             : `<div class="w-full h-full flex items-center justify-center">📁</div>`}
         </div>
-        <div>
+        <div class="flex-1 min-w-0">
           <div class="text-sm text-white font-medium">${escHtml(al.name)}</div>
           <div class="text-xs text-slate-400">${al.asset_count} bilder</div>
         </div>
+        ${al.contains_asset ? `<span class="text-xs text-green-400 flex-shrink-0 flex items-center gap-1">✓ tillagd</span>` : ''}
       </button>`).join('');
 
     list.querySelectorAll('.album-pick-item').forEach((btn) => {

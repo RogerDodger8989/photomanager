@@ -3,10 +3,19 @@ import { query } from '../db/pool.js';
 
 export default async function albumsRoutes(fastify) {
 
-  // GET /api/albums
+  // GET /api/albums — valfri ?assetId=xxx lägger till contains_asset per album
   fastify.get('/api/albums', {
     onRequest: [fastify.authenticate],
+    schema: {
+      querystring: {
+        type: 'object',
+        properties: { assetId: { type: 'string' } },
+      },
+    },
   }, async (request, reply) => {
+    const { assetId } = request.query;
+    const params = [request.user.id];
+    if (assetId) params.push(assetId);
     const { rows } = await query(
       `SELECT al.id, al.name, al.description, al.created_at, al.updated_at,
               al.cover_asset_id,
@@ -19,13 +28,14 @@ export default async function albumsRoutes(fastify) {
                  ORDER BY aa2.sort_order, a2.taken_at LIMIT 1)
               ) AS cover_thumb,
               COUNT(aa.asset_id)::int AS asset_count
+              ${assetId ? `, EXISTS(SELECT 1 FROM album_assets cx WHERE cx.album_id = al.id AND cx.asset_id = $2) AS contains_asset` : ''}
        FROM albums al
        LEFT JOIN album_assets aa ON aa.album_id = al.id
        LEFT JOIN assets a ON a.id = al.cover_asset_id
        WHERE al.owner_id = $1
        GROUP BY al.id, a.thumb_small_path
        ORDER BY al.updated_at DESC`,
-      [request.user.id]
+      params
     );
     return reply.send({ data: rows });
   });
@@ -74,13 +84,14 @@ export default async function albumsRoutes(fastify) {
     const { rows: assets } = await query(
       `SELECT a.id, a.file_name, a.mime_type, a.taken_at,
               a.thumb_small_path, a.thumb_large_path, a.duration,
-              aa.sort_order
+              aa.sort_order,
+              EXISTS(SELECT 1 FROM favorites fv WHERE fv.asset_id = a.id AND fv.user_id = $2) AS is_favorite
        FROM album_assets aa
        JOIN assets a ON a.id = aa.asset_id AND a.status = 'active'
        WHERE aa.album_id = $1
        ORDER BY aa.sort_order, a.taken_at
-       LIMIT $2 OFFSET $3`,
-      [id, limit, offset]
+       LIMIT $3 OFFSET $4`,
+      [id, request.user.id, limit, offset]
     );
 
     const { rows: countRows } = await query(

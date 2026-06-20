@@ -217,7 +217,10 @@ export default async function assetsRoutes(fastify) {
          FROM shares s LEFT JOIN users su ON su.id = s.shared_with
          WHERE s.asset_id = a.id) AS shared_with,
         (SELECT COUNT(*) FROM assets
-         WHERE file_hash = a.file_hash AND status != 'deleted' AND id != a.id) AS duplicates_count
+         WHERE file_hash = a.file_hash AND status != 'deleted' AND id != a.id) AS duplicates_count,
+        (SELECT COALESCE(json_agg(json_build_object('id', al.id, 'name', al.name) ORDER BY al.name), '[]'::json)
+         FROM album_assets aa JOIN albums al ON al.id = aa.album_id
+         WHERE aa.asset_id = a.id) AS albums
       FROM assets a
       LEFT JOIN users u ON u.id = a.owner_id
       WHERE a.id = $1 AND a.status != 'deleted'
@@ -288,6 +291,7 @@ export default async function assetsRoutes(fastify) {
         focalLength:  focalMm   ? `${focalMm} mm${fl35mm ? ` (${Math.round(fl35mm)} mm)` : ''}` : null,
         flash:        flashVal != null ? ((flashVal & 1) ? 'Utlöstes' : 'Utlöstes inte') : null,
       },
+      albums: a.albums ?? [],
       system: {
         checksum:        a.file_hash,
         duplicatesCount: parseInt(a.duplicates_count ?? 0),

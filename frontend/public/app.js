@@ -159,12 +159,12 @@ async function showPersonDropdown(q) {
   if (!matches.length) { dropdown.classList.add('hidden'); return; }
   dropdown.innerHTML = matches.map((p) => `
     <button data-pid="${p.id}" class="w-full flex items-center gap-3 px-3 py-2 hover:bg-slate-700 text-left transition-colors">
-      <div class="w-8 h-8 rounded-full overflow-hidden bg-slate-600 flex-shrink-0">
-        ${p.cover_face_id
-          ? `<img src="/api/persons/${p.id}/face-thumb" class="w-full h-full object-cover">`
+      <div class="w-8 h-8 rounded-full overflow-hidden bg-slate-600 flex-shrink-0 flex items-center justify-center">
+        ${(p.cover_face_id || p.fallback_face_id)
+          ? `<img src="/api/faces/${p.cover_face_id || p.fallback_face_id}/thumb" class="w-full h-full object-cover" onerror="this.replaceWith(Object.assign(document.createElement('span'),{textContent:'👤',className:'text-sm'}))">`
           : p.cover_thumb
-            ? `<img src="/thumbs/${p.cover_thumb}" class="w-full h-full object-cover">`
-            : '<div class="w-full h-full flex items-center justify-center text-sm">👤</div>'}
+            ? `<img src="/thumbs/${p.cover_thumb}" class="w-full h-full object-cover" onerror="this.replaceWith(Object.assign(document.createElement('span'),{textContent:'👤',className:'text-sm'}))">`
+            : '<span class="text-sm">👤</span>'}
       </div>
       <span class="text-sm text-white">${p.name}</span>
       <span class="text-xs text-slate-400 ml-auto">${p.photo_count} bilder</span>
@@ -347,12 +347,12 @@ function showAdvPersonDropdown(q) {
   personDropdown.innerHTML = matches.map((p) => `
     <button data-pid="${p.id}" data-pname="${p.name}"
       class="adv-person-opt w-full flex items-center gap-2 px-3 py-1.5 hover:bg-slate-700 text-sm text-slate-200">
-      <div class="w-6 h-6 rounded-full overflow-hidden bg-slate-600 flex-shrink-0">
-        ${p.cover_face_id
-          ? `<img src="/api/persons/${p.id}/face-thumb" class="w-full h-full object-cover">`
+      <div class="w-6 h-6 rounded-full overflow-hidden bg-slate-600 flex-shrink-0 flex items-center justify-center">
+        ${(p.cover_face_id || p.fallback_face_id)
+          ? `<img src="/api/faces/${p.cover_face_id || p.fallback_face_id}/thumb" class="w-full h-full object-cover" onerror="this.replaceWith(Object.assign(document.createElement('span'),{textContent:'👤',className:'text-xs'}))">`
           : p.cover_thumb
-            ? `<img src="/thumbs/${p.cover_thumb}" class="w-full h-full object-cover">`
-            : '👤'}
+            ? `<img src="/thumbs/${p.cover_thumb}" class="w-full h-full object-cover" onerror="this.replaceWith(Object.assign(document.createElement('span'),{textContent:'👤',className:'text-xs'}))">`
+            : '<span class="text-xs">👤</span>'}
       </div>
       <span>${p.name}</span>
     </button>`).join('');
