@@ -24,9 +24,9 @@ export default async function mapRoutes(fastify) {
     const userId  = request.user.id;
     const isAdmin = request.user.role === 'admin';
 
-    if (zoom >= 14) {
-      const assets = await getAssetsInBounds(bounds, userId, isAdmin);
-      return reply.send({ data: { type: 'assets', items: assets } });
+    if (zoom >= 16) {
+      const { rows, total, truncated } = await getAssetsInBounds(bounds, userId, isAdmin);
+      return reply.send({ data: { type: 'assets', items: rows, total, truncated } });
     }
 
     const clusters = await getMapClusters(bounds, zoom, userId, isAdmin);

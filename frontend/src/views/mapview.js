@@ -3,6 +3,7 @@ import { openLightbox } from '../components/lightbox.js';
 
 let leafletMap  = null;
 let markerGroup = null;
+let _debTimer   = null;
 
 export function renderMap(container) {
   container.innerHTML = `<div id="leaflet-map" class="w-full h-full" style="position:relative;"></div>`;
@@ -30,7 +31,10 @@ export function renderMap(container) {
     });
     leafletMap.addLayer(markerGroup);
 
-    leafletMap.on('moveend', loadClusters);
+    leafletMap.on('moveend', () => {
+      clearTimeout(_debTimer);
+      _debTimer = setTimeout(loadClusters, 250);
+    });
 
     // Stäng panel vid klick på kartan
     leafletMap.on('click', closeClusterPanel);
@@ -73,6 +77,8 @@ async function loadClusters() {
 
     markerGroup.clearLayers();
 
+    updateTruncationBadge(false, 0, 0);
+
     if (data.type === 'clusters') {
       data.items.forEach((cluster) => {
         const size  = Math.max(32, Math.min(20 + Math.log2(cluster.count) * 5, 60));
@@ -113,6 +119,7 @@ async function loadClusters() {
         markerGroup.addLayer(marker);
       });
     } else {
+      updateTruncationBadge(data.truncated, data.items.length, data.total);
       // Individuella assets vid hög zoom
       data.items.forEach((asset) => {
         const icon = L.divIcon({
@@ -167,11 +174,11 @@ async function showClusterPanel(cluster, zoom) {
     </div>
     <div id="cp-strip" style="display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;"></div>`;
   mapEl.appendChild(panel);
+  L.DomEvent.disableClickPropagation(panel);
 
   panel.querySelector('#cp-close').addEventListener('click', closeClusterPanel);
   panel.querySelector('#cp-zoom').addEventListener('click', () => {
-    closeClusterPanel();
-    leafletMap.flyTo([cluster.lat, cluster.lon], Math.min(zoom + 3, 16), { animate: true });
+    leafletMap.flyTo([cluster.lat, cluster.lon], Math.min(zoom + 6, 18), { animate: true });
   });
 
   try {
@@ -205,6 +212,24 @@ async function showClusterPanel(cluster, zoom) {
     });
   } catch {
     panel.querySelector('span').textContent = 'Kunde inte ladda bilder.';
+  }
+}
+
+function updateTruncationBadge(truncated, shown, total) {
+  const mapEl = document.getElementById('leaflet-map');
+  if (!mapEl) return;
+  let badge = document.getElementById('map-truncation-badge');
+  if (truncated) {
+    if (!badge) {
+      badge = document.createElement('div');
+      badge.id = 'map-truncation-badge';
+      badge.style.cssText = 'position:absolute;bottom:28px;left:50%;transform:translateX(-50%);z-index:1000;background:rgba(0,0,0,0.72);color:#fff;font-size:12px;padding:4px 14px;border-radius:999px;pointer-events:none;white-space:nowrap;';
+      mapEl.appendChild(badge);
+    }
+    badge.textContent = `Visar ${shown} av ${total} bilder i vyn — zooma in för att se fler`;
+    badge.style.display = '';
+  } else if (badge) {
+    badge.style.display = 'none';
   }
 }
 

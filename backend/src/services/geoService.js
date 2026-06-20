@@ -50,13 +50,14 @@ export async function getMapClusters(bounds, zoom, userId, isAdmin) {
 }
 
 // Hämta enskilda assets inom en bounding box (vid hög zoom)
-export async function getAssetsInBounds(bounds, userId, isAdmin, limit = 200) {
+export async function getAssetsInBounds(bounds, userId, isAdmin, limit = 300) {
   const ownerFilter = isAdmin ? 'TRUE' : `owner_id = '${userId}'`;
   const { rows } = await query(
     `SELECT id, file_name, thumb_small_path,
             ST_Y(location::geometry) AS lat,
             ST_X(location::geometry) AS lon,
-            taken_at
+            taken_at,
+            COUNT(*) OVER() AS total_count
      FROM assets
      WHERE status = 'active'
        AND location IS NOT NULL
@@ -66,7 +67,8 @@ export async function getAssetsInBounds(bounds, userId, isAdmin, limit = 200) {
      LIMIT $5`,
     [bounds.minLon, bounds.minLat, bounds.maxLon, bounds.maxLat, limit]
   );
-  return rows;
+  const total = Number(rows[0]?.total_count ?? 0);
+  return { rows, total, truncated: total > rows.length };
 }
 
 // Bounding box för alla foton med GPS — används för auto-centrering
