@@ -68,6 +68,79 @@ export function attachFavHeart(cell, asset, onFavChange) {
   cell.appendChild(btn);
 }
 
+/**
+ * Visar en kontextmeny för ett foto vid högerklick.
+ * @param {MouseEvent} e
+ * @param {object} asset
+ * @param {object} opts  — { onDelete, openLightboxFn, allAssets, index }
+ */
+export function showAssetContextMenu(e, asset, { onDelete, openLightboxFn, allAssets, index, onAddToAlbum } = {}) {
+  e.preventDefault();
+  document.querySelectorAll('.asset-ctx-menu').forEach((m) => m.remove());
+
+  const isFav = asset.is_favorite;
+  const menu = document.createElement('div');
+  menu.className = 'asset-ctx-menu fixed z-[500] bg-slate-800 border border-slate-700 rounded-xl shadow-2xl py-1 min-w-[180px] text-sm';
+  menu.style.left = `${Math.min(e.clientX, window.innerWidth - 200)}px`;
+  menu.style.top  = `${Math.min(e.clientY, window.innerHeight - 200)}px`;
+
+  const item = (icon, label, cls = '') => {
+    const btn = document.createElement('button');
+    btn.className = `w-full text-left px-4 py-2 flex items-center gap-2.5 hover:bg-slate-700 transition-colors ${cls || 'text-slate-200'}`;
+    btn.innerHTML = `<span class="text-base leading-none">${icon}</span><span>${label}</span>`;
+    return btn;
+  };
+
+  const openBtn = item('🔍', 'Öppna');
+  openBtn.addEventListener('click', () => {
+    menu.remove();
+    if (openLightboxFn) openLightboxFn(allAssets ?? [asset], index ?? 0);
+  });
+
+  const favBtn = item(isFav ? '💔' : '❤️', isFav ? 'Ta bort favorit' : 'Lägg till favorit');
+  favBtn.addEventListener('click', async () => {
+    menu.remove();
+    const heartBtn = document.querySelector(`.photo-cell[data-id="${asset.id}"] .fav-heart`);
+    if (heartBtn) {
+      heartBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    } else {
+      if (isFav) await api.removeFav(asset.id).catch(() => {});
+      else await api.addFav(asset.id).catch(() => {});
+      asset.is_favorite = !isFav;
+    }
+  });
+
+  const albumBtn = item('📁', 'Lägg till i album');
+  albumBtn.addEventListener('click', () => {
+    menu.remove();
+    onAddToAlbum?.([asset.id]);
+  });
+
+  const sep = document.createElement('div');
+  sep.className = 'border-t border-slate-700 my-1';
+
+  const deleteBtn = item('🗑️', 'Radera', 'text-red-400 hover:text-red-300');
+  deleteBtn.addEventListener('click', async () => {
+    menu.remove();
+    const cell = document.querySelector(`.photo-cell[data-id="${asset.id}"]`);
+    cell?.remove();
+    await api.trash(asset.id).catch(() => {});
+    onDelete?.(asset.id);
+    showUndoToast('Bild raderad', async () => {
+      await api.restore(asset.id).catch(() => {});
+      onDelete?.(asset.id, true); // true = återställd
+    });
+  });
+
+  menu.append(openBtn, favBtn, albumBtn, sep, deleteBtn);
+  document.body.appendChild(menu);
+
+  const close = (ev) => {
+    if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('mousedown', close); }
+  };
+  setTimeout(() => document.addEventListener('mousedown', close), 0);
+}
+
 async function toggleFav(asset, btn, onFavChange) {
   const wasFav = btn.classList.contains('is-fav');
 

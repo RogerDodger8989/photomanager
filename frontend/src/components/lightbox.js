@@ -67,6 +67,7 @@ export function closeLightbox() {
   lbVideo.src = '';
   lbMetaPanel.classList.add('hidden');
   resetZoom();
+  window.dispatchEvent(new CustomEvent('lightbox:closed'));
 }
 
 function resetZoom() {

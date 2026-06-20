@@ -239,167 +239,558 @@ function showCreatePersonModal(selectedFaceIds, allPersons, onDone) {
 
 // ── Unknown Faces Tab ─────────────────────────────────────────────────────────
 
-async function renderUnknownFacesTab(container, allPersons) {
-  container.innerHTML = `
-    <div class="p-4">
-      <div id="unknown-content">
-        <div class="text-slate-400 text-sm">Laddar okända ansikten…</div>
+// Modulnivå-state för åternavigering efter lightbox
+let _unknownFacesState = { lastClusterId: null, scrollY: 0 };
+// Temporärt dolda kluster (Hoppa över) — nollställs vid ny sidinladdning
+const _skippedClusterKeys = new Set();
+// Aktuell sortering
+let _ufSort = 'size'; // 'size' | 'date'
+
+function injectUnknownFacesStyles() {
+  if (document.getElementById('uf-styles')) return;
+  const style = document.createElement('style');
+  style.id = 'uf-styles';
+  style.textContent = `
+    .uf-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:1rem;padding-bottom:2rem}
+    .uf-card{background:#1e293b;border:1px solid #334155;border-radius:.75rem;display:flex;flex-direction:column;gap:.4rem;padding:.5rem;transition:box-shadow .2s,opacity .3s;position:relative}
+    .uf-card:focus-within{box-shadow:0 0 0 2px #3b82f6}
+    .uf-card--drag-over{box-shadow:0 0 0 3px #a78bfa!important;background:#312e81}
+    .uf-card--highlight{animation:uf-highlight 1.8s ease-out}
+    @keyframes uf-highlight{0%{box-shadow:0 0 0 3px #f59e0b}100%{box-shadow:none}}
+    .uf-card--fade-out{opacity:0;pointer-events:none}
+    .uf-face-primary{position:relative;width:100%;aspect-ratio:1;border-radius:.5rem;overflow:hidden;background:#0f172a}
+    .uf-thumb{width:100%;height:100%;object-fit:cover;display:block}
+    .uf-expand-badge{position:absolute;bottom:4px;right:4px;background:rgba(0,0,0,.65);color:#fff;font-size:.65rem;font-weight:600;padding:1px 5px;border-radius:9999px;cursor:pointer;border:1px solid rgba(255,255,255,.2);line-height:1.5;transition:background .15s}
+    .uf-expand-badge:hover{background:#3b82f6}
+    .uf-card-actions{position:absolute;top:6px;left:6px;display:flex;gap:4px;opacity:0;transition:opacity .15s;z-index:10}
+    .uf-card:hover .uf-card-actions{opacity:1}
+    .uf-action-btn{width:22px;height:22px;border-radius:50%;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:.65rem;font-weight:700;line-height:1;transition:transform .1s}
+    .uf-action-btn:hover{transform:scale(1.15)}
+    .uf-dismiss-btn{background:rgba(239,68,68,.8);color:#fff}
+    .uf-dismiss-btn:hover{background:#ef4444}
+    .uf-skip-btn{background:rgba(100,116,139,.8);color:#fff}
+    .uf-skip-btn:hover{background:#64748b}
+    .uf-extra-faces{display:flex;flex-wrap:wrap;gap:3px;max-height:0;overflow:hidden;transition:max-height .3s ease}
+    .uf-extra-faces.uf-expanded{max-height:600px}
+    .uf-thumb-sm{width:46px;height:46px;object-fit:cover;border-radius:5px;cursor:grab}
+    .uf-filename{font-size:.68rem;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left;width:100%;cursor:pointer;background:none;border:none;padding:0 2px;transition:color .15s}
+    .uf-filename:hover{color:#60a5fa;text-decoration:underline}
+    .uf-assign-wrap{position:relative}
+    .uf-assign-input{width:100%;background:#0f172a;border:1px solid #334155;border-radius:.45rem;padding:4px 8px;font-size:.72rem;color:#f1f5f9;outline:none;box-sizing:border-box;transition:border-color .15s}
+    .uf-assign-input:focus{border-color:#3b82f6}
+    .uf-autocomplete{background:#1e293b;border:1px solid #475569;border-radius:.5rem;max-height:200px;overflow-y:auto;z-index:9999;list-style:none;margin:0;padding:2px 0;box-shadow:0 8px 24px rgba(0,0,0,.7)}
+    .uf-ac-item{padding:5px 8px;font-size:.72rem;color:#e2e8f0;cursor:pointer;display:flex;align-items:center;gap:6px}
+    .uf-ac-item:hover,.uf-ac-item.uf-ac-active{background:#334155}
+    .uf-ac-avatar{width:24px;height:24px;border-radius:50%;object-fit:cover;flex-shrink:0;background:#334155}
+    .uf-ac-create{padding:5px 8px;font-size:.72rem;color:#4ade80;cursor:pointer;border-top:1px solid #334155;font-weight:500}
+    .uf-ac-create:hover,.uf-ac-create.uf-ac-active{background:#334155}
+    .uf-toolbar{display:flex;align-items:center;gap:.5rem;margin-bottom:.75rem;flex-wrap:wrap}
+    .uf-sort-btn{padding:3px 10px;font-size:.7rem;border-radius:9999px;border:1px solid #475569;background:transparent;color:#94a3b8;cursor:pointer;transition:all .15s}
+    .uf-sort-btn.uf-sort-active{background:#3b82f6;border-color:#3b82f6;color:#fff}
+    .uf-show-skipped{font-size:.7rem;color:#64748b;cursor:pointer;margin-left:auto;text-decoration:underline}
+    .uf-show-skipped:hover{color:#94a3b8}
+  `;
+  document.head.appendChild(style);
+}
+
+function buildAssignWidget(faceIds, allPersons, onAssigned) {
+  const wrap = document.createElement('div');
+  wrap.className = 'uf-assign-wrap';
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'uf-assign-input';
+  input.placeholder = 'Vem är det här?';
+  input.autocomplete = 'off';
+  input.spellcheck = false;
+
+  // Dropdown renderas i body för att undvika clipping från föräldra-element
+  const dropdown = document.createElement('ul');
+  dropdown.className = 'uf-autocomplete';
+  dropdown.hidden = true;
+  document.body.appendChild(dropdown);
+
+  wrap.appendChild(input);
+
+  let debounceTimer = null;
+  let activeIndex = -1;
+
+  const positionDropdown = () => {
+    const rect = input.getBoundingClientRect();
+    dropdown.style.position = 'fixed';
+    dropdown.style.left = `${rect.left}px`;
+    dropdown.style.top = `${rect.bottom + 2}px`;
+    dropdown.style.width = `${rect.width}px`;
+  };
+
+  const closeDropdown = () => { dropdown.hidden = true; activeIndex = -1; };
+
+  const openDropdown = (matches) => {
+    dropdown.innerHTML = '';
+    activeIndex = -1;
+
+    matches.slice(0, 8).forEach(person => {
+      const li = document.createElement('li');
+      li.className = 'uf-ac-item';
+      li.dataset.personId = person.id;
+
+      const faceId = person.cover_face_id ?? person.fallback_face_id;
+      if (faceId) {
+        const av = document.createElement('img');
+        av.className = 'uf-ac-avatar';
+        av.src = `/api/faces/${faceId}/thumb`;
+        av.alt = '';
+        li.appendChild(av);
+      }
+      li.appendChild(document.createTextNode(person.name));
+
+      li.addEventListener('mousedown', async (e) => {
+        e.preventDefault();
+        closeDropdown();
+        input.value = '';
+        try {
+          await api.assignFaces({ faceIds, personId: String(person.id) });
+          toast(`Tilldelad ${person.name}`, 'success');
+          onAssigned();
+        } catch (err) { toast(err.message, 'error'); }
+      });
+      dropdown.appendChild(li);
+    });
+
+    const createLi = document.createElement('li');
+    createLi.className = 'uf-ac-create';
+    createLi.textContent = '+ Skapa ny person';
+    createLi.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      const typedName = input.value.trim();
+      closeDropdown();
+      input.value = '';
+      showSimpleCreatePersonModal(faceIds, typedName, onAssigned, allPersons);
+    });
+    dropdown.appendChild(createLi);
+
+    positionDropdown();
+    dropdown.hidden = false;
+  };
+
+  input.addEventListener('input', () => {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      const q = input.value.trim().toLowerCase();
+      if (!q) { closeDropdown(); return; }
+      const matches = allPersons.filter(p => p.name.toLowerCase().includes(q));
+      openDropdown(matches);
+    }, 120);
+  });
+
+  input.addEventListener('keydown', (e) => {
+    if (dropdown.hidden) {
+      if (e.key === 'Enter') {
+        const q = input.value.trim();
+        if (q) showSimpleCreatePersonModal(faceIds, q, onAssigned, allPersons);
+      }
+      return;
+    }
+    const items = dropdown.querySelectorAll('.uf-ac-item, .uf-ac-create');
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      activeIndex = Math.min(activeIndex + 1, items.length - 1);
+      items.forEach((el, i) => el.classList.toggle('uf-ac-active', i === activeIndex));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      activeIndex = Math.max(activeIndex - 1, 0);
+      items.forEach((el, i) => el.classList.toggle('uf-ac-active', i === activeIndex));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (activeIndex >= 0 && items[activeIndex]) {
+        items[activeIndex].dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      }
+    } else if (e.key === 'Escape') {
+      closeDropdown();
+    }
+  });
+
+  input.addEventListener('focus', positionDropdown);
+  input.addEventListener('blur', () => { setTimeout(closeDropdown, 160); });
+
+  // Städa upp dropdown från body när kortet tas bort
+  const observer = new MutationObserver(() => {
+    if (!document.body.contains(wrap)) { dropdown.remove(); observer.disconnect(); }
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+
+  return wrap;
+}
+
+function showSimpleCreatePersonModal(faceIds, prefillName, onDone, allPersons) {
+  const overlay = document.createElement('div');
+  overlay.className = 'fixed inset-0 z-[400] flex items-center justify-center bg-black/60 backdrop-blur-sm';
+
+  const safeName = (prefillName ?? '').replace(/"/g, '&quot;');
+  overlay.innerHTML = `
+    <div class="bg-slate-800 border border-slate-700 rounded-2xl shadow-2xl w-80 p-6">
+      <h3 class="text-sm font-semibold text-white mb-4">Skapa ny person</h3>
+      <label class="text-xs text-slate-400 mb-1 block">Namn</label>
+      <input id="scp-name" type="text" placeholder="Namn" value="${safeName}"
+        class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 mb-3">
+      <div class="flex gap-2 mb-5">
+        <div class="flex-1">
+          <label class="text-xs text-slate-400 mb-1 block">Födelseår</label>
+          <input id="scp-birth" type="number" min="1900" max="2099" placeholder="t.ex. 1985"
+            class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500">
+        </div>
+        <div class="flex-1">
+          <label class="text-xs text-slate-400 mb-1 block">Dödsår</label>
+          <input id="scp-death" type="number" min="1900" max="2099" placeholder="t.ex. 2020"
+            class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500">
+        </div>
       </div>
-      <!-- Bulk-balk -->
-      <div id="face-bulk-bar" class="hidden fixed bottom-0 left-0 right-0 z-50 bg-slate-900 border-t border-slate-700 p-3 flex items-center gap-3 flex-wrap">
-        <span id="face-bulk-count" class="text-sm text-slate-300 font-medium">0 valda</span>
-        <button id="face-assign-btn" class="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors">Tilldela befintlig person</button>
-        <button id="face-create-btn" class="px-4 py-2 text-sm bg-green-600 hover:bg-green-500 text-white rounded-lg transition-colors">Skapa ny person</button>
-        <button id="face-clear-btn" class="px-3 py-2 text-sm text-slate-400 hover:text-white transition-colors">Avbryt</button>
+      <div class="flex gap-2 justify-end">
+        <button id="scp-cancel" class="px-4 py-2 text-sm text-slate-400 hover:text-white rounded-lg hover:bg-slate-700 transition-colors">Avbryt</button>
+        <button id="scp-ok" class="px-4 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors">OK</button>
       </div>
     </div>`;
 
-  const selectedFaceIds = new Set();
-  let lastClickedFaceIndex = -1;
-  let allFaceElements = [];
+  document.body.appendChild(overlay);
+  const nameInput = overlay.querySelector('#scp-name');
+  const birthInput = overlay.querySelector('#scp-birth');
+  const deathInput = overlay.querySelector('#scp-death');
+  nameInput.focus();
+  nameInput.select();
 
-  const updateBulkBar = () => {
-    const bar = document.getElementById('face-bulk-bar');
-    const count = document.getElementById('face-bulk-count');
-    if (!bar) return;
-    bar.classList.toggle('hidden', selectedFaceIds.size === 0);
-    if (count) count.textContent = `${selectedFaceIds.size} vald${selectedFaceIds.size === 1 ? '' : 'a'}`;
+  const doCancel = () => overlay.remove();
+  const doOk = async () => {
+    const name = nameInput.value.trim();
+    if (!name) { nameInput.focus(); return; }
+    const birthYear = birthInput.value ? parseInt(birthInput.value, 10) : null;
+    const deathYear = deathInput.value ? parseInt(deathInput.value, 10) : null;
+    overlay.remove();
+    try {
+      const { data } = await api.assignFaces({ faceIds, personName: name, birthYear, deathYear });
+      if (data?.personId && !allPersons.find(p => p.id === data.personId)) {
+        allPersons.push({ id: data.personId, name, cover_face_id: null, fallback_face_id: null });
+      }
+      toast(`Person "${name}" skapad`, 'success');
+      onDone();
+    } catch (e) { toast(e.message, 'error'); }
   };
 
-  const clearSelection = () => {
-    selectedFaceIds.clear();
-    allFaceElements.forEach(el => {
-      el.classList.remove('ring-2', 'ring-blue-500');
-      const check = el.querySelector('.face-check');
-      if (check) check.classList.add('hidden');
+  overlay.querySelector('#scp-ok').addEventListener('click', doOk);
+  overlay.querySelector('#scp-cancel').addEventListener('click', doCancel);
+  overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) doCancel(); });
+  nameInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') doOk();
+    if (e.key === 'Escape') doCancel();
+  });
+}
+
+function buildClusterCard(cluster, allPersons, onAssigned, onSkip, grid) {
+  const primaryFace = cluster.faces[0];
+  const extraFaces  = cluster.faces.slice(1);
+  const faceIds     = cluster.faces.map(f => f.id);
+  const clusterKey  = cluster.clusterId ?? `face-${primaryFace.id}`;
+
+  const card = document.createElement('div');
+  card.className = 'uf-card';
+  card.dataset.clusterKey = clusterKey;
+  card.draggable = true;
+
+  // ── Hover-knappar (Avfärda / Hoppa över) ────────────────────────────────────
+  const actions = document.createElement('div');
+  actions.className = 'uf-card-actions';
+
+  const dismissBtn = document.createElement('button');
+  dismissBtn.className = 'uf-action-btn uf-dismiss-btn';
+  dismissBtn.title = 'Inte ett ansikte — avfärda';
+  dismissBtn.textContent = '✕';
+  dismissBtn.addEventListener('click', async () => {
+    if (!confirm('Markera som "inte ett ansikte" och ta bort?')) return;
+    try {
+      await api.dismissFaces(faceIds);
+      card.classList.add('uf-card--fade-out');
+      setTimeout(() => card.remove(), 300);
+    } catch (e) { toast(e.message, 'error'); }
+  });
+
+  const skipBtn = document.createElement('button');
+  skipBtn.className = 'uf-action-btn uf-skip-btn';
+  skipBtn.title = 'Hoppa över tillfälligt';
+  skipBtn.textContent = '→';
+  skipBtn.addEventListener('click', () => {
+    _skippedClusterKeys.add(clusterKey);
+    card.classList.add('uf-card--fade-out');
+    setTimeout(() => {
+      card.style.display = 'none';
+      card.classList.remove('uf-card--fade-out');
+      onSkip();
+    }, 300);
+  });
+
+  actions.appendChild(dismissBtn);
+  actions.appendChild(skipBtn);
+  card.appendChild(actions);
+
+  // ── Primär ansiktsthumbnail ──────────────────────────────────────────────────
+  const primaryWrap = document.createElement('div');
+  primaryWrap.className = 'uf-face-primary';
+
+  const img = document.createElement('img');
+  img.src = `/api/faces/${primaryFace.id}/thumb`;
+  img.className = 'uf-thumb';
+  img.alt = '';
+  img.onerror = () => {
+    img.replaceWith(Object.assign(document.createElement('div'), {
+      className: 'uf-thumb flex items-center justify-center text-3xl text-slate-500',
+      textContent: '?',
+    }));
+  };
+  primaryWrap.appendChild(img);
+
+  // ── Expand-badge för kluster med flera ansikten ──────────────────────────────
+  let extraEl = null;
+  if (extraFaces.length > 0) {
+    const badge = document.createElement('button');
+    badge.className = 'uf-expand-badge';
+    badge.textContent = `+${extraFaces.length}`;
+    badge.title = 'Visa alla ansikten i gruppen';
+
+    extraEl = document.createElement('div');
+    extraEl.className = 'uf-extra-faces';
+    extraEl.setAttribute('aria-hidden', 'true');
+
+    extraFaces.forEach(face => {
+      const ei = document.createElement('img');
+      ei.src = `/api/faces/${face.id}/thumb`;
+      ei.className = 'uf-thumb-sm';
+      ei.alt = '';
+      ei.title = face.file_name ?? '';
+      extraEl.appendChild(ei);
     });
-    updateBulkBar();
-  };
 
-  const toggleFace = (faceId, el) => {
-    if (selectedFaceIds.has(faceId)) {
-      selectedFaceIds.delete(faceId);
-      el.classList.remove('ring-2', 'ring-blue-500');
-      el.querySelector('.face-check')?.classList.add('hidden');
-    } else {
-      selectedFaceIds.add(faceId);
-      el.classList.add('ring-2', 'ring-blue-500');
-      el.querySelector('.face-check')?.classList.remove('hidden');
-    }
-    updateBulkBar();
-  };
+    badge.addEventListener('click', () => {
+      const expanded = extraEl.classList.toggle('uf-expanded');
+      badge.textContent = expanded ? '−' : `+${extraFaces.length}`;
+      extraEl.setAttribute('aria-hidden', String(!expanded));
+    });
+
+    primaryWrap.appendChild(badge);
+  }
+
+  card.appendChild(primaryWrap);
+  if (extraEl) card.appendChild(extraEl);
+
+  // ── Filnamn (klickbart → lightbox) ──────────────────────────────────────────
+  const filename = primaryFace.file_name ?? `Asset ${primaryFace.asset_id.slice(0, 8)}`;
+  const filenameBtn = document.createElement('button');
+  filenameBtn.className = 'uf-filename';
+  filenameBtn.textContent = filename;
+  filenameBtn.title = `Öppna ${filename}`;
+  filenameBtn.addEventListener('click', () => {
+    _unknownFacesState = { lastClusterId: clusterKey, scrollY: window.scrollY };
+    const assetItem = {
+      id: primaryFace.asset_id,
+      mime_type: primaryFace.mime_type ?? 'image/jpeg',
+      thumb_small_path: primaryFace.thumb_small_path,
+      thumb_large_path: primaryFace.thumb_large_path,
+      file_name: primaryFace.file_name,
+    };
+    openLightbox([assetItem], 0);
+  });
+  card.appendChild(filenameBtn);
+
+  // ── Autocomplete-inmatning för namngivning ───────────────────────────────────
+  const assignWidget = buildAssignWidget(faceIds, allPersons, () => {
+    card.classList.add('uf-card--fade-out');
+    setTimeout(() => { card.remove(); onAssigned(); }, 300);
+  });
+  card.appendChild(assignWidget);
+
+  // ── Drag-and-drop för klustersammanslagning ──────────────────────────────────
+  card.addEventListener('dragstart', (e) => {
+    e.dataTransfer.setData('text/plain', clusterKey);
+    e.dataTransfer.effectAllowed = 'move';
+  });
+  card.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    card.classList.add('uf-card--drag-over');
+  });
+  card.addEventListener('dragleave', () => card.classList.remove('uf-card--drag-over'));
+  card.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    card.classList.remove('uf-card--drag-over');
+    const fromKey = e.dataTransfer.getData('text/plain');
+    if (fromKey === clusterKey) return;
+
+    const fromCard = grid.querySelector(`[data-cluster-key="${fromKey}"]`);
+    if (!fromCard) return;
+
+    if (!confirm('Slå ihop dessa grupper till en? (De verkar vara samma person)')) return;
+
+    // Hämta faceIds från source-kortet
+    const fromFaceIds = [...fromCard.querySelectorAll('[data-face-id]')].map(el => el.dataset.faceId);
+    const allMergedFaceIds = [...faceIds, ...fromFaceIds];
+
+    try {
+      await api.mergeClusters(fromFaceIds, faceIds);
+      // Flytta extra ansikten visuellt till detta korts expand-vy
+      fromCard.classList.add('uf-card--fade-out');
+      setTimeout(() => fromCard.remove(), 300);
+
+      // Uppdatera badge
+      if (!extraEl) {
+        const newExtra = document.createElement('div');
+        newExtra.className = 'uf-extra-faces';
+        card.insertBefore(newExtra, filenameBtn);
+        extraEl = newExtra;
+        const newBadge = document.createElement('button');
+        newBadge.className = 'uf-expand-badge';
+        primaryWrap.appendChild(newBadge);
+        newBadge.addEventListener('click', () => {
+          const exp = extraEl.classList.toggle('uf-expanded');
+          newBadge.textContent = exp ? '−' : `+${extraEl.children.length}`;
+        });
+      }
+      fromFaceIds.forEach(fid => {
+        const ei = document.createElement('img');
+        ei.src = `/api/faces/${fid}/thumb`;
+        ei.className = 'uf-thumb-sm';
+        ei.alt = '';
+        extraEl.appendChild(ei);
+      });
+      const badge = primaryWrap.querySelector('.uf-expand-badge');
+      if (badge) badge.textContent = `+${extraEl.children.length}`;
+
+      // Uppdatera assign-widget med de sammanslagna faceIds
+      faceIds.length = 0;
+      allMergedFaceIds.forEach(id => faceIds.push(id));
+      toast('Grupper sammanslagna', 'success');
+    } catch (err) { toast(err.message, 'error'); }
+  });
+
+  return card;
+}
+
+function restoreUnknownFacesState(cards) {
+  const { lastClusterId, scrollY } = _unknownFacesState;
+  if (!lastClusterId && !scrollY) return;
+
+  const targetCard = lastClusterId ? cards.get(lastClusterId) : null;
+  if (targetCard) {
+    requestAnimationFrame(() => {
+      targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      targetCard.classList.add('uf-card--highlight');
+      targetCard.addEventListener('animationend', () => {
+        targetCard.classList.remove('uf-card--highlight');
+      }, { once: true });
+    });
+  } else if (scrollY) {
+    window.scrollTo({ top: scrollY });
+  }
+  _unknownFacesState = { lastClusterId: null, scrollY: 0 };
+}
+
+async function renderUnknownFacesTab(container, allPersons) {
+  injectUnknownFacesStyles();
+
+  container.innerHTML = `
+    <div class="p-4">
+      <div id="uf-meta" class="text-xs text-slate-500 mb-2"></div>
+      <div id="uf-toolbar" class="uf-toolbar">
+        <span class="text-xs text-slate-500">Sortera:</span>
+        <button class="uf-sort-btn uf-sort-active" data-sort="size">Storlek ↓</button>
+        <button class="uf-sort-btn" data-sort="date">Datum ↓</button>
+        <button id="uf-show-skipped" class="uf-show-skipped hidden">Visa dolda (0)</button>
+      </div>
+      <div id="uf-grid" class="uf-grid"></div>
+    </div>`;
+
+  // Sätt rätt sorteringsknapp aktiv
+  container.querySelectorAll('.uf-sort-btn').forEach(btn => {
+    btn.classList.toggle('uf-sort-active', btn.dataset.sort === _ufSort);
+    btn.addEventListener('click', () => {
+      if (btn.dataset.sort === _ufSort) return;
+      _ufSort = btn.dataset.sort;
+      container.querySelectorAll('.uf-sort-btn').forEach(b => b.classList.toggle('uf-sort-active', b.dataset.sort === _ufSort));
+      renderGrid(clusters);
+    });
+  });
 
   let clusters = [];
+
+  const renderGrid = (clusterData) => {
+    const sorted = [...clusterData].sort((a, b) => {
+      if (_ufSort === 'size') return b.faces.length - a.faces.length;
+      // date: backend returnerar redan i desc created_at, ordningen bevaras
+      return 0;
+    });
+
+    const grid = document.getElementById('uf-grid');
+    if (!grid) return;
+    grid.innerHTML = '';
+
+    const cards = new Map();
+    let skippedCount = 0;
+
+    sorted.forEach(cluster => {
+      const key = cluster.clusterId ?? `face-${cluster.faces[0].id}`;
+      const card = buildClusterCard(
+        cluster,
+        allPersons,
+        () => updateSkippedBtn(),
+        () => updateSkippedBtn(),
+        grid
+      );
+      if (_skippedClusterKeys.has(key)) {
+        card.style.display = 'none';
+        skippedCount++;
+      }
+      grid.appendChild(card);
+      cards.set(key, card);
+    });
+
+    updateSkippedBtn(skippedCount);
+
+    // Lyssnare för åternavigering från lightbox
+    const onLbClosed = () => {
+      restoreUnknownFacesState(cards);
+      window.removeEventListener('lightbox:closed', onLbClosed);
+      // Registrera nytt lyssnare för nästa öppning
+      window.addEventListener('lightbox:closed', onLbClosed, { once: true });
+    };
+    window.removeEventListener('lightbox:closed', onLbClosed);
+    window.addEventListener('lightbox:closed', onLbClosed, { once: true });
+  };
+
+  const updateSkippedBtn = (count) => {
+    const btn = document.getElementById('uf-show-skipped');
+    if (!btn) return;
+    const n = count !== undefined ? count : _skippedClusterKeys.size;
+    btn.classList.toggle('hidden', n === 0);
+    btn.textContent = `Visa dolda (${n})`;
+  };
+
+  document.getElementById('uf-show-skipped')?.addEventListener('click', () => {
+    _skippedClusterKeys.clear();
+    document.querySelectorAll('#uf-grid .uf-card').forEach(c => { c.style.display = ''; });
+    updateSkippedBtn(0);
+  });
+
   try {
     const { data, meta } = await api.unassignedFaces();
     clusters = data ?? [];
 
-    const uc = document.getElementById('unknown-content');
-    if (!uc) return;
+    const metaEl = document.getElementById('uf-meta');
+    if (metaEl) metaEl.textContent = `${meta.total_faces} okände ansikten i ${meta.total_clusters} grupper`;
 
     if (!clusters.length) {
-      uc.innerHTML = '<div class="text-slate-400 text-sm">Inga okända ansikten hittades.</div>';
+      const grid = document.getElementById('uf-grid');
+      if (grid) grid.innerHTML = '<div class="text-slate-400 text-sm col-span-full">Inga okända ansikten hittades.</div>';
       return;
     }
 
-    uc.innerHTML = `<p class="text-xs text-slate-500 mb-4">${meta.total_faces} okände ansikten i ${meta.total_clusters} grupper</p>`;
-
-    allFaceElements = [];
-
-    clusters.forEach((cluster, ci) => {
-      const card = document.createElement('div');
-      card.className = 'mb-5';
-      const label = cluster.clusterId
-        ? `Grupp ${ci + 1} · ${cluster.faces.length} ansikten`
-        : `Enskilt ansikte`;
-      card.innerHTML = `
-        <div class="text-xs text-slate-400 mb-2 font-medium">${label}</div>
-        <div class="flex flex-wrap gap-2" data-cluster="${cluster.clusterId ?? 'none'}"></div>`;
-
-      const faceRow = card.querySelector('[data-cluster]');
-      const clusterFaceEls = [];
-
-      cluster.faces.forEach((face, fi) => {
-        const el = document.createElement('div');
-        el.className = 'relative w-16 h-16 rounded-lg overflow-hidden bg-slate-700 cursor-pointer hover:opacity-90 transition-opacity select-none';
-        el.dataset.faceId = face.id;
-        el.innerHTML = `
-          <img src="/api/faces/${face.id}/thumb" class="w-full h-full object-cover" onerror="this.parentElement.innerHTML='<div class=\\'w-full h-full flex items-center justify-center text-xl text-slate-500\\'>?</div>'">
-          <div class="face-check hidden absolute inset-0 bg-blue-500/30 flex items-center justify-center">
-            <div class="w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs font-bold">✓</div>
-          </div>`;
-
-        el.addEventListener('click', (e) => {
-          const globalIdx = allFaceElements.indexOf(el);
-          if (e.shiftKey && lastClickedFaceIndex >= 0) {
-            const from = Math.min(lastClickedFaceIndex, globalIdx);
-            const to   = Math.max(lastClickedFaceIndex, globalIdx);
-            for (let k = from; k <= to; k++) {
-              const target = allFaceElements[k];
-              const tid = target.dataset.faceId;
-              if (!selectedFaceIds.has(tid)) {
-                selectedFaceIds.add(tid);
-                target.classList.add('ring-2', 'ring-blue-500');
-                target.querySelector('.face-check')?.classList.remove('hidden');
-              }
-            }
-            updateBulkBar();
-          } else if (e.ctrlKey || e.metaKey) {
-            toggleFace(face.id, el);
-          } else {
-            clearSelection();
-            toggleFace(face.id, el);
-          }
-          lastClickedFaceIndex = allFaceElements.indexOf(el);
-        });
-
-        faceRow.appendChild(el);
-        clusterFaceEls.push(el);
-        allFaceElements.push(el);
-      });
-
-      // Snabb-knapp för hela klustret
-      if (cluster.faces.length > 1) {
-        const selectAll = document.createElement('button');
-        selectAll.className = 'mt-1 text-xs text-blue-400 hover:text-blue-300';
-        selectAll.textContent = 'Markera hela gruppen';
-        selectAll.addEventListener('click', () => {
-          clusterFaceEls.forEach(el => {
-            const fid = el.dataset.faceId;
-            if (!selectedFaceIds.has(fid)) {
-              selectedFaceIds.add(fid);
-              el.classList.add('ring-2', 'ring-blue-500');
-              el.querySelector('.face-check')?.classList.remove('hidden');
-            }
-          });
-          updateBulkBar();
-        });
-        card.appendChild(selectAll);
-      }
-
-      uc.appendChild(card);
-    });
-
+    renderGrid(clusters);
   } catch (e) { toast(e.message, 'error'); }
-
-  // Bulk-knappar
-  const onDone = async () => {
-    clearSelection();
-    await renderUnknownFacesTab(container, allPersons);
-  };
-
-  document.getElementById('face-clear-btn')?.addEventListener('click', clearSelection);
-
-  document.getElementById('face-create-btn')?.addEventListener('click', () => {
-    if (!selectedFaceIds.size) return;
-    showCreatePersonModal([...selectedFaceIds], allPersons, onDone);
-  });
-
-  document.getElementById('face-assign-btn')?.addEventListener('click', () => {
-    if (!selectedFaceIds.size) return;
-    // Visa modal i "tilldela befintlig"-läge direkt
-    showCreatePersonModal([...selectedFaceIds], allPersons, onDone);
-  });
 }
 
 // ── Person List ───────────────────────────────────────────────────────────────
@@ -425,10 +816,6 @@ async function renderPersonList(container) {
         <button id="find-dupes-btn"
           class="ml-auto px-3 py-1.5 text-xs border border-slate-600 hover:border-yellow-500 text-slate-400 hover:text-yellow-400 rounded-lg transition-colors">
           🔍 Hitta dubbletter
-        </button>
-        <button id="face-search-btn"
-          class="px-3 py-1.5 text-xs border border-slate-600 hover:border-blue-500 text-slate-400 hover:text-blue-400 rounded-lg transition-colors">
-          📷 Sök via bild
         </button>
       </div>
 

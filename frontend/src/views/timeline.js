@@ -1,7 +1,8 @@
 import { api } from '../api.js';
 import { openLightbox } from '../components/lightbox.js';
-import { buildPhotoCell } from '../components/gridCell.js';
+import { buildPhotoCell, showAssetContextMenu } from '../components/gridCell.js';
 import { createSelectionManager } from '../components/selectionManager.js';
+import { openAddToAlbumModal } from './albums.js';
 import { thumbUrl, isVideo, formatDate, debounce } from '../utils.js';
 
 let cursor = null;
@@ -153,6 +154,15 @@ function appendToGrid(items) {
       () => openLightbox(allItems, globalIndex),
     );
     selection?.attachToCell(cell, asset, globalIndex);
+    cell.addEventListener('contextmenu', (e) => {
+      showAssetContextMenu(e, asset, {
+        openLightboxFn: openLightbox,
+        allAssets: allItems,
+        index: globalIndex,
+        onAddToAlbum: openAddToAlbumModal,
+        onDelete: (id) => { allItems = allItems.filter((a) => a.id !== id); },
+      });
+    });
     grid.appendChild(cell);
   });
 }

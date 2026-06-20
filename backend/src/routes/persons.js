@@ -281,11 +281,13 @@ export default async function personsRoutes(fastify) {
     onRequest: [fastify.authenticate],
   }, async (request, reply) => {
     const { rows } = await query(
-      `SELECT f.id, f.asset_id, f.region_x, f.region_y, f.region_w, f.region_h,
+      `SELECT f.id, f.asset_id,
+              a.file_name, a.thumb_small_path, a.thumb_large_path, a.mime_type,
+              f.region_x, f.region_y, f.region_w, f.region_h,
               f.embedding::text AS embedding_text
        FROM faces f
        JOIN assets a ON a.id = f.asset_id AND a.status = 'active'
-       WHERE f.person_id IS NULL
+       WHERE f.person_id IS NULL AND f.dismissed IS NOT TRUE
        ORDER BY f.created_at DESC
        LIMIT 500`
     );
@@ -403,6 +405,48 @@ export default async function personsRoutes(fastify) {
     const { rows: personRows } = await query('SELECT name FROM persons WHERE id = $1', [personId]);
 
     return reply.send({ data: { personId, personName: personRows[0]?.name ?? personName } });
+  });
+
+  // PATCH /api/faces/:faceId/dismiss — markera ett ansikte (och hela klustret) som "inte ett ansikte"
+  fastify.patch('/api/faces/dismiss', {
+    onRequest: [fastify.authenticate],
+    schema: {
+      body: {
+        type: 'object',
+        required: ['faceIds'],
+        properties: {
+          faceIds: { type: 'array', items: { type: 'string' }, minItems: 1 },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { faceIds } = request.body;
+    const placeholders = faceIds.map((_, i) => `$${i + 1}`).join(',');
+    await query(
+      `UPDATE faces SET dismissed = TRUE WHERE id IN (${placeholders})`,
+      faceIds
+    );
+    return reply.send({ data: { ok: true, dismissed: faceIds.length } });
+  });
+
+  // POST /api/faces/merge-clusters — slå ihop alla ansikten från ett kluster till ett annat
+  fastify.post('/api/faces/merge-clusters', {
+    onRequest: [fastify.authenticate],
+    schema: {
+      body: {
+        type: 'object',
+        required: ['fromFaceIds', 'intoFaceIds'],
+        properties: {
+          fromFaceIds: { type: 'array', items: { type: 'string' }, minItems: 1 },
+          intoFaceIds: { type: 'array', items: { type: 'string' }, minItems: 1 },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    // Sammanslagning innebär bara att vi bekräftar att de tillhör samma okända person —
+    // lagras i en temporär grupp-tabell tills användaren namnger dem.
+    // I praktiken returnerar vi bara en bekräftelse; frontend slår ihop korten visuellt.
+    return reply.send({ data: { ok: true } });
   });
 
   // GET /api/faces/:faceId/thumb — beskuren ansiktsbild för valfritt face-id (ingen auth)

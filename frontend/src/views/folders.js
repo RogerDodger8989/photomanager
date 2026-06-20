@@ -1,7 +1,8 @@
 import { api } from '../api.js';
-import { buildPhotoCell } from '../components/gridCell.js';
+import { buildPhotoCell, showAssetContextMenu } from '../components/gridCell.js';
 import { createSelectionManager } from '../components/selectionManager.js';
 import { openLightbox } from '../components/lightbox.js';
+import { openAddToAlbumModal } from './albums.js';
 import { toast } from '../utils.js';
 
 let viewMode   = 'grid';
@@ -42,6 +43,7 @@ window.addEventListener('pm:asset-restored', (e) => {
   const cell = buildPhotoCell(asset, () => openLightbox(allAssets, allAssets.indexOf(asset)));
   sel?.attachToCell(cell, asset, insertAt);
   makeDraggable(cell, asset);
+  attachContextMenu(cell, asset);
   grid.insertBefore(cell, grid.children[insertAt] ?? null);
 });
 
@@ -296,6 +298,20 @@ async function loadMoreAssets() {
   }
 }
 
+function attachContextMenu(cell, asset) {
+  cell.addEventListener('contextmenu', (e) => {
+    showAssetContextMenu(e, asset, {
+      openLightboxFn: openLightbox,
+      allAssets,
+      index: allAssets.indexOf(asset),
+      onAddToAlbum: openAddToAlbumModal,
+      onDelete: (id, restored) => {
+        if (!restored) allAssets = allAssets.filter((a) => a.id !== id);
+      },
+    });
+  });
+}
+
 function renderAssets(items) {
   if (viewMode === 'grid') {
     const grid = document.getElementById('folder-grid');
@@ -305,6 +321,7 @@ function renderAssets(items) {
       const cell = buildPhotoCell(asset, () => openLightbox(allAssets, allAssets.indexOf(asset)));
       sel?.attachToCell(cell, asset, idx);
       makeDraggable(cell, asset);
+      attachContextMenu(cell, asset);
       grid.appendChild(cell);
     });
   } else {
@@ -329,6 +346,15 @@ function renderListItems(items) {
       <span class="text-slate-500 shrink-0 w-24 text-right">${date}</span>
       <span class="text-slate-500 shrink-0 w-16 text-right">${size}</span>`;
     row.addEventListener('click', () => openLightbox(allAssets, allAssets.indexOf(asset)));
+    row.addEventListener('contextmenu', (e) => {
+      showAssetContextMenu(e, asset, {
+        openLightboxFn: openLightbox,
+        allAssets,
+        index: allAssets.indexOf(asset),
+        onAddToAlbum: openAddToAlbumModal,
+        onDelete: (id) => { allAssets = allAssets.filter((a) => a.id !== id); },
+      });
+    });
     makeDraggable(row, asset);
     list.appendChild(row);
   });
@@ -347,6 +373,7 @@ function rerenderCurrentAssets() {
       const cell = buildPhotoCell(asset, () => openLightbox(allAssets, i));
       sel?.attachToCell(cell, asset, i);
       makeDraggable(cell, asset);
+      attachContextMenu(cell, asset);
       grid.appendChild(cell);
     });
   } else {

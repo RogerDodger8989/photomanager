@@ -18,6 +18,7 @@ const MIGRATIONS = [
   '011_source_folder.sql',
   '012_user_settings.sql',
   '013_person_relations.sql',
+  '014_face_dismissed.sql',
 ];
 
 export async function runMigrations(client) {

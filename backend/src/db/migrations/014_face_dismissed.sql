@@ -1,0 +1,2 @@
+ALTER TABLE faces ADD COLUMN IF NOT EXISTS dismissed BOOLEAN NOT NULL DEFAULT FALSE;
+CREATE INDEX IF NOT EXISTS faces_dismissed_idx ON faces (dismissed) WHERE dismissed = TRUE;

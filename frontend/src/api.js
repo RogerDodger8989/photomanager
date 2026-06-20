@@ -135,6 +135,8 @@ export const api = {
   deleteFace: (id)              => request('DELETE', `/api/faces/${id}`),
   unassignedFaces: ()           => request('GET', '/api/faces/unassigned'),
   assignFaces: (body)           => request('POST', '/api/faces/assign', body),
+  dismissFaces: (faceIds)       => request('PATCH', '/api/faces/dismiss', { faceIds }),
+  mergeClusters: (fromFaceIds, intoFaceIds) => request('POST', '/api/faces/merge-clusters', { fromFaceIds, intoFaceIds }),
 
   // Albums
   albums:   (p = {})            => request('GET', p.assetId ? `/api/albums?assetId=${p.assetId}` : '/api/albums'),
