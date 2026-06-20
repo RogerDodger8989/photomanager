@@ -162,26 +162,40 @@ export default async function aiRoutes(fastify) {
   });
 
   // POST /api/ai/reindex/:assetId — kör om AI-analys för en specifik bild
+  // Kräver inloggning; admins kan köra för alla, användare bara sina egna bilder.
   fastify.post('/api/ai/reindex/:assetId', {
-    onRequest: [fastify.requireAdmin],
+    onRequest: [fastify.authenticate],
   }, async (request, reply) => {
     if (!isAiAvailable()) {
-      return reply.status(503).send({ error: 'AI-funktionen är inte tillgänglig (modell-filer saknas)' });
+      return reply.status(503).send({ error: 'AI-ansiktsigenkänning är inte aktiv — InsightFace-tjänsten körs inte.' });
     }
 
     const { assetId } = request.params;
+    const isAdmin = request.user.role === 'admin';
+    const ownerFilter = isAdmin ? '' : `AND owner_id = '${request.user.id}'`;
+
     const { rows } = await query(
-      "SELECT file_path FROM assets WHERE id = $1 AND status = 'active'",
+      `SELECT file_path FROM assets WHERE id = $1 AND status = 'active' ${ownerFilter}`,
       [assetId]
     );
-    if (!rows[0]) return reply.status(404).send({ error: 'Asset hittades inte' });
+    if (!rows[0]) return reply.status(404).send({ error: 'Bilden hittades inte' });
 
-    // Kör asynkront
+    // Rensa gamla AI-faces och förslag så att analysen börjar om från noll
+    await query(
+      `DELETE FROM ai_suggestions WHERE face_id IN (SELECT id FROM faces WHERE asset_id = $1 AND source = 'ai')`,
+      [assetId]
+    );
+    await query(
+      `DELETE FROM faces WHERE asset_id = $1 AND source = 'ai'`,
+      [assetId]
+    );
+
+    // Kör asynkront — svarar direkt till klienten
     const { processAssetFaces } = await import('../services/aiService.js');
     const { config } = await import('../config.js');
     const { join } = await import('path');
     processAssetFaces(assetId, join(config.media.photosPath, rows[0].file_path))
-      .catch(console.error);
+      .catch((err) => console.error(`AI reindex misslyckades för ${assetId}:`, err));
 
     return reply.send({ data: { message: 'AI-analys startad i bakgrunden' } });
   });

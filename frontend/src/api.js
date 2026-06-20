@@ -153,6 +153,8 @@ export const api = {
   aiSuggestions:  (p = {})      => request('GET', `/api/ai/suggestions?${qs(p)}`),
   acceptAi:       (faceId)      => request('POST', `/api/ai/suggestions/${faceId}/accept`),
   rejectAi:       (faceId, b)   => request('POST', `/api/ai/suggestions/${faceId}/reject`, b),
+  batchAcceptAi:  (faceIds)     => request('POST', '/api/ai/suggestions/batch-accept', { faceIds }),
+  aiReindex:      (assetId)     => request('POST', `/api/ai/reindex/${assetId}`, {}),
 
   // Export
   exportZip:    (assetIds)      => request('POST', '/api/export/zip', { assetIds }),

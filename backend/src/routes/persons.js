@@ -19,14 +19,14 @@ export default async function personsRoutes(fastify) {
           JOIN assets a3 ON a3.id = f3.asset_id AND a3.status = 'active'
           WHERE f3.person_id = p.id
           LIMIT 1) AS fallback_face_id,
-         COUNT(DISTINCT f.asset_id)::int AS photo_count
+         COUNT(DISTINCT fa.id)::int AS photo_count
        FROM persons p
        LEFT JOIN faces f ON f.person_id = p.id
        LEFT JOIN assets fa ON fa.id = f.asset_id AND fa.status = 'active'
        LEFT JOIN faces cf ON cf.id = p.cover_face_id
-       LEFT JOIN assets a ON a.id = cf.asset_id
+       LEFT JOIN assets a ON a.id = cf.asset_id AND a.status = 'active'
        GROUP BY p.id, a.thumb_small_path
-       ORDER BY COUNT(DISTINCT f.asset_id) DESC`
+       ORDER BY COUNT(DISTINCT fa.id) DESC`
     );
     return reply.send({ data: rows });
   });

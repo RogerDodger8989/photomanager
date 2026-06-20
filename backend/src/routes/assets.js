@@ -444,7 +444,28 @@ export default async function assetsRoutes(fastify) {
     onRequest: [fastify.requireAdmin],
   }, async (request, reply) => {
     const { id } = request.params;
-    await query("UPDATE assets SET status = 'deleted' WHERE id = $1 AND status = 'trashed'", [id]);
+    const { rows } = await query(
+      "SELECT id, trash_path FROM assets WHERE id = $1 AND status = 'trashed'",
+      [id]
+    );
+    if (!rows[0]) return reply.status(404).send({ error: 'Hittades inte i papperskorgen' });
+
+    const { trash_path } = rows[0];
+
+    // Radera fysisk fil från .trash
+    if (trash_path && existsSync(trash_path)) {
+      await unlink(trash_path).catch(() => {});
+    }
+
+    // Rensa all kopplad data i rätt ordning (FK-beroenden)
+    await query('DELETE FROM ai_suggestions WHERE face_id IN (SELECT id FROM faces WHERE asset_id = $1)', [id]);
+    await query('DELETE FROM faces WHERE asset_id = $1', [id]);
+    await query('DELETE FROM asset_tags WHERE asset_id = $1', [id]);
+    await query('DELETE FROM asset_metadata WHERE asset_id = $1', [id]);
+    await query('DELETE FROM album_assets WHERE asset_id = $1', [id]);
+    await query('DELETE FROM event_assets WHERE asset_id = $1', [id]);
+    await query('DELETE FROM assets WHERE id = $1', [id]);
+
     await logAudit(request.user.id, 'permanent_delete', id, 'asset', null, request.ip);
     return reply.send({ data: { ok: true } });
   });

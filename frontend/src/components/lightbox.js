@@ -251,9 +251,11 @@ function buildDrawerHTML(m) {
       title: `Ansikten & Personer${m.faces.length ? ` (${m.faces.length})` : ''}`,
       open: true,
       headerExtra: `<button class="face-add-btn flex-shrink-0 text-slate-400 hover:text-white transition-colors p-1 rounded"
-        title="Lägg till ansiktstaggar" style="font-size:15px;line-height:1;font-weight:600">+</button>
+        title="Lägg till ansiktstaggar manuellt" style="font-size:15px;line-height:1;font-weight:600">+</button>
         <button class="face-overlay-toggle flex-shrink-0 text-slate-400 hover:text-white transition-colors p-1 rounded"
-        title="Visa/dölj ansiktsmarkeringar" style="font-size:14px;line-height:1">👁</button>`,
+        title="Visa/dölj ansiktsmarkeringar" style="font-size:14px;line-height:1">👁</button>
+        <button class="face-reindex-btn flex-shrink-0 text-slate-400 hover:text-blue-400 transition-colors p-1 rounded"
+        title="Kör om AI-ansiktsanalys för denna bild" style="font-size:13px;line-height:1">🔄</button>`,
       custom: buildFacesSection(m.faces, m.fileInfo.thumbLargePath, m.temporalSpatial.capturedAt),
     },
     {
@@ -637,6 +639,48 @@ function initDrawerInteractions(container, assetId, m) {
     faceAddBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       startFaceDrawMode(assetId, () => loadInfoDrawer(assetId));
+    });
+  }
+
+  // ── 🔄 Kör om AI-ansiktsanalys för denna bild ────────────────────────────────
+  const faceReindexBtn = container.querySelector('.face-reindex-btn');
+  if (faceReindexBtn) {
+    // Kontrollera om AI är aktiv — grå ut och inaktivera om inte
+    api.aiStatus().then(({ data }) => {
+      if (!data.available) {
+        faceReindexBtn.style.opacity = '0.3';
+        faceReindexBtn.style.cursor  = 'not-allowed';
+        faceReindexBtn.title = 'AI-ansiktsigenkänning är inte aktiv (InsightFace körs inte)';
+        faceReindexBtn.dataset.disabled = 'true';
+      }
+    }).catch(() => {
+      faceReindexBtn.style.opacity = '0.3';
+      faceReindexBtn.dataset.disabled = 'true';
+    });
+
+    faceReindexBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (faceReindexBtn.dataset.running === 'true') return;
+      if (faceReindexBtn.dataset.disabled === 'true') {
+        toast('AI-ansiktsigenkänning är inte aktiv — starta InsightFace-tjänsten', 'error');
+        return;
+      }
+      faceReindexBtn.dataset.running = 'true';
+      const orig = faceReindexBtn.textContent;
+      faceReindexBtn.textContent = '⏳';
+      faceReindexBtn.title = 'Analyserar…';
+      try {
+        await api.aiReindex(assetId);
+        toast('AI-analys startad — ansikten uppdateras inom kort', 'success');
+        // Vänta 4 s så InsightFace hinner bearbeta, ladda sedan om drawer + overlays
+        setTimeout(() => loadInfoDrawer(assetId), 4000);
+      } catch (err) {
+        toast(`Kunde inte starta re-analys: ${err.message}`, 'error');
+      } finally {
+        faceReindexBtn.textContent = orig;
+        faceReindexBtn.title = 'Kör om AI-ansiktsanalys för denna bild';
+        faceReindexBtn.dataset.running = 'false';
+      }
     });
   }
 

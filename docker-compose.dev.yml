@@ -31,6 +31,8 @@ services:
       TRASH_AUTO_CLEAN_DAYS: 30
       CHOKIDAR_USEPOLLING: "true"
       CHOKIDAR_INTERVAL: "3000"
+      # InsightFace körs som separat service på samma nätverk
+      INSIGHTFACE_URL: "http://insightface:5000"
     cap_add:
       - SYS_ADMIN   # Krävs för CIFS/SMB-montering inifrån containern
     depends_on:
@@ -67,8 +69,28 @@ services:
       - pm_net
     restart: unless-stopped
 
+  insightface:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.insightface
+    container_name: pm_dev_insightface
+    environment:
+      INSIGHTFACE_HOME: /app/models
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - models_dev:/app/models
+      # Samma mediamappar som photomanager — InsightFace läser bilderna direkt
+      - ./backend/media/photos:/media/photos
+      - ./backend/media/thumbs:/media/thumbs
+      - ./backend/media/transcode:/media/transcode
+      - ./Bilder:/media/Bilder
+    networks:
+      - pm_net
+    restart: unless-stopped
+
 volumes:
   pgdata_dev:
+  models_dev:
 
 networks:
   pm_net:

@@ -1,166 +1,168 @@
 /**
- * AI-service — hanterar kommunikationen med aiEmbedder-workern
- * och pgvector-baserad person-matchning.
+ * aiService.js — ansiktsigenkänning via InsightFace Python-tjänst.
  *
- * Modellsökvägar konfigureras via miljövariabler:
- *   AI_DETECTOR_PATH  = /models/SCRFD_500M_bnkps_shape640x640.onnx
- *   AI_RECOGNIZER_PATH = /models/w600k_r50.onnx
+ * Arkitektur:
+ *   InsightFace-processen (insightface_server.py) körs parallellt med
+ *   Fastify via PM2. Den laddar buffalo_l-modellen EN gång och lyssnar
+ *   på http://127.0.0.1:5000.
  *
- * Om modell-filer saknas stängs AI-funktionen av tyst (graceful degradation).
+ *   Vid Fastify-start pollar initAiWorker() /health tills Python är redo
+ *   (max 60 s). Om Python aldrig svarar degraderas AI-funktionen tyst.
+ *
+ * Modellsökväg:
+ *   Styrs av INSIGHTFACE_HOME (sätts i pm2.config.js → /app/models).
+ *   Mappa /app/models som Docker Volume i Unraid så att ~300 MB
+ *   buffalo_l-modellen inte laddas ner på nytt vid varje omstart.
+ *
+ * Cosine-similaritet-tröskel för person-matchning (0–1, högre = strängare):
  */
 
-import { Worker } from 'worker_threads';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
-import { existsSync } from 'fs';
 import { query } from '../db/pool.js';
+import { analyzeFaces, waitForInsightFace, toVectorString } from './faceRecognition.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
-// Cosine similarity-tröskel för person-matchning (0–1, högre = strängare)
 const MATCH_THRESHOLD = 0.6;
 
-let worker = null;
-let workerReady = false;
-let pendingCallbacks = new Map();
-let msgIdCounter = 0;
+let aiReady = false;
 
 export function isAiAvailable() {
-  return workerReady;
+  return aiReady;
 }
 
+/**
+ * Anropas av server.js vid uppstart.
+ * Pollar Python-tjänsten i upp till 60 s och markerar AI som aktiv när den svarar.
+ * Blockerar INTE Fastify — server.js anropar detta utan await om så önskas.
+ */
 export async function initAiWorker() {
-  const detectorPath   = process.env.AI_DETECTOR_PATH   ?? '/models/SCRFD_500M_bnkps_shape640x640.onnx';
-  const recognizerPath = process.env.AI_RECOGNIZER_PATH ?? '/models/w600k_r50.onnx';
+  console.log('AI: väntar på InsightFace-tjänsten (max 60 s) …');
+  const ready = await waitForInsightFace(60_000);
 
-  if (!existsSync(detectorPath) || !existsSync(recognizerPath)) {
-    console.log('AI: modell-filer saknas — ansiktsigenkänning inaktiverad.');
-    console.log(`  Väntat: ${detectorPath}`);
-    console.log(`  Väntat: ${recognizerPath}`);
+  if (!ready) {
+    console.log('AI: InsightFace-tjänsten svarade inte inom 60 s — ansiktsigenkänning inaktiverad.');
+    console.log('    Kontrollera att /app/models är monterat och att pm2-processen "insightface" körs.');
     return;
   }
 
-  worker = new Worker(
-    join(__dirname, '../workers/aiEmbedder.js'),
-    { workerData: { detectorPath, recognizerPath } }
-  );
-
-  await new Promise((resolve, reject) => {
-    worker.once('message', (msg) => {
-      if (msg.error) { reject(new Error(msg.error)); return; }
-      if (msg.ready) { workerReady = true; resolve(); }
-    });
-    worker.once('error', reject);
-  });
-
-  worker.on('message', (msg) => {
-    if (!msg.id) return;
-    const cb = pendingCallbacks.get(msg.id);
-    if (!cb) return;
-    pendingCallbacks.delete(msg.id);
-    if (msg.error) cb.reject(new Error(msg.error));
-    else cb.resolve(msg.result);
-  });
-
-  console.log('AI: ONNX-modeller laddade, ansiktsigenkänning aktiv.');
+  aiReady = true;
+  console.log('AI: InsightFace aktiv — ansiktsigenkänning aktiverad.');
 }
 
-function callWorker(payload) {
-  if (!workerReady) throw new Error('AI-worker är inte redo');
-  const id = ++msgIdCounter;
-  return new Promise((resolve, reject) => {
-    pendingCallbacks.set(id, { resolve, reject });
-    worker.postMessage({ ...payload, id });
-  });
-}
-
-// Detektera ansikten i en bild (för bilder utan EXIF face-data)
-export async function detectFaces(imagePath) {
-  return callWorker({ type: 'detect', imagePath });
-}
-
-// Generera 512-dim embedding för ett ansikte
-export async function generateEmbedding(imagePath, regionX, regionY, regionW, regionH) {
-  return callWorker({ type: 'embed', imagePath, regionX, regionY, regionW, regionH });
-}
-
-// === KOMPLETT PIPELINE FÖR EN BILD ===
-// 1. Om bilden har faces utan embedding → generera embedding
-// 2. Om bilden saknar faces → detektera + spara + generera embedding
-// 3. Jämför embeddings mot kända persons → föreslå matchningar
+/**
+ * Komplett pipeline för en bild:
+ *   1. Fråga InsightFace om bounding-boxes + embeddings
+ *   2. Spara nya faces i DB (eller fyll i saknade embeddings)
+ *   3. Jämför varje embedding mot kända persons → spara ai_suggestions
+ *
+ * @param {string} assetId       — UUID för assets-raden
+ * @param {string} absolutePath  — absolut sökväg till bildfilen på servern
+ */
 export async function processAssetFaces(assetId, absolutePath) {
-  if (!workerReady) return;
+  if (!aiReady) return;
 
-  // Hämta befintliga faces för denna asset
+  // --- Hämta befintliga faces för denna asset ---
   const { rows: existingFaces } = await query(
     'SELECT * FROM faces WHERE asset_id = $1',
     [assetId]
   );
 
-  let facesToEmbed = existingFaces;
+  let facesToProcess = existingFaces;
 
-  // Bilder utan EXIF face-data: kör automatisk detektion
+  // --- Bilder utan EXIF/XMP face-data: kör InsightFace-detektion ---
   if (existingFaces.length === 0) {
     let detected;
     try {
-      detected = await detectFaces(absolutePath);
+      detected = await analyzeFaces(absolutePath);
     } catch (err) {
-      console.warn(`AI-detektion misslyckades för ${absolutePath}:`, err.message);
+      console.warn(`AI: detektion misslyckades för ${absolutePath}: ${err.message}`);
       return;
     }
 
-    if (detected.length === 0) return;
+    if (detected.face_count === 0) return;
 
-    // Spara detekterade ansikten i DB
-    for (const face of detected) {
+    // Spara detekterade ansikten i DB och samla ihop för embedding-steget
+    facesToProcess = [];
+    for (const face of detected.faces) {
+      // Spara embedding direkt — InsightFace ger oss bbox + embedding i ett anrop
+      const vectorStr = face.embedding.length === 512
+        ? toVectorString(face.embedding)
+        : null;
+
       const { rows } = await query(
-        `INSERT INTO faces (asset_id, source, region_x, region_y, region_w, region_h)
-         VALUES ($1, 'ai', $2, $3, $4, $5) RETURNING *`,
-        [assetId, face.regionX, face.regionY, face.regionW, face.regionH]
+        `INSERT INTO faces (asset_id, source, region_x, region_y, region_w, region_h, embedding)
+         VALUES ($1, 'ai', $2, $3, $4, $5, $6::vector)
+         RETURNING *`,
+        [assetId, face.region_x, face.region_y, face.region_w, face.region_h, vectorStr]
       );
-      facesToEmbed.push(rows[0]);
+      facesToProcess.push(rows[0]);
+    }
+  } else {
+    // --- Befintliga faces (från XMP/DigiKam) som saknar embedding ---
+    // Kör InsightFace EN gång för hela bilden och matcha mot befintliga regioner
+    const facesWithoutEmbedding = existingFaces.filter((f) => !f.embedding);
+    if (facesWithoutEmbedding.length === 0) {
+      // Alla har redan embeddings — gå direkt till matchning
+      facesToProcess = existingFaces;
+    } else {
+      let detected;
+      try {
+        detected = await analyzeFaces(absolutePath);
+      } catch (err) {
+        console.warn(`AI: embedding-anrop misslyckades för ${absolutePath}: ${err.message}`);
+        return;
+      }
+
+      // Matcha XMP-face mot närmaste InsightFace-face med IoU > 0.3
+      for (const dbFace of facesWithoutEmbedding) {
+        const best = findBestMatchingDetection(dbFace, detected.faces);
+        if (!best || best.embedding.length !== 512) continue;
+
+        await query(
+          'UPDATE faces SET embedding = $1::vector WHERE id = $2',
+          [toVectorString(best.embedding), dbFace.id]
+        );
+        dbFace.embedding = best.embedding; // uppdatera lokalt för matchning nedan
+      }
+      facesToProcess = existingFaces;
     }
   }
 
-  // Generera embeddings för alla faces som saknar det
-  for (const face of facesToEmbed) {
-    if (face.embedding) continue; // Redan beräknad
+  // --- Person-matchning via pgvector för varje face med embedding ---
+  for (const face of facesToProcess) {
+    // embedding kan vara en sträng (från DB) eller array (nyss beräknad)
+    const embeddingArr = parseEmbedding(face.embedding);
+    if (!embeddingArr || embeddingArr.length !== 512) continue;
 
-    let embedding;
-    try {
-      embedding = await generateEmbedding(
-        absolutePath, face.region_x, face.region_y, face.region_w, face.region_h
-      );
-    } catch (err) {
-      console.warn(`AI-embedding misslyckades för face ${face.id}:`, err.message);
-      continue;
-    }
+    const suggestion = await findClosestPerson(embeddingArr, face.id);
+    if (!suggestion) continue;
 
-    // Spara embedding i pgvector-kolonnen
     await query(
-      'UPDATE faces SET embedding = $1 WHERE id = $2',
-      [`[${embedding.join(',')}]`, face.id]
+      `INSERT INTO ai_suggestions (face_id, person_id, confidence)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (face_id) DO UPDATE
+         SET person_id  = EXCLUDED.person_id,
+             confidence = EXCLUDED.confidence,
+             reviewed   = false`,
+      [face.id, suggestion.personId, suggestion.confidence]
     );
-
-    // Hitta närmaste matchande person
-    const suggestion = await findClosestPerson(embedding, face.id);
-    if (suggestion) {
-      await query(
-        `INSERT INTO ai_suggestions (face_id, person_id, confidence)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (face_id) DO UPDATE
-           SET person_id = EXCLUDED.person_id, confidence = EXCLUDED.confidence`,
-        [face.id, suggestion.personId, suggestion.confidence]
-      );
-    }
   }
 }
 
-// Cosine similarity-sökning via pgvector — hitta närmaste känd person
-async function findClosestPerson(embedding, excludeFaceId) {
-  const vectorStr = `[${embedding.join(',')}]`;
+// ---------------------------------------------------------------------------
+// Hjälpfunktioner
+// ---------------------------------------------------------------------------
 
-  // Hitta de 5 närmaste ansiktena med känd person
+/**
+ * Cosine-sökning via pgvector — hitta närmaste känd person.
+ * Exakt samma logik som i originalet, oförändrad.
+ *
+ * @param {number[]} embedding  — 512-dim vektor
+ * @param {string}   excludeFaceId — den egna face-raden (exkluderas från sökning)
+ */
+async function findClosestPerson(embedding, excludeFaceId) {
+  const vectorStr = toVectorString(embedding);
+
+  // <=> = cosine distance (0 = identisk, 2 = motsatt)
+  // 1 - distance = cosine similarity (1 = identisk)
   const { rows } = await query(
     `SELECT f.person_id, p.name,
             1 - (f.embedding <=> $1::vector) AS similarity
@@ -176,25 +178,79 @@ async function findClosestPerson(embedding, excludeFaceId) {
 
   if (rows.length === 0) return null;
 
-  // Rösta: vanligaste person bland top-5 med hög similarity
-  const candidates = rows.filter((r) => r.similarity >= MATCH_THRESHOLD);
+  const candidates = rows.filter((r) => parseFloat(r.similarity) >= MATCH_THRESHOLD);
   if (candidates.length === 0) return null;
 
+  // Rösta: person med högst summerad similarity bland kandidaterna vinner
   const votes = {};
   for (const r of candidates) {
-    votes[r.person_id] = (votes[r.person_id] ?? 0) + r.similarity;
+    votes[r.person_id] = (votes[r.person_id] ?? 0) + parseFloat(r.similarity);
   }
 
   const [bestPersonId] = Object.entries(votes).sort((a, b) => b[1] - a[1])[0];
-  const bestCandidate  = candidates.find((r) => r.person_id === bestPersonId);
+  const best = candidates.find((r) => r.person_id === bestPersonId);
 
   return {
     personId: bestPersonId,
-    personName: bestCandidate.name,
-    confidence: bestCandidate.similarity,
+    personName: best.name,
+    confidence: parseFloat(best.similarity),
   };
 }
 
+/**
+ * Matchar en befintlig DB-face-region mot en InsightFace-detektion via IoU.
+ * Används när XMP-faces saknar embedding men bilden redan är analyserad.
+ *
+ * @param {object}   dbFace    — rad från faces-tabellen (region_x/y/w/h)
+ * @param {object[]} detected  — faces från InsightFace /analyze
+ * @returns {object|null}      — bäst matchande detection eller null
+ */
+function findBestMatchingDetection(dbFace, detected) {
+  let bestIou = 0.3; // minsta acceptabla överlappning
+  let bestFace = null;
+
+  for (const det of detected) {
+    const iou = computeIoU(
+      dbFace.region_x, dbFace.region_y, dbFace.region_w, dbFace.region_h,
+      det.region_x,   det.region_y,   det.region_w,   det.region_h
+    );
+    if (iou > bestIou) {
+      bestIou = iou;
+      bestFace = det;
+    }
+  }
+
+  return bestFace;
+}
+
+/** Intersection over Union för normaliserade rektanglar. */
+function computeIoU(ax, ay, aw, ah, bx, by, bw, bh) {
+  const ix = Math.max(ax, bx);
+  const iy = Math.max(ay, by);
+  const iw = Math.min(ax + aw, bx + bw) - ix;
+  const ih = Math.min(ay + ah, by + bh) - iy;
+  if (iw <= 0 || ih <= 0) return 0;
+  const intersection = iw * ih;
+  const union = aw * ah + bw * bh - intersection;
+  return union > 0 ? intersection / union : 0;
+}
+
+/**
+ * Konverterar en embedding till number[] oavsett om den kommer som
+ * pgvector-sträng '[0.1,0.2,...]', JSON-array-sträng eller redan är en array.
+ */
+function parseEmbedding(embedding) {
+  if (!embedding) return null;
+  if (Array.isArray(embedding)) return embedding;
+  try {
+    // pgvector returnerar strängen '[0.1,-0.2,...]'
+    return JSON.parse(embedding);
+  } catch {
+    return null;
+  }
+}
+
+/** Ingen ONNX-worker att stänga ner — behålls för bakåtkompatibilitet med server.js */
 export async function shutdownAiWorker() {
-  if (worker) await worker.terminate();
+  aiReady = false;
 }

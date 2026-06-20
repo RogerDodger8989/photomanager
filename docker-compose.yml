@@ -8,7 +8,9 @@ services:
       - /mnt/user/photos:/media/photos
       - /mnt/user/thumbs:/media/thumbs
       - /mnt/user/transcode:/media/transcode
-      - /mnt/user/appdata/photomanager/models:/models
+      - /mnt/user/appdata/photomanager/models:/app/models
+    environment:
+      - INSIGHTFACE_HOME=/app/models
     env_file:
       - ./backend/.env
     depends_on:

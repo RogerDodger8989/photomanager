@@ -226,52 +226,252 @@ async function renderJobs(content) {
   });
 }
 
+// ── AI-förslag: state ────────────────────────────────────────────────────────
+const _aiState = {
+  items: [],        // alla laddade förslag
+  selected: new Set(), // valda face_id:n för batch
+  offset: 0,
+  total: 0,
+  loading: false,
+};
+const AI_PAGE = 48;
+
 async function renderAiSuggestions(content) {
-  const { data, meta } = await api.aiSuggestions({ limit: 50 });
-  if (!data.length) { content.innerHTML = '<div class="text-slate-400 text-sm">Inga väntande AI-förslag.</div>'; return; }
+  // Nollställ state vid varje tab-laddning
+  _aiState.items = [];
+  _aiState.selected.clear();
+  _aiState.offset = 0;
+  _aiState.total = 0;
 
   content.innerHTML = `
-    <div class="flex justify-between items-center mb-3">
-      <div class="text-sm text-slate-400">${meta.total} förslag att granska</div>
+    <div id="ai-header" class="flex flex-wrap items-center gap-3 mb-4">
+      <div id="ai-total-label" class="text-sm text-slate-400">Laddar…</div>
+      <div class="flex-1"></div>
+      <button id="ai-select-all" class="hidden text-xs px-3 py-1.5 border border-slate-600 hover:border-blue-500 text-slate-300 hover:text-white rounded-lg transition-colors">Markera alla</button>
+      <button id="ai-batch-accept" class="hidden text-xs px-3 py-1.5 bg-green-700 hover:bg-green-600 text-white rounded-lg transition-colors opacity-40 pointer-events-none">✓ Godkänn markerade</button>
+      <button id="ai-toggle-select" class="text-xs px-3 py-1.5 border border-slate-600 hover:border-blue-500 text-slate-300 hover:text-white rounded-lg transition-colors">Välj flera</button>
     </div>
-    <div class="grid gap-3" style="grid-template-columns: repeat(auto-fill, minmax(220px, 1fr))">
-      ${data.map((s) => `
-        <div class="bg-slate-800 rounded-xl overflow-hidden">
-          <div class="relative">
-            <img src="/thumbs/${s.thumb_small_path}" class="w-full aspect-video object-cover">
-            <!-- Face box overlay -->
-            <div class="absolute border-2 border-blue-400 rounded" style="
-              left:${s.region_x * 100}%; top:${s.region_y * 100}%;
-              width:${s.region_w * 100}%; height:${s.region_h * 100}%">
-            </div>
-          </div>
-          <div class="p-3">
-            <div class="text-sm text-white font-medium">${s.suggested_person_name}</div>
-            <div class="text-xs text-slate-400">Säkerhet: ${Math.round(s.confidence * 100)}%</div>
-            <div class="flex gap-2 mt-2">
-              <button class="ai-accept flex-1 bg-green-700 hover:bg-green-600 text-white text-xs py-1.5 rounded transition-colors" data-face="${s.face_id}">✓ Rätt</button>
-              <button class="ai-reject flex-1 bg-red-800 hover:bg-red-700 text-white text-xs py-1.5 rounded transition-colors" data-face="${s.face_id}">✗ Fel</button>
-            </div>
-          </div>
-        </div>`).join('')}
+    <div id="ai-grid" class="grid gap-3" style="grid-template-columns: repeat(auto-fill, minmax(180px, 1fr))"></div>
+    <div id="ai-load-more" class="hidden mt-4 text-center">
+      <button class="px-4 py-2 text-sm bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors">Ladda fler</button>
     </div>`;
 
-  content.querySelectorAll('.ai-accept').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      try { await api.acceptAi(btn.dataset.face); btn.closest('.bg-slate-800').remove(); }
-      catch (e) { toast(e.message, 'error'); }
+  let batchMode = false;
+
+  const updateBatchToolbar = () => {
+    const n = _aiState.selected.size;
+    const batchBtn = content.querySelector('#ai-batch-accept');
+    const enabled = n > 0;
+    batchBtn.className = `text-xs px-3 py-1.5 bg-green-700 text-white rounded-lg transition-colors ${enabled ? 'hover:bg-green-600' : 'opacity-40 pointer-events-none'}`;
+    batchBtn.textContent = n > 0 ? `✓ Godkänn ${n} markerade` : '✓ Godkänn markerade';
+  };
+
+  const toggleBatchMode = (on) => {
+    batchMode = on;
+    _aiState.selected.clear();
+    content.querySelector('#ai-toggle-select').textContent = on ? 'Avbryt val' : 'Välj flera';
+    content.querySelector('#ai-select-all').classList.toggle('hidden', !on);
+    content.querySelector('#ai-batch-accept').classList.toggle('hidden', !on);
+    updateBatchToolbar();
+    // Uppdatera alla kort
+    content.querySelectorAll('.ai-card').forEach((card) => {
+      card.querySelector('.ai-check')?.classList.toggle('hidden', !on);
+    });
+  };
+
+  content.querySelector('#ai-toggle-select').addEventListener('click', () => toggleBatchMode(!batchMode));
+
+  content.querySelector('#ai-select-all').addEventListener('click', () => {
+    const allIds = _aiState.items.map((s) => s.face_id);
+    const allSelected = allIds.every((id) => _aiState.selected.has(id));
+    if (allSelected) {
+      _aiState.selected.clear();
+    } else {
+      allIds.forEach((id) => _aiState.selected.add(id));
+    }
+    updateBatchToolbar();
+    content.querySelectorAll('.ai-card').forEach((card) => {
+      const fid = card.dataset.faceId;
+      const sel = _aiState.selected.has(fid);
+      applyCardSelection(card, sel);
     });
   });
 
-  content.querySelectorAll('.ai-reject').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const name = window.prompt('Rätt personnamn (lämna tomt om okänd):');
-      try {
-        await api.rejectAi(btn.dataset.face, name?.trim() ? { correctPersonName: name.trim() } : {});
-        btn.closest('.bg-slate-800').remove();
-      } catch (e) { toast(e.message, 'error'); }
-    });
+  content.querySelector('#ai-batch-accept').addEventListener('click', async () => {
+    if (_aiState.selected.size === 0) return;
+    const ids = [..._aiState.selected];
+    try {
+      await api.batchAcceptAi(ids);
+      ids.forEach((fid) => {
+        content.querySelector(`.ai-card[data-face-id="${fid}"]`)?.remove();
+        _aiState.items = _aiState.items.filter((s) => s.face_id !== fid);
+      });
+      _aiState.selected.clear();
+      _aiState.total -= ids.length;
+      updateTotalLabel();
+      updateBatchToolbar();
+      toast(`${ids.length} förslag godkända`, 'success');
+    } catch (e) { toast(e.message, 'error'); }
   });
+
+  const updateTotalLabel = () => {
+    const el = content.querySelector('#ai-total-label');
+    if (el) el.textContent = `${_aiState.total} förslag att granska`;
+  };
+
+  const appendSuggestions = (suggestions) => {
+    const grid = content.querySelector('#ai-grid');
+    suggestions.forEach((s) => {
+      _aiState.items.push(s);
+      const card = buildAiCard(s, batchMode);
+      card.addEventListener('click', (e) => {
+        if (e.target.closest('.ai-accept, .ai-reject')) return;
+        if (!batchMode) return;
+        const fid = card.dataset.faceId;
+        if (_aiState.selected.has(fid)) _aiState.selected.delete(fid);
+        else _aiState.selected.add(fid);
+        applyCardSelection(card, _aiState.selected.has(fid));
+        updateBatchToolbar();
+      });
+
+      card.querySelector('.ai-accept')?.addEventListener('click', async () => {
+        try {
+          await api.acceptAi(s.face_id);
+          card.remove();
+          _aiState.items = _aiState.items.filter((x) => x.face_id !== s.face_id);
+          _aiState.selected.delete(s.face_id);
+          _aiState.total--;
+          updateTotalLabel();
+          toast('Godkänt', 'success');
+        } catch (err) { toast(err.message, 'error'); }
+      });
+
+      card.querySelector('.ai-reject')?.addEventListener('click', () => {
+        showAiRejectModal(s, async ({ correctPersonId, correctPersonName }) => {
+          try {
+            await api.rejectAi(s.face_id, { correctPersonId, correctPersonName });
+            card.remove();
+            _aiState.items = _aiState.items.filter((x) => x.face_id !== s.face_id);
+            _aiState.selected.delete(s.face_id);
+            _aiState.total--;
+            updateTotalLabel();
+            toast('Avvisat', 'success');
+          } catch (err) { toast(err.message, 'error'); }
+        });
+      });
+
+      grid.appendChild(card);
+    });
+  };
+
+  const loadPage = async () => {
+    if (_aiState.loading) return;
+    _aiState.loading = true;
+    try {
+      const { data, meta } = await api.aiSuggestions({ limit: AI_PAGE, offset: _aiState.offset });
+      _aiState.total = meta.total;
+      _aiState.offset += data.length;
+      updateTotalLabel();
+
+      if (_aiState.offset === 0 && data.length === 0) {
+        content.querySelector('#ai-grid').innerHTML = '<div class="col-span-full text-slate-400 text-sm">Inga väntande AI-förslag.</div>';
+        return;
+      }
+
+      appendSuggestions(data);
+
+      const loadMoreWrap = content.querySelector('#ai-load-more');
+      if (_aiState.offset < _aiState.total) {
+        loadMoreWrap.classList.remove('hidden');
+      } else {
+        loadMoreWrap.classList.add('hidden');
+      }
+    } catch (e) { toast(e.message, 'error'); }
+    finally { _aiState.loading = false; }
+  };
+
+  content.querySelector('#ai-load-more button').addEventListener('click', loadPage);
+
+  await loadPage();
+}
+
+function buildAiCard(s, batchMode) {
+  const card = document.createElement('div');
+  card.className = 'ai-card relative bg-slate-800 rounded-xl overflow-hidden cursor-pointer select-none';
+  card.dataset.faceId = s.face_id;
+
+  // Konfidensens-färg
+  const pct = Math.round(s.confidence * 100);
+  const confColor = pct >= 80 ? 'text-green-400' : pct >= 60 ? 'text-yellow-400' : 'text-red-400';
+
+  card.innerHTML = `
+    <!-- Urklippt ansikts-thumbnail från /api/faces/:id/thumb -->
+    <div class="relative bg-slate-900 flex items-center justify-center" style="height:160px">
+      <img src="/api/faces/${s.face_id}/thumb"
+           class="h-full w-full object-cover"
+           onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+      <div class="hidden w-full h-full items-center justify-center text-4xl bg-slate-900">👤</div>
+      <!-- Batch-checkbox -->
+      <div class="ai-check ${batchMode ? '' : 'hidden'} absolute top-2 right-2 w-5 h-5 rounded-full border-2 border-slate-400 bg-black/50 flex items-center justify-center text-xs text-transparent transition-colors"></div>
+    </div>
+    <!-- Info + knappar -->
+    <div class="p-3">
+      <div class="text-sm font-medium text-white truncate mb-0.5">${s.suggested_person_name}</div>
+      <div class="text-xs ${confColor} mb-2">Säkerhet: ${pct}%</div>
+      <div class="flex gap-1.5">
+        <button class="ai-accept flex-1 bg-green-700 hover:bg-green-600 text-white text-xs py-1.5 rounded-lg transition-colors">✓ Rätt</button>
+        <button class="ai-reject flex-1 bg-red-900 hover:bg-red-800 text-white text-xs py-1.5 rounded-lg transition-colors">✗ Fel</button>
+      </div>
+    </div>`;
+
+  return card;
+}
+
+function applyCardSelection(card, selected) {
+  const check = card.querySelector('.ai-check');
+  if (!check) return;
+  if (selected) {
+    check.className = 'ai-check absolute top-2 right-2 w-5 h-5 rounded-full border-2 border-blue-500 bg-blue-500 flex items-center justify-center text-xs text-white transition-colors';
+    check.textContent = '✓';
+    card.classList.add('ring-2', 'ring-blue-500');
+  } else {
+    check.className = 'ai-check absolute top-2 right-2 w-5 h-5 rounded-full border-2 border-slate-400 bg-black/50 flex items-center justify-center text-xs text-transparent transition-colors';
+    check.textContent = '';
+    card.classList.remove('ring-2', 'ring-blue-500');
+  }
+}
+
+function showAiRejectModal(suggestion, onConfirm) {
+  const overlay = document.createElement('div');
+  overlay.className = 'fixed inset-0 z-[300] flex items-center justify-center bg-black/60 backdrop-blur-sm';
+  overlay.innerHTML = `
+    <div class="bg-slate-800 border border-slate-700 rounded-2xl shadow-2xl w-80 p-6">
+      <h3 class="text-base font-semibold text-white mb-1">Avvisa förslag</h3>
+      <p class="text-xs text-slate-400 mb-4">Förslaget var: <strong class="text-white">${suggestion.suggested_person_name}</strong></p>
+      <label class="text-xs text-slate-400 mb-1 block">Rätt person (valfritt)</label>
+      <input id="ai-reject-name" type="text" placeholder="Skriv namn eller lämna tomt"
+        class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 mb-5">
+      <div class="flex gap-2 justify-end">
+        <button id="ai-reject-cancel" class="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors rounded-lg hover:bg-slate-700">Avbryt</button>
+        <button id="ai-reject-ok" class="px-4 py-2 text-sm font-medium bg-red-700 hover:bg-red-600 text-white rounded-lg transition-colors">Avvisa</button>
+      </div>
+    </div>`;
+
+  document.body.appendChild(overlay);
+  const input = overlay.querySelector('#ai-reject-name');
+  input.focus();
+
+  const doCancel = () => overlay.remove();
+  const doConfirm = () => {
+    const name = input.value.trim();
+    overlay.remove();
+    onConfirm({ correctPersonName: name || undefined });
+  };
+
+  overlay.querySelector('#ai-reject-ok').addEventListener('click', doConfirm);
+  overlay.querySelector('#ai-reject-cancel').addEventListener('click', doCancel);
+  overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) doCancel(); });
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') doConfirm(); if (e.key === 'Escape') doCancel(); });
 }
 
 async function renderAuditLog(content) {
