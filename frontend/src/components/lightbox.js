@@ -426,8 +426,16 @@ function row(label, value) {
 }
 
 function buildOrgSection(org) {
-  const chips = (org.keywords ?? []).map(k =>
-    `<span class="inline-block bg-slate-700 text-slate-300 text-xs px-2 py-0.5 rounded-full">${k}</span>`
+  const keywords = org.keywords ?? [];
+
+  // Klickbara taggar med × för borttagning och länk till TagManager
+  const chips = keywords.map(k =>
+    `<span class="inline-flex items-center gap-1 bg-slate-700 text-slate-300 text-xs px-2 py-0.5 rounded-full group">
+      <a href="#/tags" class="tag-chip-link hover:text-blue-300 transition-colors"
+         data-tag="${k.replace(/"/g, '&quot;')}">${k}</a>
+      <button class="tag-chip-remove text-slate-500 hover:text-red-400 transition-colors leading-none"
+              data-tag="${k.replace(/"/g, '&quot;')}">×</button>
+    </span>`
   ).join(' ');
 
   return `
@@ -453,10 +461,16 @@ function buildOrgSection(org) {
           ).join('')}
         </div>
       </div>
-      ${chips ? `<div>
+      <div>
         <div class="text-xs text-slate-500 mb-1.5">Nyckelord</div>
-        <div class="flex flex-wrap gap-1">${chips}</div>
-      </div>` : ''}
+        <div id="lb-tag-chips" class="flex flex-wrap gap-1">${chips}</div>
+        <!-- Inline lägg-till-tagg -->
+        <div class="relative mt-1.5">
+          <input id="lb-tag-input" type="text" placeholder="+ Lägg till tagg…"
+            class="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-300 focus:outline-none focus:border-blue-500 placeholder-slate-600">
+          <div id="lb-tag-suggestions" class="hidden absolute z-20 left-0 right-0 top-full mt-0.5 bg-slate-800 border border-slate-600 rounded shadow-lg max-h-40 overflow-y-auto"></div>
+        </div>
+      </div>
     </div>`;
 }
 
@@ -686,6 +700,112 @@ function initDrawerInteractions(container, assetId, m) {
       } catch { toast('Kunde inte spara betyg', 'error'); }
     });
   });
+
+  // ── Taggar: klickbara chips + inline-edit ────────────────────────────────────
+  /** @type {string[]} */
+  let currentTags = [...(m.organization.keywords ?? [])];
+
+  const rebuildTagChips = () => {
+    const chipsEl = container.querySelector('#lb-tag-chips');
+    if (!chipsEl) return;
+    chipsEl.innerHTML = currentTags.map(k =>
+      `<span class="inline-flex items-center gap-1 bg-slate-700 text-slate-300 text-xs px-2 py-0.5 rounded-full">
+        <a href="#/tags" class="tag-chip-link hover:text-blue-300 transition-colors" data-tag="${k}">${k}</a>
+        <button class="tag-chip-remove text-slate-500 hover:text-red-400 leading-none" data-tag="${k}">×</button>
+      </span>`
+    ).join(' ');
+    bindTagChipEvents();
+  };
+
+  const saveCurrentTags = async () => {
+    try { await api.patchMeta(assetId, { tags: currentTags }); }
+    catch { toast('Kunde inte spara taggar', 'error'); }
+  };
+
+  const bindTagChipEvents = () => {
+    // Klick på tagg-namn → öppna TagManager filtrerat på taggen
+    container.querySelectorAll('.tag-chip-link').forEach((el) => {
+      el.addEventListener('click', (e) => {
+        e.preventDefault();
+        const tag = /** @type {HTMLElement} */ (el).dataset.tag;
+        window.location.hash = `#/tags`;
+        // Liten fördröjning så routen hinner ladda, sen trigga sökning
+        setTimeout(() => {
+          const searchEl = /** @type {HTMLInputElement|null} */ (document.getElementById('tag-search'));
+          if (searchEl && tag) { searchEl.value = tag; searchEl.dispatchEvent(new Event('input')); }
+        }, 150);
+      });
+    });
+
+    // Klick på × → ta bort tagg
+    container.querySelectorAll('.tag-chip-remove').forEach((el) => {
+      el.addEventListener('click', async () => {
+        const tag = /** @type {HTMLElement} */ (el).dataset.tag;
+        currentTags = currentTags.filter((t) => t !== tag);
+        rebuildTagChips();
+        await saveCurrentTags();
+        toast(`Tagg "${tag}" borttagen`, 'success');
+      });
+    });
+  };
+
+  bindTagChipEvents();
+
+  // Autocomplete-input
+  const tagInput = /** @type {HTMLInputElement|null} */ (container.querySelector('#lb-tag-input'));
+  const tagSugg  = container.querySelector('#lb-tag-suggestions');
+  let suggTimer;
+
+  tagInput?.addEventListener('input', () => {
+    clearTimeout(suggTimer);
+    const q = tagInput.value.trim();
+    if (!q) { tagSugg?.classList.add('hidden'); return; }
+    suggTimer = setTimeout(async () => {
+      try {
+        const res = await api.tagAutoSuggest(q);
+        const items = res.data ?? [];
+        if (!tagSugg) return;
+        tagSugg.innerHTML = items.map((t) =>
+          `<div class="tag-sugg-item px-3 py-1.5 hover:bg-slate-700 cursor-pointer text-xs text-slate-200" data-name="${t.name}">${t.path ?? t.name}</div>`
+        ).join('');
+        tagSugg.classList.toggle('hidden', !items.length);
+        tagSugg.querySelectorAll('.tag-sugg-item').forEach((el) => {
+          el.addEventListener('click', async () => {
+            const name = /** @type {HTMLElement} */ (el).dataset.name ?? '';
+            if (name && !currentTags.includes(name)) {
+              currentTags.push(name);
+              rebuildTagChips();
+              await saveCurrentTags();
+              toast(`Tagg "${name}" tillagd`, 'success');
+            }
+            if (tagInput) tagInput.value = '';
+            tagSugg?.classList.add('hidden');
+          });
+        });
+      } catch {}
+    }, 250);
+  });
+
+  tagInput?.addEventListener('keydown', async (e) => {
+    if (/** @type {KeyboardEvent} */ (e).key === 'Enter') {
+      e.preventDefault();
+      const name = tagInput.value.trim().toLowerCase();
+      if (name && !currentTags.includes(name)) {
+        currentTags.push(name);
+        rebuildTagChips();
+        await saveCurrentTags();
+        toast(`Tagg "${name}" tillagd`, 'success');
+      }
+      tagInput.value = '';
+      tagSugg?.classList.add('hidden');
+    }
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!tagInput?.contains(/** @type {Node} */ (e.target)) && !tagSugg?.contains(/** @type {Node} */ (e.target))) {
+      tagSugg?.classList.add('hidden');
+    }
+  }, { capture: true });
 
   // ── Ansiktsoverlay-toggle ────────────────────────────────────────────────────
   let facesVisible = true;

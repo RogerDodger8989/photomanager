@@ -138,7 +138,8 @@ export async function extractMetadata(filePath) {
     iptc: {},
     xmp: {},
     faces: [],         // [{ name, regionX, regionY, regionW, regionH, source }]
-    tags: [],          // nyckelord från IPTC/XMP
+    tags: [],              // nyckelord från IPTC/XMP (platta)
+    hierarchicalTags: [],  // taggsökvägar från DigiKam/Lightroom [[del1, del2, ...], ...]
     rating: null,      // 1–5 från XMP:Rating
     title: null,       // XMP:Title / IPTC:ObjectName
     description: null, // XMP:Description / IPTC:Caption-Abstract
@@ -233,7 +234,31 @@ export async function extractMetadata(filePath) {
     const kwRaw = raw.subject ?? raw[25] ?? raw.Keywords ?? raw['dc:subject'] ?? null;
     if (kwRaw) {
       const arr = Array.isArray(kwRaw) ? kwRaw : [kwRaw];
-      result.tags = arr.map((k) => String(k).toLowerCase().trim()).filter(Boolean);
+      result.tags = arr.map((k) => String(k).trim()).filter(Boolean);
+    }
+
+    // Hierarkiska taggar från DigiKam (TagsList) — separator "/", bara fullständiga paths
+    const dkList = raw['TagsList'];
+    if (dkList) {
+      const arr = Array.isArray(dkList) ? dkList : [dkList];
+      result.hierarchicalTags = arr
+        .map((s) => String(s).split('/').map((p) => p.trim()).filter(Boolean))
+        .filter((parts) => parts.length > 0);
+    }
+
+    // Hierarkiska taggar från Lightroom (hierarchicalSubject) — separator "|"
+    // Innehåller BÅDE partiella paths ("Årtal") och fullständiga ("Årtal|1970-Talet|1977").
+    // Behåll bara "maximala" paths — de som inte är prefix till någon annan path.
+    if (!result.hierarchicalTags.length) {
+      const lrHier = raw['hierarchicalSubject'];
+      if (lrHier) {
+        const arr = Array.isArray(lrHier) ? lrHier : [lrHier];
+        const entries = arr.map((s) => String(s).trim()).filter(Boolean);
+        const maximal = entries.filter((p) => !entries.some((q) => q.startsWith(p + '|')));
+        result.hierarchicalTags = maximal
+          .map((s) => s.split('|').map((p) => p.trim()).filter(Boolean))
+          .filter((parts) => parts.length > 0);
+      }
     }
 
     // === MOTION PHOTO (Samsung/Google/OnePlus) ===

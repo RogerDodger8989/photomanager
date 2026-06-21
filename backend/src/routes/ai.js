@@ -193,8 +193,8 @@ export default async function aiRoutes(fastify) {
     // Kör asynkront — svarar direkt till klienten
     const { processAssetFaces } = await import('../services/aiService.js');
     const { config } = await import('../config.js');
-    const { join } = await import('path');
-    processAssetFaces(assetId, join(config.media.photosPath, rows[0].file_path))
+    const { resolve } = await import('path');
+    processAssetFaces(assetId, resolve(config.media.photosPath, rows[0].file_path))
       .catch((err) => console.error(`AI reindex misslyckades för ${assetId}:`, err));
 
     return reply.send({ data: { message: 'AI-analys startad i bakgrunden' } });

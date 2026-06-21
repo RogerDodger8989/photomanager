@@ -1,6 +1,8 @@
+import { join, resolve } from 'path';
 import { query } from '../db/pool.js';
 import { getJobStats } from '../services/jobService.js';
 import { backfillMotionPhotos } from '../workers/motionPhotoBackfill.js';
+import { config } from '../config.js';
 import bcrypt from 'bcrypt';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -34,6 +36,116 @@ export default async function adminRoutes(fastify) {
       [id]
     );
     return reply.send({ data: { ok: true } });
+  });
+
+  // GET /api/admin/debug-metadata?path=<relativ-sökväg> — visa råa XMP-fält från en fil
+  fastify.get('/api/admin/debug-metadata', async (request, reply) => {
+    const { path: relPath } = request.query;
+    if (!relPath) return reply.code(400).send({ error: 'path krävs' });
+    const absPath = resolve(config.media.photosPath, relPath);
+    const exifr = (await import('exifr')).default;
+    const raw = await exifr.parse(absPath, {
+      tiff: true, exif: true, iptc: true, xmp: true,
+      translateKeys: false, translateValues: false, reviveValues: false,
+    });
+    // Filtrera ut relevanta tag-fält
+    const tagFields = {};
+    for (const key of Object.keys(raw ?? {})) {
+      const lk = key.toLowerCase();
+      if (lk.includes('subject') || lk.includes('keyword') || lk.includes('tag') || lk.includes('hier')) {
+        tagFields[key] = raw[key];
+      }
+    }
+    return reply.send({ tagFields, allKeys: Object.keys(raw ?? {}) });
+  });
+
+  // POST /api/admin/reindex-all — re-extrahera taggar för alla aktiva filer i bakgrunden
+  fastify.post('/api/admin/reindex-all', async (request, reply) => {
+    const { rows } = await query(
+      `SELECT id, file_path FROM assets WHERE status = 'active'`
+    );
+    const total = rows.length;
+
+    setImmediate(async () => {
+      const { extractMetadata } = await import('../services/metadataService.js');
+      for (const row of rows) {
+        try {
+          const absPath = resolve(config.media.photosPath, row.file_path);
+          const meta = await extractMetadata(absPath);
+
+          // Ta bort gamla taggar för denna fil och bygg om från metadata
+          await query('DELETE FROM asset_tags WHERE asset_id = $1', [row.id]);
+
+          const hierPaths = meta.hierarchicalTags ?? [];
+          const flatTags  = meta.tags ?? [];
+          const coveredByHierarchy = new Set();
+          for (const parts of hierPaths) {
+            for (const part of parts) coveredByHierarchy.add(part.toLowerCase());
+          }
+
+          for (const parts of hierPaths) {
+            let parentId = null;
+            let parentPath = null;
+            for (const part of parts) {
+              const fullPath = parentPath ? `${parentPath}/${part}` : part;
+              const underPersoner = fullPath === 'Personer' || fullPath.toLowerCase().startsWith('personer/');
+              const { rows: tr } = await query(
+                `INSERT INTO tags (name, path, parent_id, is_face_tag, export_only_leaf, show_lifespan, export_synonyms)
+                 VALUES ($1, $2, $3, $4, $4, $4, NOT $4)
+                 ON CONFLICT (path) DO UPDATE SET
+                   name             = EXCLUDED.name,
+                   parent_id        = EXCLUDED.parent_id,
+                   is_face_tag      = CASE WHEN EXCLUDED.is_face_tag THEN TRUE ELSE tags.is_face_tag END,
+                   export_only_leaf = CASE WHEN EXCLUDED.export_only_leaf THEN TRUE ELSE tags.export_only_leaf END,
+                   show_lifespan    = CASE WHEN EXCLUDED.show_lifespan THEN TRUE ELSE tags.show_lifespan END,
+                   export_synonyms  = CASE WHEN NOT EXCLUDED.export_synonyms THEN FALSE ELSE tags.export_synonyms END
+                 RETURNING id`,
+                [part, fullPath, parentId, underPersoner]
+              );
+              parentId   = tr[0].id;
+              parentPath = fullPath;
+            }
+            if (parentId) {
+              await query(
+                `INSERT INTO asset_tags (asset_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+                [row.id, parentId]
+              );
+            }
+          }
+
+          for (const tagName of flatTags) {
+            if (coveredByHierarchy.has(tagName.toLowerCase())) continue;
+            const { rows: tr } = await query(
+              `INSERT INTO tags (name, path) VALUES ($1, $1)
+               ON CONFLICT (path) DO UPDATE SET name = EXCLUDED.name, parent_id = EXCLUDED.parent_id
+               RETURNING id`,
+              [tagName]
+            );
+            await query(
+              `INSERT INTO asset_tags (asset_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+              [row.id, tr[0].id]
+            );
+          }
+        } catch { /* hoppa över enstaka fel */ }
+      }
+      // Ta bort taggar som varken används av bilder ELLER är förälder till en använd tagg
+      await query(`
+        WITH RECURSIVE kept AS (
+          -- Direkt använda löv-taggar
+          SELECT tag_id AS id FROM asset_tags
+          UNION
+          -- Alla förfäder (föräldrar, far-föräldrar osv) till använda taggar
+          SELECT t.parent_id
+          FROM tags t
+          JOIN kept k ON t.id = k.id
+          WHERE t.parent_id IS NOT NULL
+        )
+        DELETE FROM tags WHERE id NOT IN (SELECT id FROM kept)
+      `);
+      console.log(`Re-indexering klar: ${total} filer behandlade`);
+    });
+
+    return reply.send({ data: { queued: total } });
   });
 
   // POST /api/admin/requeue-thumbnails — köa om alla bilder utan thumbnail

@@ -1,4 +1,4 @@
-import { join } from 'path';
+import { join, resolve } from 'path';
 import { config } from '../config.js';
 import { query } from '../db/pool.js';
 import { extractMetadata } from '../services/metadataService.js';
@@ -18,7 +18,7 @@ export async function backfillMotionPhotos() {
 
   for (const row of rows) {
     try {
-      const absPath = join(config.media.photosPath, row.file_path);
+      const absPath = resolve(config.media.photosPath,row.file_path);
       const meta = await extractMetadata(absPath);
 
       if (meta.isMotionPhoto) {

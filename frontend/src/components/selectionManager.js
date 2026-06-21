@@ -200,7 +200,10 @@ export function createSelectionManager(getGrid, getAllAssets, customActions = []
     }, true); // capture — körs innan lightbox-klick
   }
 
-  return { mountToolbar, attachToCell, clearAll, selectAll, syncCellVisuals, deleteSelected };
+  function getSelected() { return selected; }
+  function isSelected(id) { return selected.has(id); }
+
+  return { mountToolbar, attachToCell, clearAll, selectAll, syncCellVisuals, deleteSelected, getSelected, isSelected };
 }
 
 export function downloadBlob(blob, filename) {

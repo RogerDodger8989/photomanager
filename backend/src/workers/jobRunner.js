@@ -3,7 +3,7 @@ import { startJob, completeJob, failJob, getPendingJobs } from '../services/jobS
 import { transcodeVideo } from './transcoder.js';
 import { generateThumbnails } from './thumbnailer.js';
 import { config } from '../config.js';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import { broadcast } from '../services/sseService.js';
 
 const MAX_ATTEMPTS = 3;
@@ -91,7 +91,7 @@ async function runThumbnailJob(job) {
       return;
     }
 
-    const absPath = join(config.media.photosPath, rows[0].file_path);
+    const absPath = resolve(config.media.photosPath,rows[0].file_path);
     await generateThumbnails(job.asset_id, absPath, rows[0].mime_type);
     await completeJob(job.id);
   } catch (err) {

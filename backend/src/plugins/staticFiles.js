@@ -1,17 +1,22 @@
 import fp from 'fastify-plugin';
 import staticPlugin from '@fastify/static';
 import { fileURLToPath } from 'url';
-import { dirname, resolve } from 'path';
+import { dirname, resolve, isAbsolute } from 'path';
 import { config } from '../config.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FRONTEND_PUBLIC = resolve(__dirname, '../../../frontend/public');
 const FRONTEND_SRC    = resolve(__dirname, '../../../frontend/src');
 
+// Ensure thumbsPath is absolute (config may use relative paths)
+const thumbsPathAbs = isAbsolute(config.media.thumbsPath)
+  ? config.media.thumbsPath
+  : resolve(process.cwd(), config.media.thumbsPath);
+
 export default fp(async (fastify) => {
   // Thumbnails
   fastify.register(staticPlugin, {
-    root: config.media.thumbsPath,
+    root: thumbsPathAbs,
     prefix: '/thumbs/',
     decorateReply: true,   // första registrering sätter sendFile-decorator
   });

@@ -1,7 +1,7 @@
 import { query } from '../db/pool.js';
 import { logAudit } from '../services/authService.js';
 import { writeMetaToFile } from '../services/xmpService.js';
-import { join, dirname, basename, relative, extname } from 'path';
+import { join, resolve, dirname, basename, relative, extname } from 'path';
 import { rename, mkdir, copyFile, unlink, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { config } from '../config.js';
@@ -153,7 +153,7 @@ export default async function assetsRoutes(fastify) {
     );
     if (!rows[0]) return reply.status(404).send({ error: 'Hittades inte' });
 
-    const absPath = join(config.media.photosPath, rows[0].file_path);
+    const absPath = resolve(config.media.photosPath,rows[0].file_path);
     const meta = await extractMetadata(absPath);
 
     const updates = [];
@@ -320,7 +320,7 @@ export default async function assetsRoutes(fastify) {
       const { rows: ar } = await query('SELECT file_path FROM assets WHERE id = $1', [id]);
       if (ar[0]?.file_path) {
         try {
-          const absPath = join(config.media.photosPath, ar[0].file_path);
+          const absPath = resolve(config.media.photosPath,ar[0].file_path);
           const xmpFields = {};
           if (rating !== undefined) xmpFields.rating = rating;
           if (title !== undefined)  xmpFields.title  = title;
@@ -503,7 +503,7 @@ export default async function assetsRoutes(fastify) {
       return reply.status(400).send({ error: 'Videoredigering stöds inte' });
     }
 
-    const absOriginal = join(config.media.photosPath, asset.file_path);
+    const absOriginal = resolve(config.media.photosPath,asset.file_path);
     if (!existsSync(absOriginal)) return reply.status(404).send({ error: 'Originalfil saknas' });
 
     // Bygg Sharp-pipeline
@@ -558,7 +558,7 @@ export default async function assetsRoutes(fastify) {
       const newFileName = `${baseName}_edit${ext || '.jpg'}`;
       const origDir     = dirname(asset.file_path);
       const newRelPath  = `${origDir}/${newFileName}`.replace(/^\//, '');
-      const absNewPath  = join(config.media.photosPath, newRelPath);
+      const absNewPath  = resolve(config.media.photosPath,newRelPath);
 
       const buf = await pipeline.toFormat(outFormat).toBuffer();
       await writeFile(absNewPath, buf);
@@ -620,7 +620,7 @@ export default async function assetsRoutes(fastify) {
 
     const relPath      = rows[0].file_path;
     const sourceFolder = rows[0].source_folder;                    // absolut: /media/Bilder
-    const absPath      = join(config.media.photosPath, relPath);   // absolut sökväg till filen
+    const absPath      = resolve(config.media.photosPath,relPath);   // absolut sökväg till filen
     let trashPath = null;
 
     if (existsSync(absPath)) {
@@ -686,7 +686,7 @@ export default async function assetsRoutes(fastify) {
     if (!rows[0]) return reply.status(404).send({ error: 'Hittades inte i papperskorgen' });
 
     const { file_path, trash_path } = rows[0];
-    const absOriginal = join(config.media.photosPath, file_path);
+    const absOriginal = resolve(config.media.photosPath,file_path);
 
     // Flytta tillbaka filen om den finns i .trash
     if (trash_path && existsSync(trash_path)) {
@@ -762,6 +762,136 @@ export default async function assetsRoutes(fastify) {
     );
 
     return reply.send({ data: rows });
+  });
+
+  // ── PATCH /api/assets/bulk-tags — lägg till/ta bort taggar på flera assets (C) ──
+  fastify.patch('/api/assets/bulk-tags', {
+    onRequest: [fastify.authenticate],
+    schema: {
+      body: {
+        type: 'object',
+        required: ['assetIds'],
+        properties: {
+          assetIds:    { type: 'array', items: { type: 'string' }, minItems: 1 },
+          addTags:     { type: 'array', items: { type: 'string' } },
+          removeTags:  { type: 'array', items: { type: 'string' } },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { assetIds, addTags = [], removeTags = [] } = request.body;
+    const userId  = request.user.id;
+    const isAdmin = request.user.role === 'admin';
+
+    // Kontrollera att användaren äger alla assets
+    if (!isAdmin) {
+      const { rows: owned } = await query(
+        `SELECT id FROM assets WHERE id = ANY($1::uuid[]) AND owner_id = $2`,
+        [assetIds, userId]
+      );
+      if (owned.length !== assetIds.length) {
+        return reply.code(403).send({ error: 'Du äger inte alla valda filer' });
+      }
+    }
+
+    // Lägg till taggar
+    for (const tagName of addTags) {
+      const normalized = tagName.toLowerCase().trim();
+      const { rows: tagRows } = await query(
+        `INSERT INTO tags (name, path) VALUES ($1, $1) ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id`,
+        [normalized]
+      );
+      const tagId = tagRows[0].id;
+      await query(
+        `INSERT INTO asset_tags (asset_id, tag_id)
+         SELECT unnest($1::uuid[]), $2
+         ON CONFLICT DO NOTHING`,
+        [assetIds, tagId]
+      );
+    }
+
+    // Ta bort taggar
+    for (const tagName of removeTags) {
+      const normalized = tagName.toLowerCase().trim();
+      const { rows: tagRows } = await query('SELECT id FROM tags WHERE name = $1', [normalized]);
+      if (tagRows.length) {
+        await query(
+          `DELETE FROM asset_tags WHERE asset_id = ANY($1::uuid[]) AND tag_id = $2`,
+          [assetIds, tagRows[0].id]
+        );
+      }
+    }
+
+    return reply.send({ data: { updated: assetIds.length, addedTags: addTags, removedTags: removeTags } });
+  });
+
+  // PATCH /api/assets/bulk-datetime — sätt datum på flera assets
+  fastify.patch('/api/assets/bulk-datetime', {
+    onRequest: [fastify.authenticate],
+    schema: {
+      body: {
+        type: 'object',
+        required: ['assetIds', 'takenAt'],
+        properties: {
+          assetIds: { type: 'array', items: { type: 'string' }, minItems: 1 },
+          takenAt:  { type: 'string' },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { assetIds, takenAt } = request.body;
+    const userId  = request.user.id;
+    const isAdmin = request.user.role === 'admin';
+    const ts = new Date(takenAt);
+    if (isNaN(ts.getTime())) return reply.status(400).send({ error: 'Ogiltigt datum' });
+
+    const { rowCount } = await query(
+      `UPDATE assets SET taken_at = $1
+       WHERE id = ANY($2::uuid[]) AND status = 'active' AND ($3 OR owner_id = $4)`,
+      [ts, assetIds, isAdmin, userId],
+    );
+    return reply.send({ data: { updated: rowCount } });
+  });
+
+  // PATCH /api/assets/bulk-location — sätt plats på flera assets
+  fastify.patch('/api/assets/bulk-location', {
+    onRequest: [fastify.authenticate],
+    schema: {
+      body: {
+        type: 'object',
+        required: ['assetIds'],
+        properties: {
+          assetIds: { type: 'array', items: { type: 'string' }, minItems: 1 },
+          lat:      { type: ['number', 'null'] },
+          lon:      { type: ['number', 'null'] },
+          label:    { type: ['string', 'null'] },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { assetIds, lat, lon, label } = request.body;
+    const userId  = request.user.id;
+    const isAdmin = request.user.role === 'admin';
+
+    const { rows: assets } = await query(
+      `SELECT id FROM assets WHERE id = ANY($1::uuid[]) AND status = 'active' AND ($2 OR owner_id = $3)`,
+      [assetIds, isAdmin, userId],
+    );
+
+    for (const a of assets) {
+      if (lat != null && lon != null) {
+        await upsertAssetLocation(a.id, lat, lon);
+        if (label != null) {
+          await query(`UPDATE assets SET location_label = $1 WHERE id = $2`, [label, a.id]);
+        }
+      } else {
+        await query(
+          `UPDATE assets SET location = NULL, location_label = NULL WHERE id = $1`,
+          [a.id],
+        );
+      }
+    }
+    return reply.send({ data: { updated: assets.length } });
   });
 }
 

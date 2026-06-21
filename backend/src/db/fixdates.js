@@ -1,6 +1,6 @@
 // Fixar taken_at och file_created_at för befintliga assets
 import { stat } from 'fs/promises';
-import { join } from 'path';
+import { resolve } from 'path';
 import { pool } from './pool.js';
 import { config } from '../config.js';
 
@@ -36,7 +36,7 @@ for (const row of rows) {
   // Försök hämta mtime från disk
   let mtime = null;
   try {
-    const absPath = join(config.media.photosPath, row.file_path);
+    const absPath = resolve(config.media.photosPath,row.file_path);
     const s = await stat(absPath);
     if (s.mtime > EPOCH) mtime = s.mtime;
   } catch {}

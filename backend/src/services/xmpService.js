@@ -2,7 +2,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { writeFile, unlink } from 'fs/promises';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import { query } from '../db/pool.js';
 import { config } from '../config.js';
 
@@ -51,7 +51,7 @@ export async function syncFacesToFile(assetId) {
       [assetId]
     );
 
-    const filePath = join(config.media.photosPath, assetRows[0].file_path);
+    const filePath = resolve(config.media.photosPath,assetRows[0].file_path);
 
     // Bygg MWG XMP-block (tom Bag om inga faces → rensar regioner i filen)
     const regionItems = faces.map(f => {

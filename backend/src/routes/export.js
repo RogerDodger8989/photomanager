@@ -1,5 +1,5 @@
 import { createReadStream, existsSync } from 'fs';
-import { join, extname, basename } from 'path';
+import { join, resolve, extname, basename } from 'path';
 import archiver from 'archiver';
 import { query } from '../db/pool.js';
 import { config } from '../config.js';
@@ -88,7 +88,7 @@ export default async function exportRoutes(fastify) {
     archive.pipe(reply.raw);
 
     for (const asset of assets) {
-      const filePath = join(config.media.photosPath, asset.file_path);
+      const filePath = resolve(config.media.photosPath,asset.file_path);
       if (!existsSync(filePath)) continue;
 
       // Originalfil
@@ -143,7 +143,7 @@ export default async function exportRoutes(fastify) {
     archive.pipe(reply.raw);
 
     for (const asset of assets) {
-      const filePath = join(config.media.photosPath, asset.file_path);
+      const filePath = resolve(config.media.photosPath,asset.file_path);
       if (!existsSync(filePath)) continue;
       archive.file(filePath, { name: asset.file_name });
       const xmp = buildXmp(asset, asset.tags, asset.persons);

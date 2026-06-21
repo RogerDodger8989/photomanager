@@ -1,8 +1,10 @@
 import { query } from '../db/pool.js';
 import { rename, copyFile, unlink, mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
-import { basename, join, dirname, relative } from 'path';
+import { basename, join, resolve, dirname, relative, extname } from 'path';
 import { config } from '../config.js';
+import { v4 as uuidv4 } from 'uuid';
+import { generateThumbnails } from '../workers/thumbnailer.js';
 
 function toRelPath(absolutePath) {
   const root = config.media.photosPath.replace(/\\/g, '/').replace(/\/$/, '');
@@ -327,5 +329,135 @@ export default async function filesRoutes(fastify) {
     );
 
     return reply.send({ data: { trashedCount: rows.length } });
+  });
+
+  // POST /api/files/rename-asset — byter namn på en enskild fil på disk + uppdaterar DB
+  fastify.post('/api/files/rename-asset', {
+    onRequest: [fastify.authenticate],
+    schema: {
+      body: {
+        type: 'object',
+        required: ['assetId', 'newName'],
+        properties: {
+          assetId: { type: 'string' },
+          newName: { type: 'string', minLength: 1 },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { assetId, newName } = request.body;
+    const userId  = request.user.id;
+    const isAdmin = request.user.role === 'admin';
+
+    const { rows } = await query(
+      `SELECT id, file_path, file_name, source_folder FROM assets
+       WHERE id = $1 AND status = 'active' AND ($2 OR owner_id = $3)`,
+      [assetId, isAdmin, userId],
+    );
+    if (!rows[0]) return reply.status(404).send({ error: 'Asset hittades inte' });
+
+    const asset = rows[0];
+
+    // Sanitera — inga path-separatorer eller nollbytes
+    const safeName = newName.replace(/[/\\<>:"|?*\x00]/g, '').trim();
+    if (!safeName) return reply.status(400).send({ error: 'Ogiltigt filnamn' });
+
+    const photosPath = config.media.photosPath;
+    const absOld     = resolve(photosPath, asset.file_path);
+    const dir        = dirname(absOld);
+    const absNew     = join(dir, safeName);
+    const relNew     = toRelPath(absNew);
+
+    if (absOld === absNew) return reply.send({ data: { unchanged: true } });
+    if (existsSync(absNew)) return reply.status(409).send({ error: 'En fil med det namnet finns redan' });
+
+    await rename(absOld, absNew);
+    await query(
+      `UPDATE assets SET file_name = $1, file_path = $2 WHERE id = $3`,
+      [safeName, relNew, assetId],
+    );
+
+    return reply.send({ data: { ok: true, newName: safeName } });
+  });
+
+  // POST /api/files/copy — kopierar filer till en annan bevakad mapp och skapar nya assets
+  fastify.post('/api/files/copy', {
+    onRequest: [fastify.authenticate],
+    schema: {
+      body: {
+        type: 'object',
+        required: ['assetIds', 'targetFolder'],
+        properties: {
+          assetIds:     { type: 'array', items: { type: 'string' }, minItems: 1 },
+          targetFolder: { type: 'string', minLength: 1 },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { assetIds, targetFolder } = request.body;
+    const userId  = request.user.id;
+    const isAdmin = request.user.role === 'admin';
+
+    const { rows: wfRows } = await query(
+      'SELECT path FROM watched_folders WHERE path = $1', [targetFolder],
+    );
+    if (!wfRows.length) return reply.status(400).send({ error: 'Målmappen är inte en bevakad mapp' });
+    if (!existsSync(targetFolder)) return reply.status(400).send({ error: 'Målmappen finns inte på disk' });
+
+    const { rows: assets } = await query(
+      `SELECT id, file_path, file_name, mime_type, file_size, file_hash,
+              taken_at, width, height, title, description, rating, owner_id
+       FROM assets
+       WHERE id = ANY($1::uuid[]) AND status = 'active' AND ($2 OR owner_id = $3)`,
+      [assetIds, isAdmin, userId],
+    );
+    if (!assets.length) return reply.status(404).send({ error: 'Inga filer hittades' });
+
+    const photosPath = config.media.photosPath;
+    const copied  = [];
+    const errors  = [];
+
+    for (const a of assets) {
+      const absOld = resolve(photosPath, a.file_path);
+      let destName = a.file_name;
+      let absNew   = join(targetFolder, destName);
+
+      // Kollisionshantering: lägg till suffix
+      if (existsSync(absNew)) {
+        const ext  = extname(destName);
+        const base = destName.slice(0, destName.length - ext.length);
+        let n = 1;
+        while (existsSync(absNew)) {
+          destName = `${base}_${n}${ext}`;
+          absNew   = join(targetFolder, destName);
+          n++;
+        }
+      }
+
+      try {
+        await copyFile(absOld, absNew);
+        const relNew = toRelPath(absNew);
+        const newId  = uuidv4();
+        await query(
+          `INSERT INTO assets
+             (id, file_path, file_name, mime_type, file_size, file_hash,
+              taken_at, width, height, title, description, rating, owner_id,
+              source_folder, status, indexed_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'active',NOW())`,
+          [
+            newId, relNew, destName, a.mime_type, a.file_size, a.file_hash,
+            a.taken_at, a.width, a.height, a.title, a.description, a.rating,
+            userId, targetFolder,
+          ],
+        );
+        // Generera miniatyrer asynkront
+        generateThumbnails(newId, absNew, a.mime_type).catch(() => {});
+        copied.push(newId);
+      } catch (err) {
+        errors.push({ id: a.id, error: err.message });
+      }
+    }
+
+    return reply.send({ data: { copied: copied.length, errors } });
   });
 }

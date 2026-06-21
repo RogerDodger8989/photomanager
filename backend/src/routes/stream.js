@@ -1,5 +1,5 @@
 import { stat, open } from 'fs/promises';
-import { join, dirname, basename } from 'path';
+import { join, resolve, dirname, basename } from 'path';
 import { config } from '../config.js';
 import { query } from '../db/pool.js';
 import { logAudit } from '../services/authService.js';
@@ -117,7 +117,7 @@ export default async function streamRoutes(fastify) {
       filePath = join(config.media.transcodePath, asset.transcoded_path);
       contentType = 'video/mp4';
     } else {
-      filePath = join(config.media.photosPath, asset.file_path);
+      filePath = resolve(config.media.photosPath,asset.file_path);
       contentType = asset.mime_type ?? 'application/octet-stream';
     }
 
@@ -177,7 +177,7 @@ export default async function streamRoutes(fastify) {
     const asset = rows[0];
     if (!asset) return reply.status(404).send({ error: 'Hittades inte' });
 
-    const filePath = join(config.media.photosPath, asset.file_path);
+    const filePath = resolve(config.media.photosPath,asset.file_path);
 
     let fileSize;
     try {
@@ -216,7 +216,7 @@ export default async function streamRoutes(fastify) {
     // Trashade filer: använd trash_path (absolut) om det finns, annars file_path
     let filePath = asset.trash_path
       ? asset.trash_path
-      : join(config.media.photosPath, asset.file_path);
+      : resolve(config.media.photosPath,asset.file_path);
     let fileSize;
     try {
       const s = await stat(filePath);

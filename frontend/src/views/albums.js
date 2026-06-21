@@ -1,6 +1,6 @@
 ﻿import { api } from '../api.js';
 import { openLightbox } from '../components/lightbox.js';
-import { buildPhotoCell } from '../components/gridCell.js';
+import { buildPhotoCell, showAssetContextMenu } from '../components/gridCell.js';
 import { createSelectionManager } from '../components/selectionManager.js';
 import { toast, confirm } from '../utils.js';
 import { openShareModal } from '../components/shareModal.js';
@@ -393,6 +393,20 @@ async function loadAlbumDetail(container, albumId) {
             grid.innerHTML = '<div class="col-span-full text-slate-400 text-sm p-2">Albumet är tomt.</div>';
           }
         } catch (err) { toast(err.message, 'error'); }
+      });
+
+      // Högerklicksmeny
+      cell.addEventListener('contextmenu', (e) => {
+        showAssetContextMenu(e, asset, {
+          selectionManager: sel,
+          getAllAssets: () => allAssets,
+          openLightboxFn: openLightbox,
+          allAssets,
+          index: i,
+          onAddToAlbum: null,
+          onDelete: (id) => { allAssets = allAssets.filter((a) => a.id !== id); },
+          onRefresh: () => { loadAlbumDetail(container, albumId); },
+        });
       });
 
       grid.appendChild(cell);

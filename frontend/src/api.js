@@ -173,6 +173,8 @@ export const api = {
   folderTree:    ()             => request('GET', '/api/folders/tree'),
   createFolder:  (body)        => request('POST', '/api/files/create-folder', body),
   moveFiles:     (body)        => request('POST', '/api/files/move', body),
+  copyFiles:     (body)        => request('POST', '/api/files/copy', body),
+  renameAsset:   (body)        => request('POST', '/api/files/rename-asset', body),
   renameFolder:  (body)        => request('PATCH', '/api/files/rename-folder', body),
   moveFolderTo:  (body)        => request('POST', '/api/files/move-folder', body),
   trashFolder:   (body)        => request('POST', '/api/files/trash-folder', body),
@@ -219,6 +221,7 @@ export const api = {
   adminJobs:          ()        => request('GET', '/api/admin/jobs'),
   retryJob:           (id)      => request('POST', `/api/admin/jobs/${id}/retry`),
   requeueThumbnails:  ()        => request('POST', '/api/admin/requeue-thumbnails', {}),
+  reindexAll:         ()        => request('POST', '/api/admin/reindex-all', {}),
   reclusterFaces:     ()        => request('POST', '/api/admin/faces/recluster', {}),
   backfillMotionPhotos: ()      => request('POST', '/api/admin/backfill-motion-photos', {}),
   adminUsers:   ()              => request('GET', '/api/admin/users'),
@@ -232,6 +235,42 @@ export const api = {
   setLocation:  (id, lat, lon, label) => request('PATCH', `/api/assets/${id}/location`, { lat, lon, label }),
   duplicates:   ()              => request('GET', '/api/assets/duplicates'),
   adminDuplicates: ()           => request('GET', '/api/admin/duplicates'),
+
+  // Tags
+  tagTree:          ()              => request('GET', '/api/tags/tree'),
+  tagStats:         ()              => request('GET', '/api/tags/stats'),
+  tagsUnused:       ()              => request('GET', '/api/tags/unused'),
+  tagsDuplicates:   ()              => request('GET', '/api/tags/duplicates'),
+  tagAutoSuggest:   (q)             => request('GET', `/api/tags/auto-suggest?q=${encodeURIComponent(q)}`),
+  tagAssets:        (id, p = {})    => request('GET', `/api/tags/${id}/assets?${qs(p)}`),
+  createTag:        (body)          => request('POST', '/api/tags', body),
+  patchTag:         (id, body)      => request('PATCH', `/api/tags/${id}`, body),
+  deleteTag:        (id, cascade)   => request('DELETE', `/api/tags/${id}${cascade ? '?cascade=true' : ''}`),
+  mergeTags:        (body)          => request('POST', '/api/tags/merge', body),
+  moveTag:          (id, body)      => request('POST', `/api/tags/${id}/move`, body),
+  markFaceTag:      (id)            => request('POST', `/api/tags/${id}/face-tag`, {}),
+  exportTags:       (format, ids)   => `/api/tags/export?format=${format}${ids ? '&ids=' + ids.join(',') : ''}`,
+  importTags:       (formData, onConflict) => {
+    const w = /** @type {any} */ (window);
+    return fetch(`/api/tags/import?onConflict=${onConflict ?? 'skip'}`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${w.__pmToken}` },
+      credentials: 'include',
+      body: formData,
+    }).then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(new Error(e.error))));
+  },
+  tagSynonyms:      (tagId)         => request('GET', `/api/tags/synonyms/${tagId}`),
+  addTagSynonym:    (body)          => request('POST', '/api/tags/synonyms', body),
+  deleteTagSynonym: (id)            => request('DELETE', `/api/tags/synonyms/${id}`),
+  folderTagRules:   ()              => request('GET', '/api/folder-tag-rules'),
+  createFolderTagRule: (body)       => request('POST', '/api/folder-tag-rules', body),
+  deleteFolderTagRule: (id)         => request('DELETE', `/api/folder-tag-rules/${id}`),
+  bulkTags:         (body)          => request('PATCH', '/api/assets/bulk-tags', body),
+  bulkDatetime:     (body)          => request('PATCH', '/api/assets/bulk-datetime', body),
+  bulkLocation:     (body)          => request('PATCH', '/api/assets/bulk-location', body),
+
+  // Taggar (äldre autocomplete — finns kvar i search.js)
+  tagsAutocomplete: (q = '')        => request('GET', `/api/tags?q=${encodeURIComponent(q)}`),
 
   // Bevakade mappar
   browseDir:          (path)       => request('GET', `/api/admin/browse?path=${encodeURIComponent(path || '/')}`),

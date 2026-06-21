@@ -261,8 +261,12 @@ async function renderJobs(content) {
           <span class="text-slate-400">${s.job_type} / ${s.status}</span>
           <span class="ml-2 font-medium text-white">${s.count}</span>
         </div>`).join('')}
+      <button id="reindex-all-btn"
+        class="ml-auto px-4 py-2 bg-green-700 hover:bg-green-600 text-white text-xs font-medium rounded-lg transition-colors">
+        🔄 Re-indexera alla filer
+      </button>
       <button id="requeue-thumbs-btn"
-        class="ml-auto px-4 py-2 bg-blue-700 hover:bg-blue-600 text-white text-xs font-medium rounded-lg transition-colors">
+        class="px-4 py-2 bg-blue-700 hover:bg-blue-600 text-white text-xs font-medium rounded-lg transition-colors">
         Återköa saknade thumbnails
       </button>
       <button id="recluster-btn"
@@ -298,6 +302,40 @@ async function renderJobs(content) {
         renderJobs(content);
       } catch (e) { toast(e.message, 'error'); }
     });
+  });
+
+  content.querySelector('#reindex-all-btn')?.addEventListener('click', async (e) => {
+    const btn = /** @type {HTMLButtonElement} */ (e.currentTarget);
+    // Första klick: visa bekräftelse på knappen
+    if (btn.dataset.confirm !== 'yes') {
+      btn.dataset.confirm = 'yes';
+      btn.textContent = '⚠️ Klicka igen för att bekräfta';
+      btn.classList.replace('bg-green-700', 'bg-amber-600');
+      btn.classList.replace('hover:bg-green-600', 'hover:bg-amber-500');
+      setTimeout(() => {
+        btn.dataset.confirm = '';
+        btn.textContent = '🔄 Re-indexera alla filer';
+        btn.classList.replace('bg-amber-600', 'bg-green-700');
+        btn.classList.replace('hover:bg-amber-500', 'hover:bg-green-600');
+      }, 4000);
+      return;
+    }
+    // Andra klick: kör
+    btn.dataset.confirm = '';
+    btn.disabled = true;
+    btn.textContent = '⏳ Köar…';
+    try {
+      const { data } = await api.reindexAll();
+      toast(`${data.queued} filer köade för re-indexering`, 'success');
+      renderJobs(content);
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '🔄 Re-indexera alla filer';
+      btn.classList.replace('bg-amber-600', 'bg-green-700');
+      btn.classList.replace('hover:bg-amber-500', 'hover:bg-green-600');
+    }
   });
 
   content.querySelector('#requeue-thumbs-btn').addEventListener('click', async (e) => {
@@ -1148,6 +1186,28 @@ async function renderUserSettings(content) {
         </div>
         <button id="quality-save" class="mt-3 px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors">Spara</button>
       </div>
+
+      <!-- Tagginställningar -->
+      <div class="bg-slate-800 border border-slate-700 rounded-xl p-4 space-y-3">
+        <div class="text-sm font-medium text-white">Taggar — standardvärden</div>
+        ${[
+          { id: 'set-export-leaf',    key: 'default_export_only_leaf', label: 'Exportera bara löv-namn som standard', desc: 'Nya taggar får "Exportera bara löv" förvalt' },
+          { id: 'set-show-lifespan', key: 'default_show_lifespan',    label: 'Visa livstid som standard',             desc: 'Nya taggar visar (födelseår–dödsår) i trädet' },
+          { id: 'set-export-syn',    key: 'default_export_synonyms',  label: 'Exportera synonymer som standard',      desc: 'Nya taggar exporterar synonymer i JSON/XMP' },
+        ].map((s) => `
+          <div class="flex items-center justify-between">
+            <div>
+              <div class="text-sm text-slate-200">${s.label}</div>
+              <div class="text-xs text-slate-400 mt-0.5">${s.desc}</div>
+            </div>
+            <button id="${s.id}" role="switch"
+              aria-checked="${settings[s.key] !== false ? 'true' : 'false'}"
+              data-setting-key="${s.key}"
+              class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${settings[s.key] !== false ? 'bg-blue-600' : 'bg-slate-600'}">
+              <span class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings[s.key] !== false ? 'translate-x-6' : 'translate-x-1'}"></span>
+            </button>
+          </div>`).join('')}
+      </div>
     </div>`;
 
   let enabled = settings.face_detection_enabled;
@@ -1173,5 +1233,25 @@ async function renderUserSettings(content) {
       await api.patchSettings({ faceQualityThreshold: parseFloat(slider.value) });
       toast('Kvalitetsgräns sparad', 'success');
     } catch (e) { toast(e.message, 'error'); }
+  });
+
+  // Tagg-standardvärde-toggles
+  ['set-export-leaf', 'set-show-lifespan', 'set-export-syn'].forEach((id) => {
+    const btn = content.querySelector(`#${id}`);
+    if (!btn) return;
+    btn.addEventListener('click', async () => {
+      const current = btn.getAttribute('aria-checked') === 'true';
+      const next = !current;
+      const key = btn.dataset.settingKey; // e.g. "default_export_only_leaf"
+      // Convert snake_case to camelCase for PATCH body
+      const camel = key.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+      try {
+        await api.patchSettings({ [camel]: next });
+        btn.setAttribute('aria-checked', String(next));
+        btn.className = `relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${next ? 'bg-blue-600' : 'bg-slate-600'}`;
+        btn.querySelector('span').className = `inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${next ? 'translate-x-6' : 'translate-x-1'}`;
+        toast('Inställning sparad', 'success');
+      } catch (e) { toast(e.message, 'error'); }
+    });
   });
 }

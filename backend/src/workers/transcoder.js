@@ -1,6 +1,6 @@
 import ffmpeg from 'fluent-ffmpeg';
 import { mkdir, unlink } from 'fs/promises';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import { config } from '../config.js';
 import { query } from '../db/pool.js';
 import { generateVideoThumbnail } from './thumbnailer.js';
@@ -10,7 +10,7 @@ const MAX_WIDTH = 1920;
 const MAX_HEIGHT = 1080;
 
 export async function transcodeVideo(assetId, sourceRelPath) {
-  const sourcePath = join(config.media.photosPath, sourceRelPath);
+  const sourcePath = resolve(config.media.photosPath,sourceRelPath);
   const outDir = join(config.media.transcodePath, assetId);
   const outPath = join(outDir, 'video.mp4');
   const screenshotPath = join(outDir, 'thumb.png');

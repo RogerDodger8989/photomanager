@@ -568,7 +568,7 @@ export default async function personsRoutes(fastify) {
     if (!rows[0]) return reply.status(404).send({ error: 'Ansikt hittades inte' });
 
     const { region_x, region_y, region_w, region_h, file_path, width, height } = rows[0];
-    const fullPath = path.join(config.media.photosPath, file_path);
+    const fullPath = path.resolve(config.media.photosPath,file_path);
 
     // Face coords are stored in display space (after orientation correction).
     // Use display dims: for 90°/270° EXIF rotations (5-8), w/h are swapped.
@@ -611,7 +611,7 @@ export default async function personsRoutes(fastify) {
     if (!rows[0]) return reply.status(404).send({ error: 'Ingen profilbild satt' });
 
     const { region_x, region_y, region_w, region_h, file_path, width, height } = rows[0];
-    const fullPath = path.join(config.media.photosPath, file_path);
+    const fullPath = path.resolve(config.media.photosPath,file_path);
 
     const sharpMeta = await sharp(fullPath).metadata();
     const orientation = sharpMeta.orientation ?? 1;

@@ -5,7 +5,7 @@
 import { query, pool } from './pool.js';
 import { extractMetadata } from '../services/metadataService.js';
 import { config } from '../config.js';
-import { join } from 'path';
+import { resolve } from 'path';
 
 const { rows: assets } = await pool.query(
   `SELECT id, file_path, file_name FROM assets WHERE status != 'deleted' ORDER BY indexed_at`
@@ -16,7 +16,7 @@ let updated = 0;
 let errors  = 0;
 
 for (const asset of assets) {
-  const absPath = join(config.media.photosPath, asset.file_path);
+  const absPath = resolve(config.media.photosPath, asset.file_path);
 
   try {
     const meta = await extractMetadata(absPath);

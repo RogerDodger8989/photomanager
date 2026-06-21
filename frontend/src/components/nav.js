@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   ['favorites','Favoriter', '❤️',  '#/favorites'],
   ['albums',   'Album',     '🗂️',  '#/albums'],
   ['faces',    'Ansikten',  '👤',  '#/faces'],
+  ['tags',     'Taggar',    '🏷️',  '#/tags'],
   ['folders',  'Mappar',    '📁',  '#/folders'],
   ['upload',   'Ladda upp', '⬆️',  '#/upload'],
   ['duplicates','Dublikat', '🔁',  '#/duplicates'],

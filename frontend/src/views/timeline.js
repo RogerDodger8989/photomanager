@@ -178,11 +178,14 @@ function appendToGrid(items) {
     selection?.attachToCell(cell, asset, globalIndex);
     cell.addEventListener('contextmenu', (e) => {
       showAssetContextMenu(e, asset, {
+        selectionManager: selection,
+        getAllAssets: () => allItems,
         openLightboxFn: openLightbox,
         allAssets: allItems,
         index: globalIndex,
         onAddToAlbum: openAddToAlbumModal,
         onDelete: (id) => { allItems = allItems.filter((a) => a.id !== id); },
+        onRefresh: () => { allItems = []; renderTimeline(document.getElementById('main-content'), currentParams); },
       });
     });
     grid.appendChild(cell);

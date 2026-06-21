@@ -24,6 +24,14 @@ const MIGRATIONS = [
   '017_motion_photo.sql',
   '018_duplicate_status.sql',
   '019_fix_duplicate_status.sql',
+  '020_tags_extended.sql',
+  '021_folder_tag_rules_and_synonyms.sql',
+  '022_stacks.sql',
+  '023_tags_export_synonyms_and_base.sql',
+  '024_fix_tag_name_casing.sql',
+  '025_fix_decade_tag_casing.sql',
+  '026_tags_drop_name_unique.sql',
+  '027_fix_person_tag_flags.sql',
 ];
 
 export async function runMigrations(client) {

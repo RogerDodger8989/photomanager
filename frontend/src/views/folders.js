@@ -304,6 +304,8 @@ async function loadMoreAssets() {
 function attachContextMenu(cell, asset) {
   cell.addEventListener('contextmenu', (e) => {
     showAssetContextMenu(e, asset, {
+      selectionManager: sel,
+      getAllAssets: () => allAssets,
       openLightboxFn: openLightbox,
       allAssets,
       index: allAssets.indexOf(asset),
@@ -311,6 +313,7 @@ function attachContextMenu(cell, asset) {
       onDelete: (id, restored) => {
         if (!restored) allAssets = allAssets.filter((a) => a.id !== id);
       },
+      onRefresh: () => { if (activeFolderKey) selectFolder(activeFolderKey, _treeData); },
     });
   });
 }
@@ -351,11 +354,14 @@ function renderListItems(items) {
     row.addEventListener('click', () => openLightbox(allAssets, allAssets.indexOf(asset)));
     row.addEventListener('contextmenu', (e) => {
       showAssetContextMenu(e, asset, {
+        selectionManager: sel,
+        getAllAssets: () => allAssets,
         openLightboxFn: openLightbox,
         allAssets,
         index: allAssets.indexOf(asset),
         onAddToAlbum: openAddToAlbumModal,
         onDelete: (id) => { allAssets = allAssets.filter((a) => a.id !== id); },
+        onRefresh: () => { if (activeFolderKey) selectFolder(activeFolderKey, _treeData); },
       });
     });
     makeDraggable(row, asset);

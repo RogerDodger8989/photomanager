@@ -124,6 +124,34 @@
     .photo-cell .fav-heart.is-fav svg { fill: #f43f5e; stroke: #f43f5e; }
     .photo-cell .fav-heart:hover svg { stroke: #f43f5e; }
 
+    /* Rename modal — klickbara mönsterkod-chips */
+    .rn-chip {
+      display: inline-flex; align-items: center;
+      padding: 2px 8px; border-radius: 999px;
+      background: rgba(59,130,246,.18); color: #93c5fd;
+      border: 1px solid rgba(59,130,246,.35);
+      font-family: monospace; font-size: 11px; cursor: pointer;
+      transition: background .15s, border-color .15s;
+      user-select: none;
+    }
+    .rn-chip:hover { background: rgba(59,130,246,.35); border-color: #60a5fa; color: #bfdbfe; }
+    .rn-chip:active { background: rgba(59,130,246,.55); }
+
+    /* Stack — "hög av foton"-visuell (DigiKam-stil) */
+    .photo-cell.is-stack { overflow: visible; }
+    .photo-cell.is-stack::before,
+    .photo-cell.is-stack::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 2px;
+      background: #1e293b;
+      z-index: -1;
+    }
+    .photo-cell.is-stack::before { transform: rotate(2deg) translate(3px, 3px); }
+    .photo-cell.is-stack::after  { transform: rotate(4deg) translate(6px, 6px); }
+
     /* Skeleton loading */
     .skeleton { background: linear-gradient(90deg, #1e293b 25%, #334155 50%, #1e293b 75%);
       background-size: 200% 100%; animation: shimmer 1.5s infinite; }

@@ -1,6 +1,6 @@
 ﻿import { api } from '../api.js';
 import { openLightbox } from '../components/lightbox.js';
-import { buildPhotoCell } from '../components/gridCell.js';
+import { buildPhotoCell, showAssetContextMenu } from '../components/gridCell.js';
 import { createSelectionManager } from '../components/selectionManager.js';
 import { formatDate } from '../utils.js';
 
@@ -297,6 +297,21 @@ export async function renderFavorites(container) {
         },
       );
       selection.attachToCell(cell, asset, i);
+      cell.addEventListener('contextmenu', (e) => {
+        showAssetContextMenu(e, asset, {
+          selectionManager: selection,
+          getAllAssets: () => assets,
+          openLightboxFn: openLightbox,
+          allAssets: assets,
+          index: i,
+          onDelete: (id) => {
+            const idx = assets.findIndex((a) => a.id === id);
+            if (idx >= 0) assets.splice(idx, 1);
+            grid.querySelector(`[data-id="${id}"]`)?.remove();
+          },
+          onRefresh: () => renderFavorites(container),
+        });
+      });
       grid.appendChild(cell);
     });
   } catch (e) {

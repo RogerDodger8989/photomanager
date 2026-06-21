@@ -198,20 +198,65 @@ export async function indexFile(absolutePath, sourceFolderPath = null) {
     } catch { /* hoppa över ogiltiga metadata-värden */ }
   }
 
-  // 6. Taggar (nyckelord)
-  for (const tagName of meta.tags) {
+  // 6. Taggar — hierarkiska sökvägar (DigiKam/Lightroom) har prioritet
+  const hierPaths = meta.hierarchicalTags ?? [];
+  const flatTags  = meta.tags ?? [];
+
+  // Alla noder (inte bara löv) som täcks av hierarkiska paths — undviker dubbletter med platta taggar
+  const coveredByHierarchy = new Set();
+  for (const parts of hierPaths) {
+    for (const part of parts) coveredByHierarchy.add(part.toLowerCase());
+  }
+
+  // Bygg parent-child-kedja för varje hierarkisk sökväg
+  for (const parts of hierPaths) {
+    let parentId   = null;
+    let parentPath = null;
+    for (const part of parts) {
+      const fullPath = parentPath ? `${parentPath}/${part}` : part;
+      const underPersoner = fullPath === 'Personer' || fullPath.toLowerCase().startsWith('personer/');
+      const { rows } = await query(
+        `INSERT INTO tags (name, path, parent_id, is_face_tag, export_only_leaf, show_lifespan, export_synonyms)
+         VALUES ($1, $2, $3, $4, $4, $4, NOT $4)
+         ON CONFLICT (path) DO UPDATE SET
+           name             = EXCLUDED.name,
+           parent_id        = EXCLUDED.parent_id,
+           is_face_tag      = CASE WHEN EXCLUDED.is_face_tag THEN TRUE ELSE tags.is_face_tag END,
+           export_only_leaf = CASE WHEN EXCLUDED.export_only_leaf THEN TRUE ELSE tags.export_only_leaf END,
+           show_lifespan    = CASE WHEN EXCLUDED.show_lifespan THEN TRUE ELSE tags.show_lifespan END,
+           export_synonyms  = CASE WHEN NOT EXCLUDED.export_synonyms THEN FALSE ELSE tags.export_synonyms END
+         RETURNING id`,
+        [part, fullPath, parentId, underPersoner]
+      );
+      parentId   = rows[0].id;
+      parentPath = fullPath;
+    }
+    // Koppla löv-taggen till bilden
+    if (parentId) {
+      await query(
+        `INSERT INTO asset_tags (asset_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+        [assetId, parentId]
+      );
+    }
+  }
+
+  // Platta nyckelord som inte redan täcks av hierarkiska paths
+  for (const tagName of flatTags) {
+    if (coveredByHierarchy.has(tagName.toLowerCase())) continue;
     const { rows: tagRows } = await query(
-      `INSERT INTO tags (name) VALUES ($1)
-       ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
+      `INSERT INTO tags (name, path) VALUES ($1, $1)
+       ON CONFLICT (path) DO UPDATE SET name = EXCLUDED.name, parent_id = EXCLUDED.parent_id
        RETURNING id`,
       [tagName]
     );
     await query(
-      `INSERT INTO asset_tags (asset_id, tag_id) VALUES ($1, $2)
-       ON CONFLICT DO NOTHING`,
+      `INSERT INTO asset_tags (asset_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
       [assetId, tagRows[0].id]
     );
   }
+
+  // 6b. Mapp→tagg-regler
+  await applyFolderTagRules(assetId, relPath);
 
   // 7. GPS + reverse geocoding
   if (meta.gps) {
@@ -282,6 +327,51 @@ export async function indexFile(absolutePath, sourceFolderPath = null) {
 
   console.log(`Indexerad: ${relPath}`);
   return assetId;
+}
+
+/**
+ * Matchar en fils sökväg mot alla folder_tag_rules och sätter matchade taggar.
+ * Regler cachas per process-körning i minnet för att undvika en DB-query per fil.
+ * @param {string} assetId
+ * @param {string} relPath - sökväg relativt till photosPath, t.ex. "2024/semester/bild.jpg"
+ */
+let _folderTagRulesCache = null;
+let _folderTagRulesCacheTs = 0;
+
+async function applyFolderTagRules(assetId, relPath) {
+  // Cacha reglerna i 60 sekunder
+  if (!_folderTagRulesCache || Date.now() - _folderTagRulesCacheTs > 60_000) {
+    const { rows } = await query('SELECT pattern, tag_id, match_type FROM folder_tag_rules');
+    _folderTagRulesCache = rows;
+    _folderTagRulesCacheTs = Date.now();
+  }
+
+  const pathParts = relPath.split('/');
+  const folderParts = pathParts.slice(0, -1); // alla delar utom filnamnet
+
+  for (const rule of _folderTagRulesCache) {
+    let matches = false;
+    const { pattern, match_type } = rule;
+
+    if (match_type === 'folder_name') {
+      matches = folderParts.some((p) => p.toLowerCase() === pattern.toLowerCase());
+    } else if (match_type === 'folder_name_contains') {
+      matches = folderParts.some((p) => p.toLowerCase().includes(pattern.toLowerCase()));
+    } else if (match_type === 'folder_path_contains') {
+      matches = relPath.toLowerCase().includes(pattern.toLowerCase());
+    } else if (match_type === 'glob') {
+      // Enkel glob: * matchar allt utom /
+      const regexStr = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*');
+      matches = new RegExp(regexStr, 'i').test(relPath);
+    }
+
+    if (matches) {
+      await query(
+        'INSERT INTO asset_tags (asset_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+        [assetId, rule.tag_id]
+      );
+    }
+  }
 }
 
 // Kallas vid fil-borttagning från disk

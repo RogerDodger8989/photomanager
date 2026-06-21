@@ -15,8 +15,11 @@ export default async function settingsRoutes(fastify) {
     // Returnera med defaults för inställningar som saknas
     return reply.send({
       data: {
-        face_detection_enabled: true,
-        face_quality_threshold: 0.5,
+        face_detection_enabled:   true,
+        face_quality_threshold:   0.5,
+        default_export_only_leaf: true,
+        default_show_lifespan:    true,
+        default_export_synonyms:  true,
         ...settings,
       },
     });
@@ -29,7 +32,10 @@ export default async function settingsRoutes(fastify) {
       body: {
         type: 'object',
         properties: {
-          faceDetectionEnabled: { type: 'boolean' },
+          faceDetectionEnabled:      { type: 'boolean' },
+          defaultExportOnlyLeaf:     { type: 'boolean' },
+          defaultShowLifespan:       { type: 'boolean' },
+          defaultExportSynonyms:     { type: 'boolean' },
         },
       },
     },
@@ -43,6 +49,15 @@ export default async function settingsRoutes(fastify) {
     }
     if (typeof body.faceQualityThreshold === 'number') {
       patch.face_quality_threshold = Math.max(0, Math.min(1, body.faceQualityThreshold));
+    }
+    if (typeof body.defaultExportOnlyLeaf === 'boolean') {
+      patch.default_export_only_leaf = body.defaultExportOnlyLeaf;
+    }
+    if (typeof body.defaultShowLifespan === 'boolean') {
+      patch.default_show_lifespan = body.defaultShowLifespan;
+    }
+    if (typeof body.defaultExportSynonyms === 'boolean') {
+      patch.default_export_synonyms = body.defaultExportSynonyms;
     }
 
     if (Object.keys(patch).length === 0) {
@@ -64,8 +79,11 @@ export default async function settingsRoutes(fastify) {
     const settings = rows[0]?.settings ?? {};
     return reply.send({
       data: {
-        face_detection_enabled: true,
-        face_quality_threshold: 0.5,
+        face_detection_enabled:   true,
+        face_quality_threshold:   0.5,
+        default_export_only_leaf: true,
+        default_show_lifespan:    true,
+        default_export_synonyms:  true,
         ...settings,
       },
     });

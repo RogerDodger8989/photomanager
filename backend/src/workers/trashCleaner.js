@@ -1,5 +1,5 @@
 import { unlink } from 'fs/promises';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import { config } from '../config.js';
 import { query } from '../db/pool.js';
 
@@ -15,7 +15,7 @@ export async function cleanTrash() {
   for (const asset of rows) {
     try {
       // Ta bort originalfil
-      await unlink(join(config.media.photosPath, asset.file_path)).catch(() => {});
+      await unlink(resolve(config.media.photosPath,asset.file_path)).catch(() => {});
 
       // Ta bort thumbnails
       if (asset.thumb_small_path) {

@@ -1,6 +1,6 @@
 ﻿import { api } from '../api.js';
 import { openLightbox } from '../components/lightbox.js';
-import { buildPhotoCell, attachFavHeart } from '../components/gridCell.js';
+import { buildPhotoCell, attachFavHeart, showAssetContextMenu } from '../components/gridCell.js';
 import { toast, toastWithUndo } from '../utils.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -2006,10 +2006,15 @@ function renderPhotosTab(container, assets, person, personId, onCoverUpdated) {
     attachFavHeart(cell, asset);
     cell.addEventListener('click', () => openLightbox(assets, i));
     cell.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-      showPhotoContextMenu(e, asset, personId, (newCoverFaceId) => {
-        if (newCoverFaceId) person.cover_face_id = newCoverFaceId;
-        onCoverUpdated();
+      showAssetContextMenu(e, asset, {
+        openLightboxFn: openLightbox,
+        allAssets: assets,
+        index: i,
+        onDelete: (id) => {
+          const idx = assets.findIndex((a) => a.id === id);
+          if (idx >= 0) assets.splice(idx, 1);
+          grid.querySelector(`[data-id="${id}"]`)?.remove();
+        },
       });
     });
     grid.appendChild(cell);
