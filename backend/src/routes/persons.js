@@ -471,6 +471,17 @@ export default async function personsRoutes(fastify) {
     return reply.send({ data: { ok: true, dismissed: faceIds.length } });
   });
 
+  // PATCH /api/faces/undismiss — ångra avfärdning av ansikten
+  fastify.patch('/api/faces/undismiss', {
+    onRequest: [fastify.authenticate],
+    schema: { body: { type: 'object', required: ['faceIds'], properties: { faceIds: { type: 'array', items: { type: 'string' }, minItems: 1 } } } },
+  }, async (request, reply) => {
+    const { faceIds } = request.body;
+    const placeholders = faceIds.map((_, i) => `$${i + 1}`).join(',');
+    await query(`UPDATE faces SET dismissed = FALSE WHERE id IN (${placeholders})`, faceIds);
+    return reply.send({ data: { ok: true } });
+  });
+
   // POST /api/faces/compute-suggestions — beräkna AI-förslag för unassigned faces utan suggestion
   fastify.post('/api/faces/compute-suggestions', {
     onRequest: [fastify.authenticate],

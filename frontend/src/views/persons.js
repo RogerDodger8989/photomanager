@@ -1,7 +1,7 @@
 ﻿import { api } from '../api.js';
 import { openLightbox } from '../components/lightbox.js';
 import { buildPhotoCell, attachFavHeart } from '../components/gridCell.js';
-import { toast } from '../utils.js';
+import { toast, toastWithUndo } from '../utils.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -623,9 +623,22 @@ function buildFaceSiblingCard(face, sharedFaceIds, allPersons, parentClusterKey,
   dismissBtn.title = 'Inte ett ansikte — avfärda';
   dismissBtn.textContent = '✕';
   dismissBtn.addEventListener('click', async () => {
-    const ok = await showSimpleConfirmModal({ title: 'Inte ett ansikte?', message: 'Ansiktet avfärdas permanent.', okLabel: 'Avfärda', okClass: 'bg-red-700 hover:bg-red-600' });
+    const ok = await showSimpleConfirmModal({ title: 'Inte ett ansikte?', message: 'Ansiktet avfärdas och visas inte längre.', okLabel: 'Avfärda', okClass: 'bg-red-700 hover:bg-red-600' });
     if (!ok) return;
-    try { await api.dismissFaces([face.id]); sc.classList.add('uf-card--fade-out'); setTimeout(() => { sc.remove(); onRemove(); }, 300); } catch (e) { toast(e.message, 'error'); }
+    try {
+      await api.dismissFaces([face.id]);
+      sc.style.opacity = '0'; sc.style.pointerEvents = 'none'; sc.style.transition = 'opacity .3s';
+      toastWithUndo('Ansikte avfärdat',
+        async () => {
+          try {
+            await api.undismissFaces([face.id]);
+            sc.removeAttribute('style');
+            if (color) sc.style.borderTop = `4px solid ${color}`;
+          } catch (e) { toast(e.message, 'error'); }
+        },
+        () => { sc.remove(); onRemove(); }
+      );
+    } catch (e) { toast(e.message, 'error'); }
   });
   const skipBtn = document.createElement('button');
   skipBtn.className = 'uf-action-btn uf-skip-btn';
@@ -708,15 +721,28 @@ function buildClusterCard(cluster, allPersons, onAssigned, onSkip, grid, onBulkT
   dismissBtn.addEventListener('click', async () => {
     const ok = await showSimpleConfirmModal({
       title: 'Inte ett ansikte?',
-      message: 'Ansiktet avfärdas permanent och visas inte längre.',
+      message: `${faceIds.length > 1 ? faceIds.length + ' ansikten avfärdas' : 'Ansiktet avfärdas'} och visas inte längre.`,
       okLabel: 'Avfärda',
       okClass: 'bg-red-700 hover:bg-red-600',
     });
     if (!ok) return;
     try {
       await api.dismissFaces(faceIds);
-      card.classList.add('uf-card--fade-out');
-      setTimeout(() => card.remove(), 300);
+      const siblingEls = [...document.querySelectorAll(`[data-parent-cluster="${clusterKey}"]`)];
+      const hide = (el) => { el.style.opacity = '0'; el.style.pointerEvents = 'none'; el.style.transition = 'opacity .3s'; };
+      const show = (el, borderColor) => { el.removeAttribute('style'); if (borderColor) el.style.borderTop = `4px solid ${borderColor}`; };
+      hide(card); siblingEls.forEach(hide);
+
+      toastWithUndo(
+        faceIds.length > 1 ? `${faceIds.length} ansikten avfärdade` : 'Ansikte avfärdat',
+        async () => {
+          try {
+            await api.undismissFaces(faceIds);
+            show(card, color); siblingEls.forEach(sc => show(sc, color));
+          } catch (e) { toast(e.message, 'error'); }
+        },
+        () => { card.remove(); siblingEls.forEach(sc => sc.remove()); }
+      );
     } catch (e) { toast(e.message, 'error'); }
   });
 

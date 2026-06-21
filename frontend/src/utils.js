@@ -33,6 +33,28 @@ export function toast(msg, type = 'info', duration = 3500) {
   setTimeout(() => el.remove(), duration);
 }
 
+export function toastWithUndo(msg, onUndo, onExpire, duration = 6000) {
+  const el = document.createElement('div');
+  el.className = 'toast bg-slate-700 text-white text-sm px-4 py-3 rounded-lg shadow-lg max-w-xs flex items-center gap-3';
+  const text = document.createElement('span');
+  text.textContent = msg;
+  const btn = document.createElement('button');
+  btn.textContent = 'Ångra';
+  btn.className = 'ml-auto text-blue-300 hover:text-blue-200 font-semibold text-xs underline flex-shrink-0';
+  let undone = false;
+  btn.addEventListener('click', () => {
+    if (undone) return;
+    undone = true;
+    el.remove();
+    onUndo();
+  });
+  el.append(text, btn);
+  document.getElementById('toast-container')?.prepend(el);
+  setTimeout(() => {
+    if (!undone) { el.remove(); onExpire?.(); }
+  }, duration);
+}
+
 // Bekräftelsedialog (ersätter window.confirm)
 export function confirm(msg) {
   return new Promise((resolve) => {
