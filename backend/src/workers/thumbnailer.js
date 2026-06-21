@@ -1,11 +1,29 @@
 import sharp from 'sharp';
-import { mkdir } from 'fs/promises';
+import ExifReader from 'exifr';
+import { mkdir, writeFile, unlink } from 'fs/promises';
 import { join } from 'path';
+import { tmpdir } from 'os';
+import { v4 as uuidv4 } from 'uuid';
 import { config } from '../config.js';
 import { query } from '../db/pool.js';
+import { isRaw } from '../services/metadataService.js';
 
 const THUMB_SMALL = 400;   // px bred, proportionell höjd
 const THUMB_LARGE = 1200;
+
+// Extraherar inbäddad JPEG-preview ur en RAW-fil via exifr.
+// Returnerar sökväg till en temporär fil, eller null om ingen preview hittades.
+async function extractRawPreview(filePath) {
+  try {
+    const buf = await ExifReader.thumbnail(filePath);
+    if (!buf || buf.byteLength === 0) return null;
+    const tmpPath = join(tmpdir(), `raw-preview-${uuidv4()}.jpg`);
+    await writeFile(tmpPath, Buffer.from(buf));
+    return tmpPath;
+  } catch {
+    return null;
+  }
+}
 
 export async function generateThumbnails(assetId, sourceFilePath, mimeType) {
   const dir = join(config.media.thumbsPath, assetId);
@@ -14,7 +32,19 @@ export async function generateThumbnails(assetId, sourceFilePath, mimeType) {
   const smallPath = join(dir, 'small.webp');
   const largePath = join(dir, 'large.webp');
 
-  const sharpInstance = sharp(sourceFilePath, { failOn: 'none' });
+  let workPath = sourceFilePath;
+  let tmpPreview = null;
+
+  if (isRaw(mimeType)) {
+    tmpPreview = await extractRawPreview(sourceFilePath);
+    if (!tmpPreview) {
+      console.warn(`Ingen inbäddad preview i RAW-fil: ${sourceFilePath}`);
+      return { smallPath: null, largePath: null };
+    }
+    workPath = tmpPreview;
+  }
+
+  const sharpInstance = sharp(workPath, { failOn: 'none' });
 
   // HEIC/HEIF hanteras automatiskt av sharp/libvips
   // Rotera korrekt baserat på EXIF-orientering
@@ -31,6 +61,8 @@ export async function generateThumbnails(assetId, sourceFilePath, mimeType) {
       .webp({ quality: 85 })
       .toFile(largePath),
   ]);
+
+  if (tmpPreview) await unlink(tmpPreview).catch(() => {});
 
   // Relativa sökvägar (relativa från thumbsPath-roten)
   const relSmall = `${assetId}/small.webp`;

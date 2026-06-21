@@ -157,6 +157,7 @@ export default async function searchRoutes(fastify) {
          a.id, a.file_name, a.mime_type, a.file_size,
          a.taken_at, a.indexed_at, a.thumb_small_path, a.thumb_large_path,
          a.location_label, a.view_count, a.duration, a.width, a.height,
+         a.is_motion_photo,
          ST_Y(a.location::geometry) AS lat,
          ST_X(a.location::geometry) AS lon,
          (EXISTS (SELECT 1 FROM favorites f WHERE f.asset_id = a.id AND f.user_id = $${params.length})) AS is_favorite

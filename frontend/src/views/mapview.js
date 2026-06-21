@@ -28,10 +28,7 @@ export function renderMap(container) {
       maxZoom: 19,
     }).addTo(leafletMap);
 
-    markerGroup = L.markerClusterGroup({
-      chunkedLoading: true,
-      maxClusterRadius: 60,
-    });
+    markerGroup = L.layerGroup();
     leafletMap.addLayer(markerGroup);
 
     leafletMap.on('moveend', () => {
@@ -159,7 +156,6 @@ async function showClusterPanel(cluster, zoom) {
 
   const radiusMeters = zoomToRadius(zoom);
 
-  // Skeleton-panel direkt
   const panel = document.createElement('div');
   panel.id = 'cluster-panel';
   panel.style.cssText = `position:absolute;bottom:0;left:0;right:0;z-index:1000;
@@ -167,7 +163,7 @@ async function showClusterPanel(cluster, zoom) {
     border-top:1px solid rgba(255,255,255,.1);padding:10px 12px;`;
   panel.innerHTML = `
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
-      <span style="color:#94a3b8;font-size:12px;">Laddar bilder…</span>
+      <span id="cp-info" style="color:#94a3b8;font-size:12px;">Laddar bilder…</span>
       <button id="cp-zoom" style="margin-left:auto;padding:4px 10px;border-radius:6px;
         background:#3b82f6;color:#fff;font-size:12px;border:none;cursor:pointer;">
         Zooma in →
@@ -186,39 +182,54 @@ async function showClusterPanel(cluster, zoom) {
     leafletMap.flyTo([cluster.lat, cluster.lon], Math.min(zoom + 6, 18), { animate: true });
   });
 
-  try {
-    const { data: photos } = await api.clusterPhotos({
-      lat: cluster.lat,
-      lon: cluster.lon,
-      radiusMeters,
-    });
+  const strip = /** @type {HTMLElement | null} */ (panel.querySelector('#cp-strip'));
+  const info  = /** @type {HTMLElement | null} */ (panel.querySelector('#cp-info'));
 
-    const strip = panel.querySelector('#cp-strip');
-    const info  = /** @type {HTMLElement | null} */ (panel.querySelector('span'));
+  let offset = 0;
+  /** @type {Array<any>} */
+  const allPhotos = [];
 
-    if (!photos?.length) {
-      if (info) info.textContent = 'Inga bilder hittades.';
-      return;
-    }
+  async function loadPage() {
+    try {
+      const { data } = await api.clusterPhotos({ lat: cluster.lat, lon: cluster.lon, radiusMeters, offset });
+      const { rows, hasMore } = data;
 
-    if (info) info.textContent = `${photos.length} bilder${photos.length === 30 ? '+' : ''} i detta område`;
+      if (!rows?.length && allPhotos.length === 0) {
+        if (info) info.textContent = 'Inga bilder hittades.';
+        return;
+      }
 
-    photos.forEach((photo) => {
-      const img = document.createElement('img');
-      img.src = `/thumbs/${photo.thumb_small_path}`;
-      img.style.cssText = `width:72px;height:72px;object-fit:cover;border-radius:6px;
-        cursor:pointer;flex-shrink:0;border:2px solid transparent;transition:border-color .15s;`;
-      img.addEventListener('mouseenter', () => { img.style.borderColor = '#3b82f6'; });
-      img.addEventListener('mouseleave', () => { img.style.borderColor = 'transparent'; });
-      img.addEventListener('click', () => {
-        openLightbox(photos, photos.indexOf(photo));
+      rows.forEach((photo) => {
+        allPhotos.push(photo);
+        const img = document.createElement('img');
+        img.src = `/thumbs/${photo.thumb_small_path}`;
+        img.style.cssText = `width:72px;height:72px;object-fit:cover;border-radius:6px;
+          cursor:pointer;flex-shrink:0;border:2px solid transparent;transition:border-color .15s;`;
+        img.addEventListener('mouseenter', () => { img.style.borderColor = '#3b82f6'; });
+        img.addEventListener('mouseleave', () => { img.style.borderColor = 'transparent'; });
+        img.addEventListener('click', () => openLightbox(allPhotos, allPhotos.indexOf(photo)));
+        if (strip) strip.appendChild(img);
       });
-      if (strip) strip.appendChild(img);
-    });
-  } catch {
-    const errInfo = /** @type {HTMLElement | null} */ (panel.querySelector('span'));
-    if (errInfo) errInfo.textContent = 'Kunde inte ladda bilder.';
+
+      offset += rows.length;
+      if (info) info.textContent = `${allPhotos.length}${hasMore ? '+' : ''} bilder i detta område`;
+
+      panel.querySelector('#cp-load-more')?.remove();
+      if (hasMore) {
+        const btn = document.createElement('button');
+        btn.id = 'cp-load-more';
+        btn.textContent = 'Ladda fler';
+        btn.style.cssText = `display:block;margin-top:8px;padding:4px 14px;border-radius:6px;
+          background:rgba(255,255,255,.12);color:#e2e8f0;font-size:12px;border:none;cursor:pointer;`;
+        btn.addEventListener('click', loadPage);
+        panel.appendChild(btn);
+      }
+    } catch {
+      if (info) info.textContent = 'Kunde inte ladda bilder.';
+    }
   }
+
+  await loadPage();
 }
 
 function updateTruncationBadge(truncated, shown, total) {
@@ -247,13 +258,7 @@ async function openAsset(assetId) {
 }
 
 function zoomToRadius(zoom) {
-  const radii = {
-    1: 5_000_000, 2: 2_000_000, 3: 1_000_000, 4: 500_000,
-    5: 200_000,   6: 100_000,   7: 50_000,    8: 20_000,
-    9: 10_000,    10: 5_000,    11: 2_000,    12: 1_000,
-    13: 500,      14: 200,      15: 100,      16: 50,
-  };
-  return radii[Math.min(Math.max(zoom, 1), 16)] ?? 1000;
+  return Math.round(5_000_000 / Math.pow(2, zoom));
 }
 
 export function destroyMap() {

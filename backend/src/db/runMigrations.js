@@ -21,6 +21,9 @@ const MIGRATIONS = [
   '014_face_dismissed.sql',
   '015_smart_album_rules.sql',
   '016_face_cluster_group.sql',
+  '017_motion_photo.sql',
+  '018_duplicate_status.sql',
+  '019_fix_duplicate_status.sql',
 ];
 
 export async function runMigrations(client) {

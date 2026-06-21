@@ -1,14 +1,26 @@
 import { createWriteStream, mkdirSync } from 'fs';
+import { unlink } from 'fs/promises';
 import { join, extname } from 'path';
 import { pipeline } from 'stream/promises';
 import { v4 as uuidv4 } from 'uuid';
 import { config } from '../config.js';
 import { logAudit } from '../services/authService.js';
+import { computeFileHash } from '../services/hashService.js';
 
 // Tillåtna MIME-typer
 const ALLOWED_MIME = new Set([
   'image/jpeg', 'image/png', 'image/webp', 'image/gif',
   'image/heic', 'image/heif', 'image/tiff',
+  // RAW-format
+  'image/x-canon-cr2', 'image/x-canon-cr3',
+  'image/x-nikon-nef',
+  'image/x-sony-arw',
+  'image/x-adobe-dng',
+  'image/x-olympus-orf',
+  'image/x-panasonic-rw2',
+  'image/x-fujifilm-raf',
+  'image/x-pentax-pef',
+  // Video
   'video/mp4', 'video/quicktime', 'video/x-msvideo',
   'video/x-matroska', 'video/mpeg',
 ]);
@@ -61,6 +73,7 @@ export default async function uploadRoutes(fastify) {
 
       try {
         await pipeline(part.file, createWriteStream(destPath));
+
         uploaded.push({ original: part.filename, saved: safeName });
       } catch (err) {
         errors.push(`${part.filename}: ${err.message}`);

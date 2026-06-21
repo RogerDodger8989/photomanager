@@ -35,6 +35,14 @@ export function buildPhotoCell(asset, onClick, onFavChange) {
           </svg>
         </div>
       </div>` : ''}
+    ${asset.is_motion_photo && !isVideo(asset.mime_type) ? `
+      <div class="absolute bottom-1 left-1 pointer-events-none" title="Motion Photo">
+        <div class="bg-black/60 rounded-full p-1">
+          <svg class="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/>
+          </svg>
+        </div>
+      </div>` : ''}
     <div class="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors pointer-events-none"></div>
     <button class="fav-heart${asset.is_favorite ? ' is-fav' : ''}" title="${asset.is_favorite ? 'Ta bort favorit' : 'Lägg till favorit'}">
       ${HEART_SVG}

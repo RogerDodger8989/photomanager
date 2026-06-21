@@ -13,7 +13,6 @@ export async function upsertAssetLocation(assetId, lat, lon) {
 // Hämta kluster för kartvyn
 export async function getMapClusters(bounds, zoom, userId, isAdmin) {
   const radiusMeters = zoomToRadius(zoom);
-  const ownerFilter = isAdmin ? 'TRUE' : `owner_id = '${userId}'`;
 
   const { rows } = await query(
     `SELECT
@@ -31,12 +30,12 @@ export async function getMapClusters(bounds, zoom, userId, isAdmin) {
        FROM assets
        WHERE status = 'active'
          AND location IS NOT NULL
-         AND ${ownerFilter}
+         AND ($7 OR owner_id = $6)
          AND location && ST_MakeEnvelope($1, $2, $3, $4, 4326)
      ) clustered
      GROUP BY cluster_id
      ORDER BY count DESC`,
-    [bounds.minLon, bounds.minLat, bounds.maxLon, bounds.maxLat, radiusMeters / 111_320]
+    [bounds.minLon, bounds.minLat, bounds.maxLon, bounds.maxLat, radiusMeters / 111_320, userId, isAdmin]
   );
 
   return rows.map((r) => ({
@@ -51,9 +50,8 @@ export async function getMapClusters(bounds, zoom, userId, isAdmin) {
 
 // Hämta enskilda assets inom en bounding box (vid hög zoom)
 export async function getAssetsInBounds(bounds, userId, isAdmin, limit = 300) {
-  const ownerFilter = isAdmin ? 'TRUE' : `owner_id = '${userId}'`;
   const { rows } = await query(
-    `SELECT id, file_name, thumb_small_path,
+    `SELECT id, file_name, thumb_small_path, thumb_large_path,
             ST_Y(location::geometry) AS lat,
             ST_X(location::geometry) AS lon,
             taken_at,
@@ -61,11 +59,11 @@ export async function getAssetsInBounds(bounds, userId, isAdmin, limit = 300) {
      FROM assets
      WHERE status = 'active'
        AND location IS NOT NULL
-       AND ${ownerFilter}
+       AND ($7 OR owner_id = $6)
        AND location && ST_MakeEnvelope($1, $2, $3, $4, 4326)
      ORDER BY taken_at DESC
      LIMIT $5`,
-    [bounds.minLon, bounds.minLat, bounds.maxLon, bounds.maxLat, limit]
+    [bounds.minLon, bounds.minLat, bounds.maxLon, bounds.maxLat, limit, userId, isAdmin]
   );
   const total = Number(rows[0]?.total_count ?? 0);
   return { rows, total, truncated: total > rows.length };
@@ -90,9 +88,9 @@ export async function getMapExtent(userId, isAdmin) {
 }
 
 // Foton inom en given radial area — används för kluster-panelen
-export async function getClusterPhotos(lat, lon, radiusMeters, userId, isAdmin) {
+export async function getClusterPhotos(lat, lon, radiusMeters, userId, isAdmin, offset = 0) {
   const { rows } = await query(
-    `SELECT id, thumb_small_path, taken_at, file_name,
+    `SELECT id, thumb_small_path, thumb_large_path, taken_at, file_name,
             ST_Y(location::geometry) AS lat,
             ST_X(location::geometry) AS lon
      FROM assets
@@ -101,10 +99,39 @@ export async function getClusterPhotos(lat, lon, radiusMeters, userId, isAdmin) 
        AND ($5 OR owner_id = $4)
        AND ST_DWithin(location, ST_MakePoint($2, $1)::geography, $3)
      ORDER BY taken_at DESC
-     LIMIT 30`,
-    [lat, lon, radiusMeters, userId, isAdmin]
+     LIMIT 31 OFFSET $6`,
+    [lat, lon, radiusMeters, userId, isAdmin, offset]
   );
-  return rows;
+  const hasMore = rows.length === 31;
+  return { rows: rows.slice(0, 30), hasMore };
+}
+
+// Forward geocoding via Nominatim — fritext (stad, adress, ort) → { lat, lon, label }
+export async function forwardGeocode(searchText) {
+  try {
+    const q = encodeURIComponent(searchText.trim());
+    const url = `https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=5&addressdetails=1`;
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'PhotoManager/1.0 (self-hosted)' },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.map((r) => {
+      const addr = r.address ?? {};
+      const city = addr.city ?? addr.town ?? addr.village ?? addr.county ?? r.name;
+      const country = addr.country ?? '';
+      const label = [city, country].filter(Boolean).join(', ');
+      return {
+        lat:         parseFloat(r.lat),
+        lon:         parseFloat(r.lon),
+        label:       label || r.display_name,
+        displayName: r.display_name,
+      };
+    });
+  } catch {
+    return [];
+  }
 }
 
 // Reverse geocoding via Nominatim (OpenStreetMap, ingen API-nyckel krävs)

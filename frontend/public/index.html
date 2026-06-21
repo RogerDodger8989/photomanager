@@ -27,8 +27,6 @@
 
   <!-- Leaflet CSS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
-  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
 
   <style>
     /* Scrollbar */
@@ -394,6 +392,8 @@
       <div id="lb-media-container" class="relative max-h-full max-w-full" style="will-change: transform; transition: transform 0.05s ease-out;">
         <img id="lb-img" class="max-h-[85vh] max-w-full object-contain hidden" alt="">
         <video id="lb-video" class="max-h-[85vh] max-w-full hidden" controls preload="metadata"></video>
+        <!-- Motion Photo-video: spelas upp som ett lager ovanpå stillbilden -->
+        <video id="lb-motion-video" class="absolute inset-0 w-full h-full object-contain hidden" playsinline muted preload="none"></video>
         <div id="lb-faces" class="absolute inset-0 pointer-events-none"></div>
       </div>
 
@@ -405,6 +405,12 @@
 
       <!-- Zoom-kontroller -->
       <div class="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1 bg-black/60 rounded-full px-2 py-1">
+        <button id="lb-motion-replay" title="Spela upp rörelsefilm igen" class="hidden text-white hover:text-blue-400 w-8 h-8 flex items-center justify-center transition-colors">
+          <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/>
+          </svg>
+        </button>
+        <div id="lb-motion-replay-divider" class="hidden w-px h-4 bg-slate-600 mx-1"></div>
         <button id="lb-zoom-out" title="Zooma ut" class="text-white hover:text-slate-300 w-8 h-8 flex items-center justify-center text-xl font-light transition-colors">−</button>
         <span id="lb-zoom-label" class="text-xs text-slate-400 w-10 text-center">100%</span>
         <button id="lb-zoom-in" title="Zooma in" class="text-white hover:text-slate-300 w-8 h-8 flex items-center justify-center text-xl font-light transition-colors">+</button>
@@ -449,9 +455,8 @@
 <!-- Toast-notiser -->
 <div id="toast-container" class="space-y-2"></div>
 
-<!-- Leaflet + MarkerCluster JS -->
+<!-- Leaflet JS -->
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 
 <!-- App -->
 <script type="module" src="/app.js"></script>

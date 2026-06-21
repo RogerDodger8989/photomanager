@@ -2,7 +2,7 @@ import { relative } from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { config } from '../config.js';
 import { query } from '../db/pool.js';
-import { computeFileHash, findDuplicateByHash } from '../services/hashService.js';
+import { computeFileHash } from '../services/hashService.js';
 import { extractMetadata, isImage, isVideo, getMimeType } from '../services/metadataService.js';
 import { upsertAssetLocation, reverseGeocode } from '../services/geoService.js';
 import { generateThumbnails } from './thumbnailer.js';
@@ -39,15 +39,37 @@ export async function indexFile(absolutePath, sourceFolderPath = null) {
   const fileName = absolutePath.split(/[\\/]/).pop();
 
   // 1. Kolla om filen redan är indexerad (t.ex. server-restart)
+  // Inkluderar även 'deleted' — annars blockerar UNIQUE-constrainten på file_path en ny INSERT.
   const existing = await query(
-    `SELECT a.id, a.source_folder, a.thumb_small_path, a.location,
+    `SELECT a.id, a.status, a.source_folder, a.thumb_small_path, a.location,
             (SELECT COUNT(*) FROM faces f WHERE f.asset_id = a.id)::int AS face_count,
             (SELECT COUNT(*) FROM faces f WHERE f.asset_id = a.id AND f.person_id IS NULL AND f.source != 'ai')::int AS unassigned_faces
-     FROM assets a WHERE a.file_path = $1 AND a.status != 'deleted'`,
+     FROM assets a WHERE a.file_path = $1`,
     [relPath]
   );
   if (existing.rows.length > 0) {
     const row = existing.rows[0];
+
+    // Filen låg i papperskorgen eller var permanent raderad men har lagts tillbaka på disk — återställ den.
+    if (row.status === 'trashed' || row.status === 'deleted') {
+      await query(
+        `UPDATE assets SET status = 'active', trashed_at = NULL, trash_path = NULL,
+                           source_folder = COALESCE($1, source_folder)
+         WHERE id = $2`,
+        [sourceFolderPath, row.id]
+      );
+      // Generera om thumbnail om den raderades tillsammans med filen
+      if (isImage(mimeType)) {
+        try {
+          await generateThumbnails(row.id, absolutePath, mimeType);
+        } catch (err) {
+          console.warn(`Thumbnail misslyckades (återställd) för ${relPath}:`, err.message);
+        }
+      }
+      broadcast('asset.indexed', { assetId: row.id, fileName, mimeType });
+      console.log(`Återställd (${row.status}): ${relPath}`);
+      return row.id;
+    }
     // Koppla till den mapp som nu bevakar filen (om den saknas eller skiljer sig)
     if (sourceFolderPath && row.source_folder !== sourceFolderPath) {
       await query('UPDATE assets SET source_folder = $1 WHERE id = $2', [sourceFolderPath, row.id]);
@@ -125,23 +147,18 @@ export async function indexFile(absolutePath, sourceFolderPath = null) {
     return;
   }
 
-  const duplicate = await findDuplicateByHash(fileHash);
-  if (duplicate) {
-    console.log(`Duplikat hoppas över: ${relPath} (samma som ${duplicate.file_path})`);
-    return;
-  }
-
   // 3. Extrahera metadata
   const meta = await extractMetadata(absolutePath);
 
-  // 4. Skapa asset-rad i DB
+  // 4. Skapa asset-rad i DB — alltid 'active', dublikathantering sker i Dublikat-vyn
   const assetId = uuidv4();
+  const initialStatus = 'active';
   await query(
     `INSERT INTO assets
        (id, file_path, file_name, file_hash, mime_type, file_size,
         width, height, taken_at, file_created_at,
-        transcode_status, rating, title, description, source_folder)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+        transcode_status, rating, title, description, source_folder, is_motion_photo, status)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
     [
       assetId,
       relPath,
@@ -158,6 +175,8 @@ export async function indexFile(absolutePath, sourceFolderPath = null) {
       meta.title ?? null,
       meta.description ?? null,
       sourceFolderPath,
+      meta.isMotionPhoto ?? false,
+      initialStatus,
     ]
   );
 

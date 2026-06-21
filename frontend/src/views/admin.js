@@ -132,7 +132,7 @@ async function renderStats(content) {
   content.innerHTML = `
     <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
       ${[
-        ['Bilder', data.total_assets],
+        ['Bilder', data.total_images],
         ['Videor', data.total_videos],
         ['Lagring', formatBytes(data.total_bytes)],
         ['Användare', data.total_users],
@@ -269,6 +269,10 @@ async function renderJobs(content) {
         class="px-4 py-2 bg-purple-700 hover:bg-purple-600 text-white text-xs font-medium rounded-lg transition-colors">
         🔄 Omklustra ansikten
       </button>
+      <button id="backfill-motion-btn"
+        class="px-4 py-2 bg-teal-700 hover:bg-teal-600 text-white text-xs font-medium rounded-lg transition-colors">
+        🎬 Skanna Motion Photos
+      </button>
     </div>
     <div class="space-y-1.5">
       ${recent.map((j) => `
@@ -323,6 +327,21 @@ async function renderJobs(content) {
       toast(err.message, 'error');
       btn.disabled = false;
       btn.textContent = '🔄 Omklustra ansikten';
+    }
+  });
+
+  content.querySelector('#backfill-motion-btn')?.addEventListener('click', async (e) => {
+    const btn = /** @type {HTMLButtonElement} */ (e.currentTarget);
+    btn.disabled = true;
+    btn.textContent = '⏳ Skannar…';
+    try {
+      const { data } = await api.backfillMotionPhotos();
+      toast(`${data.scanned} bilder skannade, ${data.updated} Motion Photos hittade`, data.updated > 0 ? 'success' : 'info', 4000);
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '🎬 Skanna Motion Photos';
     }
   });
 }
@@ -622,16 +641,17 @@ async function renderDuplicates(content) {
           <div class="text-xs text-slate-400 mb-2">${group.count} kopior · <span class="font-mono">${group.file_hash.slice(0,16)}…</span></div>
           <div class="flex gap-2 overflow-x-auto pb-1">
             ${group.assets.map((a, ai) => `
-              <div class="dup-asset flex-shrink-0 w-28 text-center group/dup relative" data-id="${a.id}" data-gi="${gi}" data-ai="${ai}">
-                <div class="w-28 h-28 rounded-lg overflow-hidden mb-1 ring-2 ring-transparent group-hover/dup:ring-blue-500 transition-all">
+              <div class="dup-asset flex-shrink-0 w-32 text-center group/dup relative" data-id="${a.id}" data-gi="${gi}" data-ai="${ai}">
+                <div class="w-32 h-32 rounded-lg overflow-hidden mb-1 ring-2 ${ai === 0 ? 'ring-blue-500' : 'ring-yellow-600'} transition-all">
                   <img src="/thumbs/${a.thumb_small_path}" class="w-full h-full object-cover" loading="lazy">
                 </div>
-                <div class="text-xs text-slate-400 truncate mb-1" title="${a.file_path}">${a.file_path.split('/').pop()}</div>
-                <div class="text-xs text-slate-500">${a.file_size ? formatBytes(a.file_size) : ''}</div>
+                <div class="text-xs text-slate-200 truncate mb-0.5 font-medium" title="${a.file_path}">${a.file_path.split('/').pop()}</div>
+                <div class="text-xs text-slate-500 truncate mb-1" title="${a.file_path}">${a.file_path.includes('/') ? a.file_path.substring(0, a.file_path.lastIndexOf('/')) || '/' : '/'}</div>
+                <div class="text-xs text-slate-500 mb-1">${a.file_size ? formatBytes(a.file_size) : ''}</div>
                 ${ai === 0 ? `
-                  <div class="text-xs bg-blue-600 text-white rounded px-1.5 py-0.5 mt-1">Behåll</div>` : `
-                  <button class="dup-trash-btn w-full text-xs bg-red-900 hover:bg-red-700 text-red-300 rounded px-1.5 py-0.5 mt-1 transition-colors"
-                    data-id="${a.id}" data-gi="${gi}">🗑 Radera</button>`}
+                  <div class="text-xs bg-blue-600 text-white rounded px-1.5 py-0.5">✓ Original</div>` : `
+                  <button class="dup-trash-btn w-full text-xs bg-red-900 hover:bg-red-700 text-red-300 rounded px-1.5 py-0.5 transition-colors"
+                    data-id="${a.id}" data-gi="${gi}">🗑 Radera kopia</button>`}
               </div>`).join('')}
           </div>
         </div>`).join('')}

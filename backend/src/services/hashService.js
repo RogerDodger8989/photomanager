@@ -14,7 +14,7 @@ export function computeFileHash(filePath) {
 
 export async function findDuplicateByHash(hash) {
   const { rows } = await query(
-    "SELECT id, file_path FROM assets WHERE file_hash = $1 AND status != 'deleted' LIMIT 1",
+    "SELECT id, file_path FROM assets WHERE file_hash = $1 AND status IN ('active', 'duplicate') LIMIT 1",
     [hash]
   );
   return rows[0] ?? null;

@@ -43,7 +43,7 @@ export default async function mapRoutes(fastify) {
     return reply.send({ data });
   });
 
-  // GET /api/map/cluster-photos?lat=&lon=&radiusMeters=
+  // GET /api/map/cluster-photos?lat=&lon=&radiusMeters=&offset=
   fastify.get('/api/map/cluster-photos', {
     onRequest: [fastify.authenticate],
     schema: {
@@ -54,14 +54,15 @@ export default async function mapRoutes(fastify) {
           lat:          { type: 'number' },
           lon:          { type: 'number' },
           radiusMeters: { type: 'number' },
+          offset:       { type: 'integer', minimum: 0, default: 0 },
         },
       },
     },
   }, async (request, reply) => {
-    const { lat, lon, radiusMeters } = request.query;
+    const { lat, lon, radiusMeters, offset = 0 } = request.query;
     const userId  = request.user.id;
     const isAdmin = request.user.role === 'admin';
-    const photos = await getClusterPhotos(lat, lon, radiusMeters, userId, isAdmin);
-    return reply.send({ data: photos });
+    const result = await getClusterPhotos(lat, lon, radiusMeters, userId, isAdmin, offset);
+    return reply.send({ data: result });
   });
 }

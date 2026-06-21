@@ -1,5 +1,6 @@
 import { query } from '../db/pool.js';
 import { getJobStats } from '../services/jobService.js';
+import { backfillMotionPhotos } from '../workers/motionPhotoBackfill.js';
 import bcrypt from 'bcrypt';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -51,17 +52,18 @@ export default async function adminRoutes(fastify) {
     return reply.send({ data: { queued: rows.length } });
   });
 
-  // GET /api/admin/duplicates — lista duplikat
+  // GET /api/admin/duplicates — lista duplikat (active + duplicate-status)
   fastify.get('/api/admin/duplicates', async (request, reply) => {
     const { rows } = await query(
       `SELECT file_hash, COUNT(*)::int AS count,
               json_agg(json_build_object(
                 'id', id, 'file_path', file_path,
                 'file_size', file_size, 'taken_at', taken_at,
-                'thumb_small_path', thumb_small_path
+                'thumb_small_path', thumb_small_path,
+                'status', status
               ) ORDER BY indexed_at) AS assets
        FROM assets
-       WHERE file_hash IS NOT NULL AND status = 'active'
+       WHERE file_hash IS NOT NULL AND status IN ('active', 'duplicate')
        GROUP BY file_hash
        HAVING COUNT(*) > 1
        ORDER BY count DESC`
@@ -253,8 +255,8 @@ export default async function adminRoutes(fastify) {
   fastify.get('/api/admin/stats', async (request, reply) => {
     const { rows } = await query(`
       SELECT
-        (SELECT COUNT(*)  FROM assets WHERE status = 'active')               AS total_assets,
-        (SELECT COUNT(*)  FROM assets WHERE status = 'active' AND duration IS NOT NULL) AS total_videos,
+        (SELECT COUNT(*)  FROM assets WHERE status = 'active' AND mime_type NOT LIKE 'video/%') AS total_images,
+        (SELECT COUNT(*)  FROM assets WHERE status = 'active' AND mime_type LIKE 'video/%') AS total_videos,
         (SELECT COALESCE(SUM(file_size), 0) FROM assets WHERE status = 'active') AS total_bytes,
         (SELECT COUNT(*)  FROM assets WHERE status = 'trashed')              AS trashed_assets,
         (SELECT COUNT(*)  FROM users WHERE is_active = true)                 AS total_users,
@@ -327,5 +329,11 @@ export default async function adminRoutes(fastify) {
   fastify.post('/api/admin/faces/recluster', async (request, reply) => {
     await query(`INSERT INTO jobs (job_type) VALUES ('recluster_faces') ON CONFLICT DO NOTHING`);
     return reply.send({ data: { ok: true, message: 'Omklustringsjobb köat' } });
+  });
+
+  // POST /api/admin/backfill-motion-photos — uppdatera is_motion_photo för befintliga bilder
+  fastify.post('/api/admin/backfill-motion-photos', async (request, reply) => {
+    const result = await backfillMotionPhotos();
+    return reply.send({ data: result });
   });
 }

@@ -5,7 +5,7 @@ import { query } from '../db/pool.js';
 import { indexFile, removeFileFromIndex } from './indexer.js';
 import { mountCifsShare, isMounted } from '../services/mountService.js';
 
-const MEDIA_EXTENSIONS = /\.(jpg|jpeg|png|webp|heic|heif|tiff|tif|gif|avif|bmp|mp4|mov|avi|mkv|webm|mpg|mpeg|3gp|wmv|m4v)$/i;
+const MEDIA_EXTENSIONS = /\.(jpg|jpeg|png|webp|heic|heif|tiff|tif|gif|avif|bmp|cr2|cr3|nef|arw|dng|orf|rw2|raf|pef|mp4|mov|avi|mkv|webm|mpg|mpeg|3gp|wmv|m4v)$/i;
 
 const processingQueue = new Set();
 

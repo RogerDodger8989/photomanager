@@ -37,6 +37,7 @@ import { startTrashCleanerCron } from './workers/trashCleaner.js';
 import { startJobRunner }        from './workers/jobRunner.js';
 import { buildEvents }           from './services/exploreService.js';
 import { initAiWorker, shutdownAiWorker } from './services/aiService.js';
+import { backfillMotionPhotos }  from './workers/motionPhotoBackfill.js';
 
 const fastify = Fastify({
   logger: {
@@ -115,6 +116,8 @@ const start = async () => {
     startTrashCleanerCron();
     // Bygg händelse-index i bakgrunden vid uppstart
     buildEvents().catch(console.error);
+    // Identifiera Motion Photos bland befintliga bilder (körs i bakgrunden)
+    backfillMotionPhotos().catch(console.error);
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);

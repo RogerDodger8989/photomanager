@@ -1,5 +1,6 @@
 ﻿import { api } from '../api.js';
 import { toast, formatDate, formatDateTime, isVideo } from '../utils.js';
+import { openEditMetaModal } from './editMetaModal.js';
 import { state } from '../state.js';
 import { openAddToAlbumModal } from '../views/albums.js';
 import { openShareModal } from './shareModal.js';
@@ -26,6 +27,9 @@ const lbMetaPanel     = /** @type {HTMLElement} */ (document.getElementById('lb-
 const lbMetaCont      = /** @type {HTMLElement} */ (document.getElementById('lb-meta-content'));
 const lbMediaArea     = /** @type {HTMLElement} */ (document.getElementById('lb-media-area'));
 const lbZoomLabel     = /** @type {HTMLElement} */ (document.getElementById('lb-zoom-label'));
+const lbMotionVideo   = /** @type {HTMLVideoElement} */ (document.getElementById('lb-motion-video'));
+const lbMotionReplay  = document.getElementById('lb-motion-replay');
+const lbMotionDivider = document.getElementById('lb-motion-replay-divider');
 
 const DRAWER_KEY = 'pm-drawer-open';
 
@@ -67,10 +71,50 @@ export function closeLightbox() {
   document.body.style.overflow = '';
   lbVideo.pause();
   lbVideo.src = '';
+  stopMotionVideo();
   lbMetaPanel.classList.add('hidden');
   resetZoom();
   window.dispatchEvent(new CustomEvent('lightbox:closed'));
 }
+
+function stopMotionVideo() {
+  if (lbMotionVideo) {
+    lbMotionVideo.pause();
+    lbMotionVideo.src = '';
+    lbMotionVideo.classList.add('hidden');
+  }
+  lbMotionReplay?.classList.add('hidden');
+  lbMotionDivider?.classList.add('hidden');
+}
+
+function authVideoUrl(path) {
+  const t = /** @type {any} */ (window).__pmToken ?? '';
+  return t ? `${path}?token=${encodeURIComponent(t)}` : path;
+}
+
+function playMotionVideo(assetId) {
+  if (!lbMotionVideo) return;
+  lbMotionVideo.src = authVideoUrl(`/api/assets/${assetId}/motion-video`);
+  lbMotionVideo.classList.remove('hidden');
+  lbMotionVideo.play().catch(() => {
+    // Auto-play blockerad — visa replay-knapp direkt
+    lbMotionVideo.classList.add('hidden');
+  });
+  lbMotionReplay?.classList.remove('hidden');
+  lbMotionDivider?.classList.remove('hidden');
+}
+
+lbMotionVideo?.addEventListener('ended', () => {
+  lbMotionVideo.classList.add('hidden');
+});
+
+lbMotionReplay?.addEventListener('click', () => {
+  const asset = items[currentIndex];
+  if (!asset?.is_motion_photo) return;
+  lbMotionVideo.classList.remove('hidden');
+  lbMotionVideo.currentTime = 0;
+  lbMotionVideo.play().catch(() => {});
+});
 
 function resetZoom() {
   zoomLevel = 1; panX = 0; panY = 0;
@@ -115,12 +159,18 @@ function showItem(idx) {
   lbImg.classList.toggle('hidden',  isVid);
   lbVideo.classList.toggle('hidden', !isVid);
 
+  stopMotionVideo();
+
   if (isVid) {
-    lbVideo.src = `/api/assets/${asset.id}/stream`;
+    lbVideo.src = authVideoUrl(`/api/assets/${asset.id}/stream`);
     lbVideo.load();
   } else {
     lbImg.src = `/thumbs/${asset.thumb_large_path ?? asset.thumb_small_path}`;
     lbImg.alt = asset.file_name;
+    // Motion Photo: spela upp inbäddad video automatiskt
+    if (asset.is_motion_photo) {
+      playMotionVideo(asset.id);
+    }
   }
 
   const dateStr = asset.taken_at ? formatDate(asset.taken_at) : '';
@@ -493,6 +543,14 @@ function buildTemporalSection(ts) {
       ${country ? row('Land', country) : ''}
       ${!dateStr && !city && !region && !country && !ts.gps
         ? '<p class="text-xs text-slate-500 italic">Ingen tid/plats-data</p>' : ''}
+      <button class="edit-meta-btn mt-1 flex items-center gap-1.5 text-xs text-slate-500
+                     hover:text-blue-400 transition-colors">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+        </svg>
+        Redigera tid &amp; plats
+      </button>
     </div>`;
 }
 
@@ -533,6 +591,10 @@ function buildSystemSection(sys) {
         <div class="text-xs text-slate-400 font-mono break-all bg-slate-800 rounded px-2 py-1">${sys.checksum}</div>
       </div>` : ''}
       ${dupWarning}
+      <button id="rescan-meta-btn"
+        class="mt-2 w-full py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs rounded-lg transition-colors">
+        🔍 Skanna om GPS & Motion Photo
+      </button>
     </div>`;
 }
 
@@ -724,6 +786,50 @@ function initDrawerInteractions(container, assetId, m) {
         detail: { dateFrom: `${dateFrom}T00:00:00`, dateTo: `${dateFrom}T23:59:59` },
       }));
     });
+  });
+
+  // ── Skanna om GPS & Motion Photo ─────────────────────────────────────────────
+  const rescanBtn = container.querySelector('#rescan-meta-btn');
+  if (rescanBtn) {
+    rescanBtn.addEventListener('click', async () => {
+      rescanBtn.textContent = '⏳ Skannar…';
+      rescanBtn.disabled = true;
+      try {
+        await api.rescanAsset(assetId);
+        toast('Klar! Laddar om information…', 'success');
+        // Ladda om drawer och uppdatera lightbox-items
+        setTimeout(() => loadInfoDrawer(assetId), 500);
+      } catch (err) {
+        toast(`Misslyckades: ${err.message}`, 'error');
+        rescanBtn.textContent = '🔍 Skanna om GPS & Motion Photo';
+        rescanBtn.disabled = false;
+      }
+    });
+  }
+
+  // ── Redigera tid & plats ─────────────────────────────────────────────────────
+  container.querySelector('.edit-meta-btn')?.addEventListener('click', async () => {
+    const result = await openEditMetaModal(
+      assetId,
+      m.temporalSpatial?.capturedAt ?? null,
+      m.temporalSpatial?.location?.city ?? null
+    );
+    if (result) {
+      // Uppdatera lightbox-items och ladda om drawer
+      const idx = items.findIndex(a => a.id === assetId);
+      if (idx !== -1) {
+        if (result.takenAt)       items[idx].taken_at       = result.takenAt;
+        if (result.locationLabel) items[idx].location_label = result.locationLabel;
+      }
+      loadInfoDrawer(assetId);
+      // Uppdatera datum/plats-raden i lightboxens överkant
+      const asset = items[currentIndex];
+      if (asset) {
+        const dateStr = asset.taken_at ? formatDate(asset.taken_at) : '';
+        const loc     = asset.location_label ? ` · ${asset.location_label}` : '';
+        lbInfo.textContent = `${dateStr}${loc}`;
+      }
+    }
   });
 
   // ── Stad-klick ───────────────────────────────────────────────────────────────

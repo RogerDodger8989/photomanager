@@ -8,6 +8,8 @@ import { config } from '../config.js';
 import { v4 as uuidv4 } from 'uuid';
 import sharp from 'sharp';
 import { generateThumbnails } from '../workers/thumbnailer.js';
+import { extractMetadata } from '../services/metadataService.js';
+import { upsertAssetLocation, reverseGeocode, forwardGeocode } from '../services/geoService.js';
 
 export default async function assetsRoutes(fastify) {
 
@@ -85,7 +87,7 @@ export default async function assetsRoutes(fastify) {
       `SELECT a.id, a.file_name, a.mime_type, a.file_size, a.width, a.height,
               a.taken_at, a.indexed_at, a.thumb_small_path, a.thumb_large_path,
               a.location_label, a.view_count, a.duration, a.transcode_status,
-              a.owner_id,
+              a.owner_id, a.is_motion_photo,
               ST_Y(a.location::geometry) AS lat,
               ST_X(a.location::geometry) AS lon,
               (EXISTS (SELECT 1 FROM favorites f WHERE f.asset_id = a.id AND f.user_id = $${params.push(userId)})) AS is_favorite
@@ -101,6 +103,134 @@ export default async function assetsRoutes(fastify) {
     const nextCursor = hasMore ? items[items.length - 1][sort] : null;
 
     return reply.send({ data: items, meta: { hasMore, nextCursor } });
+  });
+
+  // GET /api/assets/duplicates — grupper av innehållsidentiska filer
+  fastify.get('/api/assets/duplicates', {
+    onRequest: [fastify.authenticate],
+  }, async (request, reply) => {
+    const { rows } = await query(`
+      SELECT
+        a.file_hash,
+        COUNT(*)::int AS count,
+        json_agg(
+          json_build_object(
+            'id',              a.id,
+            'file_name',       a.file_name,
+            'file_path',       a.file_path,
+            'file_size',       a.file_size,
+            'taken_at',        a.taken_at,
+            'indexed_at',      a.indexed_at,
+            'thumb_small_path',a.thumb_small_path,
+            'mime_type',       a.mime_type,
+            'width',           a.width,
+            'height',          a.height,
+            'location_label',  a.location_label,
+            'status',          a.status,
+            'face_count',      (SELECT COUNT(*) FROM faces f WHERE f.asset_id = a.id),
+            'tag_count',       (SELECT COUNT(*) FROM asset_tags t WHERE t.asset_id = a.id)
+          )
+          ORDER BY a.indexed_at ASC
+        ) AS assets
+      FROM assets a
+      WHERE a.file_hash IS NOT NULL
+        AND a.status IN ('active', 'trashed')
+      GROUP BY a.file_hash
+      HAVING COUNT(*) > 1
+      ORDER BY COUNT(*) DESC, MIN(a.indexed_at) DESC
+    `);
+    return reply.send({ data: rows });
+  });
+
+  // POST /api/assets/:id/rescan — re-extrahera GPS/motion-photo direkt från fil (utan restart)
+  fastify.post('/api/assets/:id/rescan', {
+    onRequest: [fastify.authenticate],
+  }, async (request, reply) => {
+    const { id } = request.params;
+    const { rows } = await query(
+      "SELECT id, file_path, mime_type FROM assets WHERE id = $1 AND status = 'active'",
+      [id]
+    );
+    if (!rows[0]) return reply.status(404).send({ error: 'Hittades inte' });
+
+    const absPath = join(config.media.photosPath, rows[0].file_path);
+    const meta = await extractMetadata(absPath);
+
+    const updates = [];
+    const params = [];
+
+    if (meta.isMotionPhoto) {
+      updates.push(`is_motion_photo = true`);
+    }
+    if (meta.gps) {
+      await upsertAssetLocation(id, meta.gps.lat, meta.gps.lon);
+      const label = await reverseGeocode(meta.gps.lat, meta.gps.lon).catch(() => null);
+      if (label) {
+        updates.push(`location_label = $${params.push(label)}`);
+      }
+    }
+    if (updates.length) {
+      params.push(id);
+      await query(`UPDATE assets SET ${updates.join(', ')} WHERE id = $${params.length}`, params);
+    }
+
+    return reply.send({
+      data: {
+        isMotionPhoto: meta.isMotionPhoto,
+        gps: meta.gps,
+        locationLabel: meta.gps ? (await reverseGeocode(meta.gps.lat, meta.gps.lon).catch(() => null)) : null,
+      },
+    });
+  });
+
+  // GET /api/assets/geocode?q=<text> — sök plats via Nominatim, returnerar kandidater
+  fastify.get('/api/assets/geocode', {
+    onRequest: [fastify.authenticate],
+  }, async (request, reply) => {
+    const q = (request.query.q ?? '').trim();
+    if (!q) return reply.send({ data: [] });
+    const results = await forwardGeocode(q);
+    return reply.send({ data: results });
+  });
+
+  // PATCH /api/assets/:id/datetime — ändra fotodatum manuellt
+  fastify.patch('/api/assets/:id/datetime', {
+    onRequest: [fastify.authenticate],
+  }, async (request, reply) => {
+    const { id } = request.params;
+    const { takenAt } = request.body ?? {};
+    if (!takenAt) return reply.status(400).send({ error: 'takenAt krävs' });
+
+    const dt = new Date(takenAt);
+    if (isNaN(dt.getTime())) return reply.status(400).send({ error: 'Ogiltigt datum' });
+
+    const { rows } = await query(
+      `UPDATE assets SET taken_at = $1 WHERE id = $2 AND status IN ('active','trashed') RETURNING id, taken_at`,
+      [dt.toISOString(), id]
+    );
+    if (!rows[0]) return reply.status(404).send({ error: 'Hittades inte' });
+    return reply.send({ data: rows[0] });
+  });
+
+  // PATCH /api/assets/:id/location — sätt eller rensa plats manuellt
+  fastify.patch('/api/assets/:id/location', {
+    onRequest: [fastify.authenticate],
+  }, async (request, reply) => {
+    const { id } = request.params;
+    const { lat, lon, label } = request.body ?? {};
+
+    if (lat == null || lon == null) {
+      // Rensa plats
+      await query(
+        `UPDATE assets SET location = NULL, location_label = NULL WHERE id = $1`,
+        [id]
+      );
+      return reply.send({ data: { lat: null, lon: null, label: null } });
+    }
+
+    await upsertAssetLocation(id, lat, lon);
+    await query(`UPDATE assets SET location_label = $1 WHERE id = $2`, [label ?? null, id]);
+    return reply.send({ data: { lat, lon, label } });
   });
 
   // GET /api/assets/:id — enskild asset
@@ -483,7 +613,7 @@ export default async function assetsRoutes(fastify) {
 
     const { id } = request.params;
     const { rows } = await query(
-      "SELECT id, file_path, source_folder FROM assets WHERE id = $1 AND status = 'active'",
+      "SELECT id, file_path, source_folder FROM assets WHERE id = $1 AND status IN ('active', 'duplicate')",
       [id]
     );
     if (!rows[0]) return reply.status(404).send({ error: 'Hittades inte eller redan i papperskorgen' });

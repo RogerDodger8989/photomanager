@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   ['faces',    'Ansikten',  '👤',  '#/faces'],
   ['folders',  'Mappar',    '📁',  '#/folders'],
   ['upload',   'Ladda upp', '⬆️',  '#/upload'],
+  ['duplicates','Dublikat', '🔁',  '#/duplicates'],
 ];
 
 const ADMIN_ITEMS = [
