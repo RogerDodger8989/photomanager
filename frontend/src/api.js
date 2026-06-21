@@ -145,7 +145,8 @@ export const api = {
   assignFaces: (body)           => request('POST', '/api/faces/assign', body),
   dismissFaces: (faceIds)       => request('PATCH', '/api/faces/dismiss', { faceIds }),
   mergeClusters: (fromFaceIds, intoFaceIds) => request('POST', '/api/faces/merge-clusters', { fromFaceIds, intoFaceIds }),
-  ungroupFace:   (faceId)                   => request('POST', '/api/faces/ungroup', { faceId }),
+  ungroupFace:        (faceId)               => request('POST', '/api/faces/ungroup', { faceId }),
+  computeSuggestions: ()                     => request('POST', '/api/faces/compute-suggestions', {}),
 
   // Albums
   albums:   (p = {})            => request('GET', p.assetId ? `/api/albums?assetId=${p.assetId}` : '/api/albums'),
@@ -178,7 +179,7 @@ export const api = {
   // AI
   aiStatus:       ()            => request('GET', '/api/ai/status'),
   aiSuggestions:  (p = {})      => request('GET', `/api/ai/suggestions?${qs(p)}`),
-  acceptAi:       (faceId)      => request('POST', `/api/ai/suggestions/${faceId}/accept`),
+  acceptAi:       (faceId)      => request('POST', `/api/ai/suggestions/${faceId}/accept`, {}),
   rejectAi:       (faceId, b)   => request('POST', `/api/ai/suggestions/${faceId}/reject`, b),
   batchAcceptAi:  (faceIds)     => request('POST', '/api/ai/suggestions/batch-accept', { faceIds }),
   aiReindex:      (assetId)     => request('POST', `/api/ai/reindex/${assetId}`, {}),

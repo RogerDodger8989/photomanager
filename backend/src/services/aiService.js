@@ -163,7 +163,7 @@ export async function processAssetFaces(assetId, absolutePath, qualityThreshold 
  * @param {number[]} embedding  — 512-dim vektor
  * @param {string}   excludeFaceId — den egna face-raden (exkluderas från sökning)
  */
-async function findClosestPerson(embedding, excludeFaceId) {
+export async function findClosestPerson(embedding, excludeFaceId) {
   const vectorStr = toVectorString(embedding);
 
   // <=> = cosine distance (0 = identisk, 2 = motsatt)

@@ -281,6 +281,14 @@ function injectUnknownFacesStyles() {
     .uf-skip-btn:hover{background:#64748b}
     .uf-ungroup-btn{background:rgba(59,130,246,.8);color:#fff}
     .uf-ungroup-btn:hover{background:#3b82f6}
+    .uf-suggestion-chip{display:flex;align-items:center;gap:.35rem;padding:.3rem .5rem;background:#1e3a5f;border:1px solid #2563eb;border-radius:.5rem;font-size:.68rem;color:#93c5fd;flex-wrap:wrap;margin-top:.1rem}
+    .uf-suggestion-chip strong{color:#bfdbfe}
+    .uf-suggestion-chip em{color:#60a5fa;font-style:normal;margin-left:.15rem}
+    .uf-sug-accept,.uf-sug-reject{border:none;border-radius:50%;width:20px;height:20px;cursor:pointer;font-size:.65rem;font-weight:700;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;transition:transform .1s}
+    .uf-sug-accept{background:rgba(34,197,94,.85);color:#fff}
+    .uf-sug-accept:hover{background:#22c55e;transform:scale(1.15)}
+    .uf-sug-reject{background:rgba(239,68,68,.8);color:#fff}
+    .uf-sug-reject:hover{background:#ef4444;transform:scale(1.15)}
     .uf-card--sibling{opacity:0;animation:uf-sibling-in .2s ease forwards}
     @keyframes uf-sibling-in{from{opacity:0;transform:scale(.95)}to{opacity:1;transform:scale(1)}}
     .uf-card--grouped{border-top-width:4px!important;border-top-style:solid!important}
@@ -864,6 +872,34 @@ function buildClusterCard(cluster, allPersons, onAssigned, onSkip, grid, onBulkT
     card.classList.add('uf-card--fade-out');
     setTimeout(() => { card.remove(); onAssigned(); }, 300);
   };
+  // ── AI-förslag ───────────────────────────────────────────────────────────────
+  if (cluster.suggestion) {
+    const { personName, confidence, faceId: sugFaceId } = cluster.suggestion;
+    const pct = Math.round(confidence * 100);
+    const chip = document.createElement('div');
+    chip.className = 'uf-suggestion-chip';
+    const label = document.createElement('span');
+    label.innerHTML = `Är det <strong>${personName}</strong>?<em>${pct}%</em>`;
+    const acceptBtn = document.createElement('button');
+    acceptBtn.className = 'uf-sug-accept';
+    acceptBtn.title = 'Ja, det stämmer';
+    acceptBtn.textContent = '✓';
+    acceptBtn.addEventListener('click', async () => {
+      try { await api.acceptAi(sugFaceId); removeWholeGroup(); }
+      catch (e) { toast(e.message, 'error'); }
+    });
+    const rejectBtn = document.createElement('button');
+    rejectBtn.className = 'uf-sug-reject';
+    rejectBtn.title = 'Nej, fel person';
+    rejectBtn.textContent = '✗';
+    rejectBtn.addEventListener('click', async () => {
+      try { await api.rejectAi(sugFaceId, {}); chip.remove(); }
+      catch (e) { toast(e.message, 'error'); }
+    });
+    chip.append(label, acceptBtn, rejectBtn);
+    card.appendChild(chip);
+  }
+
   const assignWidget = buildAssignWidget(faceIds, allPersons, removeWholeGroup);
   card.appendChild(assignWidget);
 
@@ -1169,6 +1205,8 @@ async function renderUnknownFacesTab(container, allPersons) {
   });
 
   try {
+    // Beräkna AI-förslag först (snabbt om redan gjort), sedan ladda kluster med färdiga suggestions
+    await api.computeSuggestions().catch(() => {});
     const { data, meta } = await api.unassignedFaces();
     clusters = data ?? [];
 

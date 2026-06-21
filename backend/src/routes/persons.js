@@ -6,6 +6,7 @@ import sharp from 'sharp';
 import { query } from '../db/pool.js';
 import { syncFacesToFile } from '../services/xmpService.js';
 import { config } from '../config.js';
+import { findClosestPerson } from '../services/aiService.js';
 
 export default async function personsRoutes(fastify) {
 
@@ -367,6 +368,24 @@ export default async function personsRoutes(fastify) {
       data.push({ clusterId: null, faces: [face] });
     }
 
+    // Hämta befintliga (ej avvisade) AI-suggestions för alla unassigned faces
+    const allFaceIds = data.flatMap(cl => cl.faces.map(f => f.id));
+    if (allFaceIds.length > 0) {
+      const { rows: sugRows } = await query(
+        `SELECT s.face_id, s.person_id, s.confidence, p.name AS person_name
+         FROM ai_suggestions s
+         JOIN persons p ON p.id = s.person_id
+         WHERE s.face_id = ANY($1::uuid[])
+           AND (s.reviewed = FALSE OR s.accepted = TRUE)`,
+        [allFaceIds]
+      );
+      const sugByFaceId = Object.fromEntries(sugRows.map(r => [r.face_id, r]));
+      for (const cl of data) {
+        const sug = cl.faces.map(f => sugByFaceId[f.id]).find(Boolean);
+        if (sug) cl.suggestion = { personId: sug.person_id, personName: sug.person_name, confidence: sug.confidence, faceId: sug.face_id };
+      }
+    }
+
     return reply.send({
       data,
       meta: { total_faces: rows.length, total_clusters: clusters.length },
@@ -450,6 +469,37 @@ export default async function personsRoutes(fastify) {
       faceIds
     );
     return reply.send({ data: { ok: true, dismissed: faceIds.length } });
+  });
+
+  // POST /api/faces/compute-suggestions — beräkna AI-förslag för unassigned faces utan suggestion
+  fastify.post('/api/faces/compute-suggestions', {
+    onRequest: [fastify.authenticate],
+  }, async (request, reply) => {
+    const { rows: faces } = await query(`
+      SELECT f.id, f.embedding::text AS embedding_text
+      FROM faces f
+      WHERE f.person_id IS NULL AND f.dismissed IS NOT TRUE AND f.embedding IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM ai_suggestions s
+          WHERE s.face_id = f.id AND (s.reviewed = FALSE OR s.accepted = TRUE)
+        )
+      LIMIT 200
+    `);
+
+    let computed = 0;
+    for (const face of faces) {
+      const emb = face.embedding_text.slice(1, -1).split(',').map(Number);
+      const match = await findClosestPerson(emb, face.id);
+      if (!match) continue;
+      await query(
+        `INSERT INTO ai_suggestions (face_id, person_id, confidence)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (face_id) DO UPDATE SET person_id=$2, confidence=$3, reviewed=FALSE, accepted=NULL`,
+        [face.id, match.personId, match.confidence]
+      );
+      computed++;
+    }
+    return reply.send({ data: { computed } });
   });
 
   // POST /api/faces/ungroup — lyft ut ett ansikte ur sin kluster-grupp
