@@ -284,19 +284,15 @@ export default async function personsRoutes(fastify) {
       `SELECT f.id, f.asset_id,
               a.file_name, a.thumb_small_path, a.thumb_large_path, a.mime_type,
               f.region_x, f.region_y, f.region_w, f.region_h,
+              f.cluster_group_id,
               f.embedding::text AS embedding_text
        FROM faces f
        JOIN assets a ON a.id = f.asset_id AND a.status = 'active'
        WHERE f.person_id IS NULL AND f.dismissed IS NOT TRUE
        ORDER BY f.created_at DESC
-       LIMIT 500`
+       LIMIT 5000`
     );
 
-    // Dela upp i de med embedding och utan
-    const withEmb  = rows.filter(r => r.embedding_text);
-    const withoutEmb = rows.filter(r => !r.embedding_text).map(r => ({ ...r, clusterId: null }));
-
-    // Parsa embeddings från pgvector-format "[0.1,0.2,...]"
     function parseEmbedding(text) {
       return text.slice(1, -1).split(',').map(Number);
     }
@@ -307,9 +303,24 @@ export default async function personsRoutes(fastify) {
       return dot / (Math.sqrt(na) * Math.sqrt(nb) + 1e-10);
     }
 
-    // Greedy agglomerativ klustring, tröskel 0.75 likhet
+    // Gruppera manuellt sammanslagna faces (cluster_group_id) först
+    const manualGroups = new Map(); // cluster_group_id → face[]
+    const remaining = [];
+    for (const row of rows) {
+      if (row.cluster_group_id) {
+        if (!manualGroups.has(row.cluster_group_id)) manualGroups.set(row.cluster_group_id, []);
+        manualGroups.get(row.cluster_group_id).push(row);
+      } else {
+        remaining.push(row);
+      }
+    }
+
+    // Greedy agglomerativ klustring på remaining, tröskel 0.75
     const THRESHOLD = 0.75;
-    const clusters = []; // [{ centroid: Float64Array, faces: [...], sum: [...] }]
+    const clusters = [];
+
+    const withEmb    = remaining.filter(r => r.embedding_text);
+    const withoutEmb = remaining.filter(r => !r.embedding_text);
 
     for (const face of withEmb) {
       const emb = parseEmbedding(face.embedding_text);
@@ -321,7 +332,6 @@ export default async function personsRoutes(fastify) {
       if (bestSim >= THRESHOLD) {
         const cl = clusters[bestIdx];
         cl.faces.push(face);
-        // Uppdatera centroid som medel
         for (let i = 0; i < emb.length; i++) cl.sum[i] += emb[i];
         const n = cl.faces.length;
         cl.centroid = cl.sum.map(v => v / n);
@@ -330,17 +340,30 @@ export default async function personsRoutes(fastify) {
       }
     }
 
-    // Sortera kluster efter storlek
     clusters.sort((a, b) => b.faces.length - a.faces.length);
 
-    const data = clusters.map((cl, i) => ({
-      clusterId: `c${i}`,
-      faces: cl.faces.map(({ embedding_text, ...f }) => f),
-    }));
+    const data = [];
 
-    // Lägg till faces utan embedding sist som singletons
+    // Manuella grupper visas först (de är bekräftade av användaren)
+    let mgIdx = 0;
+    for (const [groupId, faces] of manualGroups) {
+      data.push({
+        clusterId: `mg${mgIdx++}`,
+        faces: faces.map(({ embedding_text, cluster_group_id, ...f }) => f),
+      });
+    }
+
+    // Embedding-kluster
+    for (let i = 0; i < clusters.length; i++) {
+      data.push({
+        clusterId: `c${i}`,
+        faces: clusters[i].faces.map(({ embedding_text, cluster_group_id, ...f }) => f),
+      });
+    }
+
+    // Faces utan embedding sist som singletons
     for (const f of withoutEmb) {
-      const { embedding_text, ...face } = f;
+      const { embedding_text, cluster_group_id, ...face } = f;
       data.push({ clusterId: null, faces: [face] });
     }
 
@@ -429,6 +452,16 @@ export default async function personsRoutes(fastify) {
     return reply.send({ data: { ok: true, dismissed: faceIds.length } });
   });
 
+  // POST /api/faces/ungroup — lyft ut ett ansikte ur sin kluster-grupp
+  fastify.post('/api/faces/ungroup', {
+    onRequest: [fastify.authenticate],
+    schema: { body: { type: 'object', required: ['faceId'], properties: { faceId: { type: 'string' } } } },
+  }, async (request, reply) => {
+    const { faceId } = request.body;
+    await query('UPDATE faces SET cluster_group_id = NULL WHERE id = $1', [faceId]);
+    return reply.send({ data: { ok: true } });
+  });
+
   // POST /api/faces/merge-clusters — slå ihop alla ansikten från ett kluster till ett annat
   fastify.post('/api/faces/merge-clusters', {
     onRequest: [fastify.authenticate],
@@ -443,10 +476,21 @@ export default async function personsRoutes(fastify) {
       },
     },
   }, async (request, reply) => {
-    // Sammanslagning innebär bara att vi bekräftar att de tillhör samma okända person —
-    // lagras i en temporär grupp-tabell tills användaren namnger dem.
-    // I praktiken returnerar vi bara en bekräftelse; frontend slår ihop korten visuellt.
-    return reply.send({ data: { ok: true } });
+    const { fromFaceIds, intoFaceIds } = request.body;
+    const allIds = [...new Set([...fromFaceIds, ...intoFaceIds])];
+
+    // Återanvänd befintlig cluster_group_id om någon av ansiktena redan har en
+    const { rows: existing } = await query(
+      `SELECT cluster_group_id FROM faces WHERE id = ANY($1::uuid[]) AND cluster_group_id IS NOT NULL LIMIT 1`,
+      [allIds]
+    );
+    const groupId = existing[0]?.cluster_group_id ?? (await query('SELECT gen_random_uuid() AS id')).rows[0].id;
+
+    await query(
+      `UPDATE faces SET cluster_group_id = $1 WHERE id = ANY($2::uuid[])`,
+      [groupId, allIds]
+    );
+    return reply.send({ data: { ok: true, cluster_group_id: groupId } });
   });
 
   // GET /api/faces/:faceId/thumb — beskuren ansiktsbild för valfritt face-id (ingen auth)

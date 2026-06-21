@@ -286,6 +286,46 @@ export default async function adminRoutes(fastify) {
       LIMIT 10
     `);
 
-    return reply.send({ data: { ...rows[0], perYear, cameras } });
+    // Uppladdningar per dag (senaste 30 dagarna)
+    const { rows: uploadsPerDay } = await query(`
+      SELECT
+        DATE(indexed_at)::text AS day,
+        COUNT(*)::int           AS count
+      FROM assets
+      WHERE status = 'active' AND indexed_at >= NOW() - INTERVAL '30 days'
+      GROUP BY day
+      ORDER BY day ASC
+    `);
+
+    // Lagring per månad (senaste 12 månader)
+    const { rows: storagePerMonth } = await query(`
+      SELECT
+        TO_CHAR(DATE_TRUNC('month', indexed_at), 'YYYY-MM') AS month,
+        COALESCE(SUM(file_size), 0)::bigint                  AS bytes
+      FROM assets
+      WHERE status = 'active' AND indexed_at >= NOW() - INTERVAL '12 months'
+      GROUP BY month
+      ORDER BY month ASC
+    `);
+
+    // AI-igenkänningsprecision
+    const { rows: aiRows } = await query(`
+      SELECT
+        COUNT(*) FILTER (WHERE reviewed = TRUE)::int                         AS ai_reviewed,
+        COUNT(*) FILTER (WHERE reviewed = TRUE AND accepted = TRUE)::int      AS ai_accepted,
+        COUNT(*) FILTER (WHERE reviewed = TRUE AND accepted = FALSE)::int     AS ai_rejected,
+        ROUND(AVG(confidence) FILTER (WHERE accepted = TRUE)::numeric, 2)    AS ai_avg_conf_accepted,
+        ROUND(AVG(confidence) FILTER (WHERE accepted = FALSE)::numeric, 2)   AS ai_avg_conf_rejected
+      FROM ai_suggestions
+    `);
+    const aiStats = aiRows[0] ?? {};
+
+    return reply.send({ data: { ...rows[0], perYear, cameras, uploadsPerDay, storagePerMonth, aiStats } });
+  });
+
+  // POST /api/admin/faces/recluster — köa om-klustringsjobb för alla okända ansikten
+  fastify.post('/api/admin/faces/recluster', async (request, reply) => {
+    await query(`INSERT INTO jobs (job_type) VALUES ('recluster_faces') ON CONFLICT DO NOTHING`);
+    return reply.send({ data: { ok: true, message: 'Omklustringsjobb köat' } });
   });
 }

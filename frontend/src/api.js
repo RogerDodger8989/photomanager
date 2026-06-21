@@ -1,4 +1,4 @@
-// Centraliserad API-klient med JWT auto-refresh och felhantering
+﻿// Centraliserad API-klient med JWT auto-refresh och felhantering
 
 let accessToken = null;
 let refreshPromise = null;
@@ -6,13 +6,14 @@ let refreshPromise = null;
 export function setToken(token) {
   const changed = accessToken !== token;
   accessToken = token;
-  window.__pmToken = token;
+  const w = /** @type {any} */ (window);
+  w.__pmToken = token;
   // Återanslut SSE med ny token om den ändrades
-  if (changed && token && typeof window.__pmReconnectSSE === 'function') {
-    window.__pmReconnectSSE();
+  if (changed && token && typeof w.__pmReconnectSSE === 'function') {
+    w.__pmReconnectSSE();
   }
 }
-export function clearToken()    { accessToken = null; window.__pmToken = null; }
+export function clearToken()    { accessToken = null; /** @type {any} */ (window).__pmToken = null; }
 export function hasToken()      { return !!accessToken; }
 
 async function refreshToken() {
@@ -36,6 +37,12 @@ async function refreshToken() {
   return refreshPromise;
 }
 
+/**
+ * @param {string} method
+ * @param {string} path
+ * @param {any} [body]
+ * @param {RequestInit} [opts]
+ */
 async function request(method, path, body = null, opts = {}) {
   const headers = { 'Content-Type': 'application/json' };
   if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`;
@@ -89,6 +96,7 @@ export const api = {
   assetMetadata: (id)           => request('GET', `/api/assets/${id}/metadata`),
   patchMeta: (id, body)         => request('PATCH', `/api/assets/${id}/metadata`, body),
   trash:   (id)                 => request('DELETE', `/api/assets/${id}`),
+  editAsset: (id, body)         => request('POST', `/api/assets/${id}/edit`, body),
   restore: (id)                 => request('POST', `/api/trash/${id}/restore`, {}),
   trashList: ()                 => request('GET', '/api/trash'),
   permanentDelete: (id)         => request('DELETE', `/api/trash/${id}/permanent`),
@@ -121,7 +129,7 @@ export const api = {
   addRelation:       (id, body) => request('POST', `/api/persons/${id}/relations`, body),
   deleteRelation:    (relId)    => request('DELETE', `/api/persons/relations/${relId}`),
   personStats:   (id)           => request('GET', `/api/persons/${id}/stats`),
-  faceSearchByImage: (formData) => fetch('/api/faces/search-by-image', { method: 'POST', headers: { 'Authorization': `Bearer ${window.__pmToken}` }, body: formData }).then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(new Error(e.error)))),
+  faceSearchByImage: (formData) => fetch('/api/faces/search-by-image', { method: 'POST', headers: { 'Authorization': `Bearer ${/** @type {any} */ (window).__pmToken}` }, body: formData }).then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(new Error(e.error)))),
 
   // Persons
   persons:  (p = {})            => request('GET', `/api/persons?${qs(p)}`),
@@ -137,6 +145,7 @@ export const api = {
   assignFaces: (body)           => request('POST', '/api/faces/assign', body),
   dismissFaces: (faceIds)       => request('PATCH', '/api/faces/dismiss', { faceIds }),
   mergeClusters: (fromFaceIds, intoFaceIds) => request('POST', '/api/faces/merge-clusters', { fromFaceIds, intoFaceIds }),
+  ungroupFace:   (faceId)                   => request('POST', '/api/faces/ungroup', { faceId }),
 
   // Albums
   albums:   (p = {})            => request('GET', p.assetId ? `/api/albums?assetId=${p.assetId}` : '/api/albums'),
@@ -146,6 +155,9 @@ export const api = {
   deleteAlbum:  (id)            => request('DELETE', `/api/albums/${id}`),
   addToAlbum:   (id, assetIds)  => request('POST', `/api/albums/${id}/assets`, { assetIds }),
   removeFromAlbum: (id, assetId)=> request('DELETE', `/api/albums/${id}/assets/${assetId}`),
+  albumRules:      (id)          => request('GET', `/api/albums/${id}/rules`),
+  saveAlbumRules:  (id, body)    => request('PUT', `/api/albums/${id}/rules`, body),
+  rebuildAlbum:    (id)          => request('POST', `/api/albums/${id}/rebuild`, {}),
 
   // Shares
   shares:         ()            => request('GET', '/api/shares'),
@@ -171,8 +183,28 @@ export const api = {
   batchAcceptAi:  (faceIds)     => request('POST', '/api/ai/suggestions/batch-accept', { faceIds }),
   aiReindex:      (assetId)     => request('POST', `/api/ai/reindex/${assetId}`, {}),
 
-  // Export
-  exportZip:    (assetIds)      => request('POST', '/api/export/zip', { assetIds }),
+  // Export — returnerar Blob direkt (inte JSON)
+  exportZip: async (assetIds) => {
+    const headers = { 'Content-Type': 'application/json' };
+    const w = /** @type {any} */ (window);
+    if (w.__pmToken) headers['Authorization'] = `Bearer ${w.__pmToken}`;
+    const res = await fetch('/api/export/zip', {
+      method: 'POST', headers, credentials: 'include',
+      body: JSON.stringify({ assetIds }),
+    });
+    if (!res.ok) { const e = await res.json().catch(() => ({ error: res.statusText })); throw new Error(e.error ?? `HTTP ${res.status}`); }
+    return res.blob();
+  },
+  exportAlbumZip: async (albumId) => {
+    const headers = { 'Content-Type': 'application/json' };
+    const w = /** @type {any} */ (window);
+    if (w.__pmToken) headers['Authorization'] = `Bearer ${w.__pmToken}`;
+    const res = await fetch(`/api/export/album/${albumId}`, {
+      method: 'POST', headers, credentials: 'include', body: '{}',
+    });
+    if (!res.ok) { const e = await res.json().catch(() => ({ error: res.statusText })); throw new Error(e.error ?? `HTTP ${res.status}`); }
+    return res.blob();
+  },
   auditLogCsv:  ()              => '/api/admin/audit-log/csv', // returnerar URL, fetch direkt
 
   // Push
@@ -185,6 +217,7 @@ export const api = {
   adminJobs:          ()        => request('GET', '/api/admin/jobs'),
   retryJob:           (id)      => request('POST', `/api/admin/jobs/${id}/retry`),
   requeueThumbnails:  ()        => request('POST', '/api/admin/requeue-thumbnails', {}),
+  reclusterFaces:     ()        => request('POST', '/api/admin/faces/recluster', {}),
   adminUsers:   ()              => request('GET', '/api/admin/users'),
   createUser:   (body)          => request('POST', '/api/admin/users', body),
   updateUser:   (id, body)      => request('PATCH', `/api/admin/users/${id}`, body),

@@ -1,4 +1,4 @@
-import { navVisible, state } from '../state.js';
+﻿import { navVisible, state } from '../state.js';
 
 // Nav-items: [key, label, emoji, route]
 const NAV_ITEMS = [
@@ -59,7 +59,7 @@ export function renderNav() {
 export function updateActiveNav() {
   const hash = location.hash || '#/photos';
   document.querySelectorAll('#nav-links a, #bottom-nav-links a').forEach((a) => {
-    const isActive = hash.startsWith(a.getAttribute('href'));
+    const isActive = hash.startsWith(a.getAttribute('href') ?? '');
     if (a.closest('#nav-links')) {
       a.className = `flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
         isActive ? 'bg-slate-700 text-white' : 'text-slate-400 hover:bg-slate-700 hover:text-white'

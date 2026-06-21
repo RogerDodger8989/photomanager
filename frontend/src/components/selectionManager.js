@@ -1,6 +1,7 @@
-import { api } from '../api.js';
+﻿import { api } from '../api.js';
 import { showUndoToast } from './lightbox.js';
 import { openAddToAlbumModal } from '../views/albums.js';
+import { toast } from '../utils.js';
 
 /**
  * Hanterar multi-select för ett fotogalleri.
@@ -40,6 +41,9 @@ export function createSelectionManager(getGrid, getAllAssets, customActions = []
         <button id="sel-add-album" class="flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 px-2 py-1 rounded hover:bg-slate-700 transition-colors">
           📁 Lägg till i album
         </button>
+        <button id="sel-export" class="flex items-center gap-1.5 text-xs text-green-400 hover:text-green-300 px-2 py-1 rounded hover:bg-slate-700 transition-colors">
+          📦 Exportera ZIP
+        </button>
         <button id="sel-delete" class="flex items-center gap-1.5 text-xs text-red-400 hover:text-red-300 px-2 py-1 rounded hover:bg-slate-700 transition-colors">
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
@@ -55,6 +59,7 @@ export function createSelectionManager(getGrid, getAllAssets, customActions = []
     toolbarEl.querySelector('#sel-add-album')?.addEventListener('click', () => {
       openAddToAlbumModal([...selected]);
     });
+    toolbarEl.querySelector('#sel-export')?.addEventListener('click', () => exportSelected());
     toolbarEl.querySelector('#sel-delete')?.addEventListener('click', deleteSelected);
     customActions.forEach((a, i) => {
       toolbarEl.querySelector(`[data-custom-action="${i}"]`)?.addEventListener('click', () => a.onClick([...selected]));
@@ -112,6 +117,25 @@ export function createSelectionManager(getGrid, getAllAssets, customActions = []
       if (cb) cb.checked = isSelected;
       cell.classList.toggle('ring-2', isSelected);
     });
+  }
+
+  // ── Export ───────────────────────────────────────────────────────────────────
+
+  async function exportSelected() {
+    const ids = [...selected];
+    if (!ids.length) return;
+    if (ids.length > 500) { toast('Max 500 bilder per export', 'error'); return; }
+    const exportBtn = toolbarEl?.querySelector('#sel-export');
+    if (exportBtn) exportBtn.textContent = '⏳ Förbereder…';
+    try {
+      const blob = await api.exportZip(ids);
+      downloadBlob(blob, `export-${ids.length}-bilder.zip`);
+      toast(`${ids.length} bilder exporterade`, 'success');
+    } catch (e) {
+      toast(e.message, 'error');
+    } finally {
+      if (exportBtn) exportBtn.textContent = '📦 Exportera ZIP';
+    }
   }
 
   // ── Radering ─────────────────────────────────────────────────────────────────
@@ -177,4 +201,14 @@ export function createSelectionManager(getGrid, getAllAssets, customActions = []
   }
 
   return { mountToolbar, attachToCell, clearAll, selectAll, syncCellVisuals, deleteSelected };
+}
+
+export function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
 }

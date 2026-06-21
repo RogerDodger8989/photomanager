@@ -1,4 +1,4 @@
-import { toast } from '../utils.js';
+﻿import { toast } from '../utils.js';
 
 export function renderUpload(container) {
   container.innerHTML = `
@@ -66,7 +66,7 @@ export function renderUpload(container) {
   container.querySelector('#pick-folder-btn').addEventListener('click', async () => {
     if ('showDirectoryPicker' in window) {
       try {
-        const dirHandle = await window.showDirectoryPicker();
+        const dirHandle = await /** @type {any} */ (window).showDirectoryPicker();
         const files = await readDirHandle(dirHandle);
         addFiles(files);
         return;
@@ -158,7 +158,7 @@ export function renderUpload(container) {
       const res = await fetch('/api/upload', {
         method: 'POST',
         credentials: 'include',
-        headers: window.__pmToken ? { Authorization: `Bearer ${window.__pmToken}` } : {},
+        headers: /** @type {any} */ (window).__pmToken ? { Authorization: `Bearer ${/** @type {any} */ (window).__pmToken}` } : {},
         body: formData,
       });
       if (!res.ok) throw new Error(`Uppladdning misslyckades (${res.status})`);
@@ -210,15 +210,15 @@ async function getDroppedFiles(items) {
 
 async function readEntry(entry, files) {
   if (entry.isFile) {
-    await new Promise((res) => entry.file((f) => { files.push(f); res(); }));
+    await /** @type {Promise<void>} */ (new Promise((res) => entry.file((f) => { files.push(f); res(); })));
   } else if (entry.isDirectory) {
     const reader = entry.createReader();
-    await new Promise((res) => {
+    await /** @type {Promise<void>} */ (new Promise((res) => {
       reader.readEntries(async (entries) => {
         await Promise.all(entries.map((e) => readEntry(e, files)));
         res();
       });
-    });
+    }));
   }
 }
 

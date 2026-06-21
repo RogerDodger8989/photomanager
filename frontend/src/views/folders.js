@@ -1,4 +1,4 @@
-import { api } from '../api.js';
+﻿import { api } from '../api.js';
 import { buildPhotoCell, showAssetContextMenu } from '../components/gridCell.js';
 import { createSelectionManager } from '../components/selectionManager.js';
 import { openLightbox } from '../components/lightbox.js';
@@ -26,7 +26,7 @@ document.addEventListener('keydown', (e) => {
 
 // Synka grid när lightbox raderar/återställer en bild
 window.addEventListener('pm:asset-trashed', (e) => {
-  const id = e.detail?.id;
+  const id = /** @type {CustomEvent} */ (e).detail?.id;
   if (!id) return;
   allAssets = allAssets.filter((a) => a.id !== id);
   document.getElementById('folder-grid')?.querySelector(`[data-id="${id}"]`)?.remove();
@@ -34,7 +34,7 @@ window.addEventListener('pm:asset-trashed', (e) => {
 });
 
 window.addEventListener('pm:asset-restored', (e) => {
-  const { asset, index } = e.detail ?? {};
+  const { asset, index } = /** @type {CustomEvent} */ (e).detail ?? {};
   if (!asset || !activeFolderKey) return;
   const insertAt = typeof index === 'number' ? index : allAssets.length;
   allAssets.splice(insertAt, 0, asset);
@@ -104,18 +104,18 @@ export async function renderFolders(container) {
     </div>`;
 
   updateViewButtons(container);
-  container.querySelector('#view-grid-btn').addEventListener('click', () => {
+  container.querySelector('#view-grid-btn')?.addEventListener('click', () => {
     viewMode = 'grid'; updateViewButtons(container); rerenderCurrentAssets();
   });
-  container.querySelector('#view-list-btn').addEventListener('click', () => {
+  container.querySelector('#view-list-btn')?.addEventListener('click', () => {
     viewMode = 'list'; updateViewButtons(container); rerenderCurrentAssets();
   });
-  container.querySelector('#recursive-cb').addEventListener('change', (e) => {
-    _recursive = e.target.checked;
+  container.querySelector('#recursive-cb')?.addEventListener('change', (e) => {
+    _recursive = /** @type {HTMLInputElement} */ (e.target).checked;
     if (activeFolderKey) selectFolder(activeFolderKey, _treeData);
   });
 
-  container.querySelector('#folder-empty').classList.remove('hidden');
+  container.querySelector('#folder-empty')?.classList.remove('hidden');
 
   sel = createSelectionManager(
     () => document.getElementById('folder-grid'),
@@ -126,7 +126,8 @@ export async function renderFolders(container) {
       onClick: (ids) => showMoveModal(ids),
     }]
   );
-  document.getElementById('folder-sel-toolbar').innerHTML = '';
+  const selToolbar = document.getElementById('folder-sel-toolbar');
+  if (selToolbar) selToolbar.innerHTML = '';
 
   container.querySelector('#load-more-btn')?.addEventListener('click', loadMoreAssets);
 
@@ -138,7 +139,8 @@ export async function renderFolders(container) {
     _treeData = tree;
     renderTree(container, tree);
   } catch {
-    document.getElementById('folder-tree-inner').innerHTML =
+    const treeInner = document.getElementById('folder-tree-inner');
+    if (treeInner) treeInner.innerHTML =
       '<div class="px-3 text-red-400 text-xs py-2">Kunde inte ladda mappar</div>';
   }
 }
@@ -147,6 +149,7 @@ export async function renderFolders(container) {
 
 function renderTree(container, tree) {
   const inner = document.getElementById('folder-tree-inner');
+  if (!inner) return;
   if (!tree || tree.length === 0) {
     inner.innerHTML = '<div class="px-3 text-slate-500 text-xs py-2">Inga bevakade mappar</div>';
     return;
@@ -157,7 +160,7 @@ function renderTree(container, tree) {
   tree.forEach((wf) => {
     const rootKey = wf.watchedFolder + '|';
 
-    // Root-mapp (bevakad mapp) — bara navigering, ingen kontextmeny
+    // Root-mapp (bevakad mapp) - bara navigering, ingen kontextmeny
     const rootBtn = document.createElement('button');
     rootBtn.dataset.key = rootKey;
     rootBtn.className = 'folder-item folder-drop-target w-full text-left flex items-center gap-2 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-700/60 transition-colors rounded';
@@ -170,7 +173,7 @@ function renderTree(container, tree) {
     rootBtn.addEventListener('click', () => selectFolder(rootKey, tree));
     rootBtn.addEventListener('contextmenu', (e) => {
       e.preventDefault();
-      showFolderContextMenu(e, { label: wf.label, fullPath: wf.watchedFolder, watchedFolder: wf.watchedFolder }, tree);
+      showFolderContextMenu(/** @type {MouseEvent} */ (e), { label: wf.label, fullPath: wf.watchedFolder, watchedFolder: wf.watchedFolder }, tree);
     });
     makeDropTarget(rootBtn, wf.watchedFolder, wf.label);
     inner.appendChild(rootBtn);
@@ -194,7 +197,7 @@ function renderTree(container, tree) {
       sfBtn.addEventListener('click', () => selectFolder(key, tree));
       sfBtn.addEventListener('contextmenu', (e) => {
         e.preventDefault();
-        showFolderContextMenu(e, { label: sf.label, fullPath, watchedFolder: wf.watchedFolder }, tree);
+        showFolderContextMenu(/** @type {MouseEvent} */ (e), { label: sf.label, fullPath, watchedFolder: wf.watchedFolder }, tree);
       });
       inner.appendChild(sfBtn);
     });
@@ -204,7 +207,7 @@ function renderTree(container, tree) {
 function updateActiveFolder(key) {
   activeFolderKey = key;
   document.querySelectorAll('.folder-item').forEach((btn) => {
-    const active = btn.dataset.key === key;
+    const active = /** @type {HTMLElement} */ (btn).dataset.key === key;
     btn.classList.toggle('bg-blue-600/30', active);
     btn.classList.toggle('text-white',     active);
   });
@@ -230,7 +233,7 @@ async function selectFolder(key, tree) {
         return `<button class="hover:text-white transition-colors" data-bc-key="${esc(key)}">${esc(s)}</button>`;
       }).join('<span class="mx-1 text-slate-600">›</span>');
       breadcrumb.querySelectorAll('[data-bc-key]').forEach((btn) => {
-        btn.addEventListener('click', () => selectFolder(btn.dataset.bcKey, tree));
+        btn.addEventListener('click', () => selectFolder(/** @type {HTMLElement} */ (btn).dataset.bcKey, tree));
       });
     } else {
       breadcrumb.textContent = rootLabel;
@@ -395,7 +398,7 @@ function makeDraggable(el, asset) {
     // Samla IDs: om asset ingår i urval → dra alla markerade, annars bara den enstaka
     const grid = document.getElementById('folder-grid');
     const checkedIds = grid
-      ? [...grid.querySelectorAll('.sel-checkbox:checked')].map((cb) => cb.closest('[data-id]')?.dataset.id).filter(Boolean)
+      ? [...grid.querySelectorAll('.sel-checkbox:checked')].map((cb) => /** @type {HTMLElement|null} */ (cb.closest('[data-id]'))?.dataset.id).filter(Boolean)
       : [];
 
     const ids = checkedIds.includes(asset.id) ? checkedIds : [asset.id];
@@ -547,28 +550,28 @@ function showInputModal({ title, label, defaultValue = '', confirmText = 'OK', o
     </div>`;
 
   const close = () => overlay.remove();
-  const input = modal.querySelector('.modal-input');
+  const input = /** @type {HTMLInputElement|null} */ (modal.querySelector('.modal-input'));
   const ok    = modal.querySelector('.modal-ok');
 
   const submit = () => {
-    const val = input.value.trim();
-    if (!val) { input.focus(); return; }
+    const val = input?.value.trim();
+    if (!val) { input?.focus(); return; }
     close();
     onConfirm(val);
   };
 
-  modal.querySelector('.modal-close').addEventListener('click', close);
-  modal.querySelector('.modal-cancel').addEventListener('click', close);
-  ok.addEventListener('click', submit);
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') submit();
-    if (e.key === 'Escape') close();
+  modal.querySelector('.modal-close')?.addEventListener('click', close);
+  modal.querySelector('.modal-cancel')?.addEventListener('click', close);
+  ok?.addEventListener('click', submit);
+  input?.addEventListener('keydown', (e) => {
+    if (/** @type {KeyboardEvent} */ (e).key === 'Enter') submit();
+    if (/** @type {KeyboardEvent} */ (e).key === 'Escape') close();
   });
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
 
   overlay.appendChild(modal);
   document.body.appendChild(overlay);
-  requestAnimationFrame(() => { input.focus(); input.select(); });
+  requestAnimationFrame(() => { input?.focus(); input?.select(); });
 }
 
 function showCreateFolderDialog(folder, tree) {
@@ -629,23 +632,25 @@ function showMoveFolderModal(folder, tree) {
     btn.className = 'w-full text-left flex items-center gap-2 px-4 py-2 text-sm text-slate-300 hover:bg-slate-700/60 transition-colors';
     btn.innerHTML = `<svg class="w-4 h-4 text-blue-400 shrink-0" fill="currentColor" viewBox="0 0 24 24"><path d="M10 4H4a2 2 0 00-2 2v12a2 2 0 002 2h16a2 2 0 002-2V8a2 2 0 00-2-2h-8l-2-2z"/></svg><span>${esc(wf.label)}</span>`;
     btn.addEventListener('click', () => {
-      listEl.querySelectorAll('button').forEach((b) => b.classList.remove('bg-blue-600/30', 'text-white'));
+      listEl?.querySelectorAll('button').forEach((b) => b.classList.remove('bg-blue-600/30', 'text-white'));
       btn.classList.add('bg-blue-600/30', 'text-white');
       selectedRoot = wf.watchedFolder;
-      modal.querySelector('#mf-confirm').disabled = false;
+      const mfConfirm = /** @type {HTMLButtonElement|null} */ (modal.querySelector('#mf-confirm'));
+      if (mfConfirm) mfConfirm.disabled = false;
     });
-    listEl.appendChild(btn);
+    listEl?.appendChild(btn);
   });
 
   const close = () => overlay.remove();
-  modal.querySelector('#mf-close').addEventListener('click', close);
-  modal.querySelector('#mf-cancel').addEventListener('click', close);
+  modal.querySelector('#mf-close')?.addEventListener('click', close);
+  modal.querySelector('#mf-cancel')?.addEventListener('click', close);
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
 
-  modal.querySelector('#mf-confirm').addEventListener('click', async () => {
+  modal.querySelector('#mf-confirm')?.addEventListener('click', async () => {
     if (!selectedRoot) return;
-    modal.querySelector('#mf-confirm').disabled = true;
-    modal.querySelector('#mf-confirm').textContent = 'Flyttar...';
+    const mfConfirm = /** @type {HTMLButtonElement|null} */ (modal.querySelector('#mf-confirm'));
+    if (mfConfirm) mfConfirm.disabled = true;
+    if (mfConfirm) mfConfirm.textContent = 'Flyttar...';
     try {
       await api.moveFolderTo({ folderPath: folder.fullPath, targetRoot: selectedRoot });
       close();
@@ -682,19 +687,21 @@ function showDeleteFolderDialog(folder, tree) {
     </div>`;
 
   const close = () => overlay.remove();
-  modal.querySelector('.modal-close').addEventListener('click', close);
-  modal.querySelector('.modal-cancel').addEventListener('click', close);
-  overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+  modal.querySelector('.modal-close')?.addEventListener('click', close);
+  modal.querySelector('.modal-cancel')?.addEventListener('click', close);
+  overlay.addEventListener('keydown', (e) => { if (/** @type {KeyboardEvent} */ (e).key === 'Escape') close(); });
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
 
-  modal.querySelector('.modal-ok').addEventListener('click', () => {
+  modal.querySelector('.modal-ok')?.addEventListener('click', () => {
     close();
     api.trashFolder({ folderPath: folder.fullPath })
       .then(({ data }) => {
         toast(`${data.trashedCount} foto${data.trashedCount !== 1 ? 'n' : ''} skickade till papperskorgen`, 'success');
         if (activeFolderKey?.includes(folder.fullPath.replace(folder.watchedFolder, ''))) {
-          document.getElementById('folder-grid').innerHTML = '';
-          document.getElementById('folder-list').innerHTML = '';
+          const fg = document.getElementById('folder-grid');
+          const fl = document.getElementById('folder-list');
+          if (fg) fg.innerHTML = '';
+          if (fl) fl.innerHTML = '';
           allAssets = [];
         }
         refreshTree();
@@ -704,7 +711,7 @@ function showDeleteFolderDialog(folder, tree) {
 
   overlay.appendChild(modal);
   document.body.appendChild(overlay);
-  requestAnimationFrame(() => modal.querySelector('.modal-ok').focus());
+  requestAnimationFrame(() => /** @type {HTMLElement|null} */ (modal.querySelector('.modal-ok'))?.focus());
 }
 
 // Laddar om trädet utan att störa vald mapp
@@ -754,24 +761,25 @@ async function showMoveModal(assetIds) {
     btn.className = 'w-full text-left flex items-center gap-2 px-4 py-2 text-sm text-slate-300 hover:bg-slate-700/60 transition-colors';
     btn.innerHTML = `<svg class="w-4 h-4 text-blue-400 shrink-0" fill="currentColor" viewBox="0 0 24 24"><path d="M10 4H4a2 2 0 00-2 2v12a2 2 0 002 2h16a2 2 0 002-2V8a2 2 0 00-2-2h-8l-2-2z"/></svg><span class="truncate">${esc(wf.label)}</span>`;
     btn.addEventListener('click', () => {
-      folderList.querySelectorAll('button').forEach((b) => b.classList.remove('bg-blue-600/30', 'text-white'));
+      folderList?.querySelectorAll('button').forEach((b) => b.classList.remove('bg-blue-600/30', 'text-white'));
       btn.classList.add('bg-blue-600/30', 'text-white');
       selectedTarget = wf.watchedFolder;
-      modal.querySelector('#move-confirm').disabled = false;
+      const moveConfirm = /** @type {HTMLButtonElement|null} */ (modal.querySelector('#move-confirm'));
+      if (moveConfirm) moveConfirm.disabled = false;
     });
-    folderList.appendChild(btn);
+    folderList?.appendChild(btn);
   });
 
   const close = () => overlay.remove();
-  modal.querySelector('#move-close').addEventListener('click', close);
-  modal.querySelector('#move-cancel').addEventListener('click', close);
+  modal.querySelector('#move-close')?.addEventListener('click', close);
+  modal.querySelector('#move-cancel')?.addEventListener('click', close);
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
 
-  modal.querySelector('#move-confirm').addEventListener('click', async () => {
+  modal.querySelector('#move-confirm')?.addEventListener('click', async () => {
     if (!selectedTarget) return;
-    const confirmBtn = modal.querySelector('#move-confirm');
-    confirmBtn.disabled = true;
-    confirmBtn.textContent = 'Flyttar...';
+    const confirmBtn = /** @type {HTMLButtonElement|null} */ (modal.querySelector('#move-confirm'));
+    if (confirmBtn) confirmBtn.disabled = true;
+    if (confirmBtn) confirmBtn.textContent = 'Flyttar...';
     try {
       const targetLabel = tree.find((wf) => wf.watchedFolder === selectedTarget)?.label ?? selectedTarget;
       await moveFilesTo(assetIds, selectedTarget, targetLabel);

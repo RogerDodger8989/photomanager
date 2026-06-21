@@ -1,6 +1,7 @@
-import { api } from '../api.js';
+﻿import { api } from '../api.js';
 import { isVideo } from '../utils.js';
 import { showUndoToast } from './lightbox.js';
+import { openImageEditor } from './imageEditor.js';
 
 const HEART_SVG = `<svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
   <path stroke-linecap="round" stroke-linejoin="round"
@@ -10,8 +11,8 @@ const HEART_SVG = `<svg class="w-4 h-4 text-white" fill="none" stroke="currentCo
 /**
  * Skapar en grid-cell div med thumbnail, video-badge och favorit-hjärta.
  * @param {object} asset
- * @param {function} onClick  — anropas vid klick på bilden
- * @param {function} [onFavChange]  — anropas med (assetId, newIsFav) efter ändring
+ * @param {function} onClick  - anropas vid klick på bilden
+ * @param {function} [onFavChange]  - anropas med (assetId, newIsFav) efter ändring
  */
 export function buildPhotoCell(asset, onClick, onFavChange) {
   const cell = document.createElement('div');
@@ -40,10 +41,11 @@ export function buildPhotoCell(asset, onClick, onFavChange) {
     </button>`;
 
   cell.addEventListener('click', (e) => {
-    if (!e.target.closest('.fav-heart')) onClick();
+    if (!(/** @type {Element} */ (e.target)).closest('.fav-heart')) onClick();
   });
 
   const heartBtn = cell.querySelector('.fav-heart');
+  if (!heartBtn) return cell;
   heartBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     toggleFav(asset, heartBtn, onFavChange);
@@ -116,6 +118,18 @@ export function showAssetContextMenu(e, asset, { onDelete, openLightboxFn, allAs
     onAddToAlbum?.([asset.id]);
   });
 
+  const editBtn = item('✏️', 'Redigera');
+  editBtn.addEventListener('click', () => {
+    menu.remove();
+    openImageEditor(asset, (updated) => {
+      if (updated?.thumb_small_path) {
+        const img = document.querySelector(`.photo-cell[data-id="${asset.id}"] img`);
+        if (img) /** @type {HTMLImageElement} */ (img).src = `/thumbs/${updated.thumb_small_path}?t=${Date.now()}`;
+        Object.assign(asset, updated);
+      }
+    });
+  });
+
   const sep = document.createElement('div');
   sep.className = 'border-t border-slate-700 my-1';
 
@@ -132,7 +146,7 @@ export function showAssetContextMenu(e, asset, { onDelete, openLightboxFn, allAs
     });
   });
 
-  menu.append(openBtn, favBtn, albumBtn, sep, deleteBtn);
+  menu.append(openBtn, favBtn, albumBtn, editBtn, sep, deleteBtn);
   document.body.appendChild(menu);
 
   const close = (ev) => {

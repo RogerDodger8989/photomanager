@@ -1,5 +1,7 @@
-import { api } from '../api.js';
+﻿import { api } from '../api.js';
 import { openLightbox } from '../components/lightbox.js';
+
+const _w = /** @type {any} */ (window);
 
 let leafletMap  = null;
 let markerGroup = null;
@@ -9,6 +11,7 @@ export function renderMap(container) {
   container.innerHTML = `<div id="leaflet-map" class="w-full h-full" style="position:relative;"></div>`;
 
   requestAnimationFrame(async () => {
+    const L = _w.L;
     if (leafletMap) {
       leafletMap.remove();
       leafletMap = null;
@@ -39,9 +42,9 @@ export function renderMap(container) {
     // Stäng panel vid klick på kartan
     leafletMap.on('click', closeClusterPanel);
 
-    if (window._pmMapGoto) {
-      const { lat, lon, zoom } = window._pmMapGoto;
-      window._pmMapGoto = null;
+    if (_w._pmMapGoto) {
+      const { lat, lon, zoom } = _w._pmMapGoto;
+      _w._pmMapGoto = null;
       leafletMap.setView([lat, lon], zoom ?? 12);
     } else {
       // Auto-centrera till där fotona faktiskt finns
@@ -63,6 +66,7 @@ export function renderMap(container) {
 
 async function loadClusters() {
   if (!leafletMap) return;
+  const L = _w.L;
   const bounds = leafletMap.getBounds();
   const zoom   = leafletMap.getZoom();
 
@@ -149,6 +153,7 @@ function closeClusterPanel() {
 async function showClusterPanel(cluster, zoom) {
   closeClusterPanel();
 
+  const L = _w.L;
   const mapEl = document.getElementById('leaflet-map');
   if (!mapEl) return;
 
@@ -176,8 +181,8 @@ async function showClusterPanel(cluster, zoom) {
   mapEl.appendChild(panel);
   L.DomEvent.disableClickPropagation(panel);
 
-  panel.querySelector('#cp-close').addEventListener('click', closeClusterPanel);
-  panel.querySelector('#cp-zoom').addEventListener('click', () => {
+  panel.querySelector('#cp-close')?.addEventListener('click', closeClusterPanel);
+  panel.querySelector('#cp-zoom')?.addEventListener('click', () => {
     leafletMap.flyTo([cluster.lat, cluster.lon], Math.min(zoom + 6, 18), { animate: true });
   });
 
@@ -189,14 +194,14 @@ async function showClusterPanel(cluster, zoom) {
     });
 
     const strip = panel.querySelector('#cp-strip');
-    const info  = panel.querySelector('span');
+    const info  = /** @type {HTMLElement | null} */ (panel.querySelector('span'));
 
     if (!photos?.length) {
-      info.textContent = 'Inga bilder hittades.';
+      if (info) info.textContent = 'Inga bilder hittades.';
       return;
     }
 
-    info.textContent = `${photos.length} bilder${photos.length === 30 ? '+' : ''} i detta område`;
+    if (info) info.textContent = `${photos.length} bilder${photos.length === 30 ? '+' : ''} i detta område`;
 
     photos.forEach((photo) => {
       const img = document.createElement('img');
@@ -208,10 +213,11 @@ async function showClusterPanel(cluster, zoom) {
       img.addEventListener('click', () => {
         openLightbox(photos, photos.indexOf(photo));
       });
-      strip.appendChild(img);
+      if (strip) strip.appendChild(img);
     });
   } catch {
-    panel.querySelector('span').textContent = 'Kunde inte ladda bilder.';
+    const errInfo = /** @type {HTMLElement | null} */ (panel.querySelector('span'));
+    if (errInfo) errInfo.textContent = 'Kunde inte ladda bilder.';
   }
 }
 

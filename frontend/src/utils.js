@@ -1,4 +1,4 @@
-// Formatera bytes till läsbart format
+﻿// Formatera bytes till läsbart format
 export function formatBytes(bytes) {
   const n = Number(bytes);
   if (!n || n < 0) return '0 B';
@@ -29,7 +29,7 @@ export function toast(msg, type = 'info', duration = 3500) {
   const el = document.createElement('div');
   el.className = `toast ${colors[type] ?? colors.info} text-white text-sm px-4 py-3 rounded-lg shadow-lg max-w-xs`;
   el.textContent = msg;
-  document.getElementById('toast-container').prepend(el);
+  document.getElementById('toast-container')?.prepend(el);
   setTimeout(() => el.remove(), duration);
 }
 
@@ -47,8 +47,10 @@ export function confirm(msg) {
         </div>
       </div>`;
     document.body.appendChild(overlay);
-    overlay.querySelector('#conf-yes').onclick = () => { overlay.remove(); resolve(true); };
-    overlay.querySelector('#conf-no').onclick  = () => { overlay.remove(); resolve(false); };
+    const yesEl = /** @type {HTMLElement} */ (overlay.querySelector('#conf-yes'));
+    const noEl  = /** @type {HTMLElement} */ (overlay.querySelector('#conf-no'));
+    yesEl.onclick = () => { overlay.remove(); resolve(true); };
+    noEl.onclick  = () => { overlay.remove(); resolve(false); };
   });
 }
 
@@ -66,7 +68,8 @@ export function modal(titleText, contentHtml, footerHtml = '') {
       ${footerHtml ? `<div class="px-5 py-4 border-t border-slate-700 flex justify-end gap-3">${footerHtml}</div>` : ''}
     </div>`;
   document.body.appendChild(el);
-  el.querySelector('.modal-close').onclick = () => el.remove();
+  const closeBtn = /** @type {HTMLElement} */ (el.querySelector('.modal-close'));
+  closeBtn.onclick = () => el.remove();
   el.onclick = (e) => { if (e.target === el) el.remove(); };
   return el;
 }

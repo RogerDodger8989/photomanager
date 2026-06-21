@@ -1,10 +1,13 @@
 import { query } from '../db/pool.js';
 import { logAudit } from '../services/authService.js';
 import { writeMetaToFile } from '../services/xmpService.js';
-import { join, dirname, basename, relative } from 'path';
-import { rename, mkdir, copyFile, unlink } from 'fs/promises';
+import { join, dirname, basename, relative, extname } from 'path';
+import { rename, mkdir, copyFile, unlink, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { config } from '../config.js';
+import { v4 as uuidv4 } from 'uuid';
+import sharp from 'sharp';
+import { generateThumbnails } from '../workers/thumbnailer.js';
 
 export default async function assetsRoutes(fastify) {
 
@@ -335,6 +338,136 @@ export default async function assetsRoutes(fastify) {
         indexedAt:       a.indexed_at,
       },
     }});
+  });
+
+  // POST /api/assets/:id/edit — icke-destruktiv bildredigering med Sharp
+  fastify.post('/api/assets/:id/edit', {
+    onRequest: [fastify.authenticate],
+    schema: {
+      body: {
+        type: 'object',
+        required: ['operations'],
+        properties: {
+          operations: { type: 'array' },
+          saveAs: { type: 'string', enum: ['replace', 'copy'], default: 'replace' },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { id } = request.params;
+    const { operations = [], saveAs = 'replace' } = request.body;
+
+    const { rows } = await query(
+      "SELECT id, file_path, file_name, mime_type, owner_id FROM assets WHERE id = $1 AND status = 'active'",
+      [id]
+    );
+    if (!rows[0]) return reply.status(404).send({ error: 'Hittades inte' });
+
+    const asset = rows[0];
+    if (asset.owner_id !== request.user.id && request.user.role !== 'admin') {
+      return reply.status(403).send({ error: 'Åtkomst nekad' });
+    }
+
+    // Endast bilder (inte video)
+    if (!asset.mime_type?.startsWith('image/')) {
+      return reply.status(400).send({ error: 'Videoredigering stöds inte' });
+    }
+
+    const absOriginal = join(config.media.photosPath, asset.file_path);
+    if (!existsSync(absOriginal)) return reply.status(404).send({ error: 'Originalfil saknas' });
+
+    // Bygg Sharp-pipeline
+    let pipeline = sharp(absOriginal);
+
+    for (const op of operations) {
+      switch (op.type) {
+        case 'rotate':
+          pipeline = pipeline.rotate(Number(op.angle) || 0);
+          break;
+        case 'flip':
+          pipeline = pipeline.flip();
+          break;
+        case 'flop':
+          pipeline = pipeline.flop();
+          break;
+        case 'modulate': {
+          const mods = {};
+          if (op.brightness != null) mods.brightness = Number(op.brightness);
+          if (op.saturation != null) mods.saturation = Number(op.saturation);
+          if (op.hue       != null) mods.hue         = Number(op.hue);
+          if (Object.keys(mods).length) pipeline = pipeline.modulate(mods);
+          break;
+        }
+        case 'linear': {
+          // Kontrast: linear(a, b) where a=slope, b=offset
+          const a = Number(op.a ?? 1);
+          const b = Number(op.b ?? 0);
+          if (a !== 1 || b !== 0) pipeline = pipeline.linear(a, b);
+          break;
+        }
+        case 'sharpen':
+          pipeline = pipeline.sharpen();
+          break;
+        case 'normalize':
+          pipeline = pipeline.normalize();
+          break;
+      }
+    }
+
+    // Bevara originalformat (eller konvertera till JPEG om okänt)
+    const ext = extname(asset.file_name).toLowerCase();
+    const outFormat = ['.jpg', '.jpeg'].includes(ext) ? 'jpeg'
+      : ext === '.png' ? 'png'
+      : ext === '.webp' ? 'webp'
+      : 'jpeg';
+
+    if (saveAs === 'copy') {
+      // Spara som ny fil bredvid originalet
+      const newId       = uuidv4();
+      const baseName    = basename(asset.file_name, extname(asset.file_name));
+      const newFileName = `${baseName}_edit${ext || '.jpg'}`;
+      const origDir     = dirname(asset.file_path);
+      const newRelPath  = `${origDir}/${newFileName}`.replace(/^\//, '');
+      const absNewPath  = join(config.media.photosPath, newRelPath);
+
+      const buf = await pipeline.toFormat(outFormat).toBuffer();
+      await writeFile(absNewPath, buf);
+
+      // Registrera ny asset i DB (grundläggande — utan full EXIF-extraktion)
+      await query(
+        `INSERT INTO assets (id, file_name, file_path, mime_type, owner_id, source_folder, status, indexed_at)
+         VALUES ($1, $2, $3, $4, $5, $6, 'active', NOW())`,
+        [newId, newFileName, newRelPath, `image/${outFormat}`, asset.owner_id, dirname(absNewPath)]
+      );
+      await generateThumbnails(newId, absNewPath, `image/${outFormat}`);
+
+      await logAudit(request.user.id, 'edit_copy', id, 'asset', { operations }, request.ip);
+      const { rows: newRows } = await query('SELECT * FROM assets WHERE id = $1', [newId]);
+      return reply.status(201).send({ data: newRows[0] });
+
+    } else {
+      // Ersätt originalet (spara backup först)
+      const backupPath = absOriginal + '.bak';
+      await copyFile(absOriginal, backupPath);
+
+      try {
+        const buf = await pipeline.toFormat(outFormat).toBuffer();
+        await writeFile(absOriginal, buf);
+        // Ta bort backup om det gick bra
+        await unlink(backupPath).catch(() => {});
+      } catch (err) {
+        // Återställ backup
+        await copyFile(backupPath, absOriginal).catch(() => {});
+        await unlink(backupPath).catch(() => {});
+        throw err;
+      }
+
+      await generateThumbnails(id, absOriginal, asset.mime_type);
+      await logAudit(request.user.id, 'edit_replace', id, 'asset', { operations }, request.ip);
+
+      const { rows: updRows } = await query('SELECT * FROM assets WHERE id = $1', [id]);
+      return reply.send({ data: updRows[0] });
+    }
   });
 
   // DELETE /api/assets/:id — flytta fil till .trash/ och markera som trashed i DB

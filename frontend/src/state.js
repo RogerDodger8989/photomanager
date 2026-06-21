@@ -1,10 +1,13 @@
-// Global applikationsstate — single source of truth
+﻿// Global applikationsstate — single source of truth
 
 export const state = {
-  user: null,          // { id, username, role, permissions: {} }
-  currentView: null,   // aktiv vy
+  /** @type {{ id: any, username: string, role: string, permissions: Record<string,boolean> } | null} */
+  user: null,
+  /** @type {string | null} */
+  currentView: null,
   lightbox: {
-    items: [],         // array av asset-objekt
+    /** @type {any[]} */
+    items: [],
     index: 0,
   },
   selectedAssets: new Set(), // multi-select IDs

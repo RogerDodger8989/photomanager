@@ -1,4 +1,4 @@
-import { api } from '../api.js';
+﻿import { api } from '../api.js';
 import { toast, formatDateTime, formatBytes, confirm } from '../utils.js';
 
 const TABS = ['stats', 'users', 'jobs', 'ai', 'audit', 'duplicates', 'folders', 'trash', 'settings'];
@@ -49,6 +49,84 @@ async function loadTab(tab, content) {
   } catch (e) { content.innerHTML = `<div class="text-red-400 text-sm">${e.message}</div>`; }
 }
 
+function buildSvgBarChart(rows, valueKey, labelKey, colorClass, formatVal) {
+  if (!rows.length) return '<p class="text-xs text-slate-500">Ingen data</p>';
+  const max = Math.max(...rows.map((r) => Number(r[valueKey])));
+  const W = 560, H = 80, barW = Math.max(4, Math.floor((W - rows.length * 2) / rows.length));
+  const bars = rows.map((r, i) => {
+    const h = max > 0 ? Math.round((Number(r[valueKey]) / max) * H) : 0;
+    const x = i * (barW + 2);
+    const y = H - h;
+    return `<rect x="${x}" y="${y}" width="${barW}" height="${h}" rx="2" class="${colorClass}" opacity="0.85">
+      <title>${r[labelKey]}: ${formatVal(r[valueKey])}</title></rect>`;
+  }).join('');
+  const firstLabel = rows[0]?.[labelKey] ?? '';
+  const lastLabel  = rows[rows.length - 1]?.[labelKey] ?? '';
+  return `<svg viewBox="0 0 ${W} ${H + 16}" class="w-full h-24" style="overflow:visible">
+    ${bars}
+    <text x="0" y="${H + 14}" class="fill-slate-500 text-[9px]" font-size="9">${firstLabel}</text>
+    <text x="${W}" y="${H + 14}" class="fill-slate-500 text-[9px]" text-anchor="end" font-size="9">${lastLabel}</text>
+  </svg>`;
+}
+
+function buildUploadsChart(uploadsPerDay) {
+  if (!uploadsPerDay.length) return '';
+  return `
+    <div class="mt-6">
+      <h3 class="text-sm font-medium text-slate-300 mb-2">Uppladdningar per dag (30 dagar)</h3>
+      <div class="bg-slate-800 rounded-xl p-4">
+        ${buildSvgBarChart(uploadsPerDay, 'count', 'day', 'fill-blue-500', (v) => `${v} bilder`)}
+        <div class="text-xs text-slate-500 mt-1">Totalt ${uploadsPerDay.reduce((s, r) => s + r.count, 0)} bilder</div>
+      </div>
+    </div>`;
+}
+
+function buildStorageChart(storagePerMonth) {
+  if (!storagePerMonth.length) return '';
+  return `
+    <div class="mt-4">
+      <h3 class="text-sm font-medium text-slate-300 mb-2">Lagring tillagd per månad (12 mån)</h3>
+      <div class="bg-slate-800 rounded-xl p-4">
+        ${buildSvgBarChart(storagePerMonth, 'bytes', 'month', 'fill-emerald-500', (v) => formatBytes(v))}
+      </div>
+    </div>`;
+}
+
+function buildAiStatsSection(ai) {
+  const reviewed = Number(ai.ai_reviewed ?? 0);
+  if (reviewed === 0) return '';
+  const accepted = Number(ai.ai_accepted ?? 0);
+  const rejected = Number(ai.ai_rejected ?? 0);
+  const accPct   = reviewed > 0 ? Math.round((accepted / reviewed) * 100) : 0;
+  const rejPct   = reviewed > 0 ? Math.round((rejected / reviewed) * 100) : 0;
+  const confAcc  = ai.ai_avg_conf_accepted != null ? `${Math.round(Number(ai.ai_avg_conf_accepted) * 100)}%` : '–';
+  const confRej  = ai.ai_avg_conf_rejected != null ? `${Math.round(Number(ai.ai_avg_conf_rejected) * 100)}%` : '–';
+  return `
+    <div class="mt-6">
+      <h3 class="text-sm font-medium text-slate-300 mb-2">AI-igenkänning</h3>
+      <div class="bg-slate-800 rounded-xl p-4">
+        <div class="grid grid-cols-3 gap-4 mb-3">
+          <div>
+            <div class="text-xl font-bold text-white">${reviewed}</div>
+            <div class="text-xs text-slate-400 mt-0.5">Granskade</div>
+          </div>
+          <div>
+            <div class="text-xl font-bold text-green-400">${accepted} <span class="text-sm font-normal">(${accPct}%)</span></div>
+            <div class="text-xs text-slate-400 mt-0.5">Accepterade · snitt ${confAcc}</div>
+          </div>
+          <div>
+            <div class="text-xl font-bold text-red-400">${rejected} <span class="text-sm font-normal">(${rejPct}%)</span></div>
+            <div class="text-xs text-slate-400 mt-0.5">Avvisade · snitt ${confRej}</div>
+          </div>
+        </div>
+        <div class="w-full h-2 rounded-full bg-slate-700 overflow-hidden">
+          <div class="h-2 rounded-full bg-green-500 transition-all" style="width:${accPct}%"></div>
+        </div>
+        <div class="text-xs text-slate-500 mt-1">${accPct}% träffsäkerhet</div>
+      </div>
+    </div>`;
+}
+
 async function renderStats(content) {
   const { data } = await api.adminStats();
   content.innerHTML = `
@@ -93,7 +171,10 @@ async function renderStats(content) {
             </div>`).join('')}
         </div>
       </div>
-    </div>`;
+    </div>
+    ${buildUploadsChart(data.uploadsPerDay ?? [])}
+    ${buildStorageChart(data.storagePerMonth ?? [])}
+    ${buildAiStatsSection(data.aiStats ?? {})}`;
 }
 
 async function renderUsers(content) {
@@ -184,6 +265,10 @@ async function renderJobs(content) {
         class="ml-auto px-4 py-2 bg-blue-700 hover:bg-blue-600 text-white text-xs font-medium rounded-lg transition-colors">
         Återköa saknade thumbnails
       </button>
+      <button id="recluster-btn"
+        class="px-4 py-2 bg-purple-700 hover:bg-purple-600 text-white text-xs font-medium rounded-lg transition-colors">
+        🔄 Omklustra ansikten
+      </button>
     </div>
     <div class="space-y-1.5">
       ${recent.map((j) => `
@@ -225,11 +310,27 @@ async function renderJobs(content) {
       btn.textContent = 'Återköa saknade thumbnails';
     }
   });
+
+  content.querySelector('#recluster-btn')?.addEventListener('click', async (e) => {
+    const btn = /** @type {HTMLButtonElement} */ (e.currentTarget);
+    btn.disabled = true;
+    btn.textContent = '⏳ Köar…';
+    try {
+      await api.reclusterFaces();
+      toast('Omklustringsjobb köat — resultatet syns nästa gång du öppnar Okända ansikten', 'success', 4000);
+      renderJobs(content);
+    } catch (err) {
+      toast(err.message, 'error');
+      btn.disabled = false;
+      btn.textContent = '🔄 Omklustra ansikten';
+    }
+  });
 }
 
 // ── AI-förslag: state ────────────────────────────────────────────────────────
 const _aiState = {
-  items: [],        // alla laddade förslag
+  /** @type {any[]} */
+  items: [],
   selected: new Set(), // valda face_id:n för batch
   offset: 0,
   total: 0,
@@ -326,7 +427,7 @@ async function renderAiSuggestions(content) {
       _aiState.items.push(s);
       const card = buildAiCard(s, batchMode);
       card.addEventListener('click', (e) => {
-        if (e.target.closest('.ai-accept, .ai-reject')) return;
+        if (/** @type {HTMLElement} */ (e.target)?.closest('.ai-accept, .ai-reject')) return;
         if (!batchMode) return;
         const fid = card.dataset.faceId;
         if (_aiState.selected.has(fid)) _aiState.selected.delete(fid);
@@ -459,20 +560,24 @@ function showAiRejectModal(suggestion, onConfirm) {
     </div>`;
 
   document.body.appendChild(overlay);
-  const input = overlay.querySelector('#ai-reject-name');
-  input.focus();
+  const input = /** @type {HTMLInputElement} */ (overlay.querySelector('#ai-reject-name'));
+  if (input) input.focus();
 
   const doCancel = () => overlay.remove();
   const doConfirm = () => {
-    const name = input.value.trim();
+    const name = input ? input.value.trim() : '';
     overlay.remove();
     onConfirm({ correctPersonName: name || undefined });
   };
 
-  overlay.querySelector('#ai-reject-ok').addEventListener('click', doConfirm);
-  overlay.querySelector('#ai-reject-cancel').addEventListener('click', doCancel);
+  overlay.querySelector('#ai-reject-ok')?.addEventListener('click', doConfirm);
+  overlay.querySelector('#ai-reject-cancel')?.addEventListener('click', doCancel);
   overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) doCancel(); });
-  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') doConfirm(); if (e.key === 'Escape') doCancel(); });
+  if (input) input.addEventListener('keydown', (e) => {
+    const ke = /** @type {KeyboardEvent} */ (e);
+    if (ke.key === 'Enter') doConfirm();
+    if (ke.key === 'Escape') doCancel();
+  });
 }
 
 async function renderAuditLog(content) {
@@ -497,26 +602,73 @@ async function renderAuditLog(content) {
 }
 
 async function renderDuplicates(content) {
+  const reload = () => renderDuplicates(content);
+  content.innerHTML = '<div class="text-slate-400 text-sm">Laddar duplikat…</div>';
   const { data } = await api.duplicates();
   if (!data.length) { content.innerHTML = '<div class="text-slate-400 text-sm">Inga duplikat hittades.</div>'; return; }
 
+  const totalExtra = data.reduce((s, g) => s + g.count - 1, 0);
   content.innerHTML = `
-    <div class="text-sm text-slate-400 mb-3">${data.length} grupper med duplikat</div>
-    <div class="space-y-4">
-      ${data.map((group) => `
-        <div class="bg-slate-800 rounded-xl p-3">
-          <div class="text-xs text-slate-400 mb-2">${group.count} kopior · Hash: ${group.file_hash.slice(0,16)}…</div>
+    <div class="flex items-center justify-between mb-3">
+      <div class="text-sm text-slate-400">${data.length} grupper · <span class="text-yellow-400">${totalExtra} extra kopior</span></div>
+      <button id="dup-auto-btn"
+        class="px-3 py-1.5 bg-red-700 hover:bg-red-600 text-white text-xs font-medium rounded-lg transition-colors">
+        🗑 Behåll äldst, radera resten
+      </button>
+    </div>
+    <div id="dup-groups" class="space-y-4">
+      ${data.map((group, gi) => `
+        <div class="dup-group bg-slate-800 rounded-xl p-3" data-gi="${gi}">
+          <div class="text-xs text-slate-400 mb-2">${group.count} kopior · <span class="font-mono">${group.file_hash.slice(0,16)}…</span></div>
           <div class="flex gap-2 overflow-x-auto pb-1">
-            ${group.assets.map((a) => `
-              <div class="flex-shrink-0 w-20 text-center">
-                <div class="w-20 h-20 rounded overflow-hidden mb-1">
-                  <img src="/thumbs/${a.thumb_small_path}" class="w-full h-full object-cover">
+            ${group.assets.map((a, ai) => `
+              <div class="dup-asset flex-shrink-0 w-28 text-center group/dup relative" data-id="${a.id}" data-gi="${gi}" data-ai="${ai}">
+                <div class="w-28 h-28 rounded-lg overflow-hidden mb-1 ring-2 ring-transparent group-hover/dup:ring-blue-500 transition-all">
+                  <img src="/thumbs/${a.thumb_small_path}" class="w-full h-full object-cover" loading="lazy">
                 </div>
-                <div class="text-xs text-slate-400 truncate">${a.file_path}</div>
+                <div class="text-xs text-slate-400 truncate mb-1" title="${a.file_path}">${a.file_path.split('/').pop()}</div>
+                <div class="text-xs text-slate-500">${a.file_size ? formatBytes(a.file_size) : ''}</div>
+                ${ai === 0 ? `
+                  <div class="text-xs bg-blue-600 text-white rounded px-1.5 py-0.5 mt-1">Behåll</div>` : `
+                  <button class="dup-trash-btn w-full text-xs bg-red-900 hover:bg-red-700 text-red-300 rounded px-1.5 py-0.5 mt-1 transition-colors"
+                    data-id="${a.id}" data-gi="${gi}">🗑 Radera</button>`}
               </div>`).join('')}
           </div>
         </div>`).join('')}
     </div>`;
+
+  content.querySelectorAll('.dup-trash-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const { id, gi } = btn.dataset;
+      btn.disabled = true;
+      btn.textContent = '…';
+      try {
+        await api.trash(id);
+        const asset = btn.closest('.dup-asset');
+        asset?.remove();
+        const group = content.querySelector(`.dup-group[data-gi="${gi}"]`);
+        const remaining = group?.querySelectorAll('.dup-asset').length ?? 0;
+        if (remaining <= 1) group?.remove();
+        toast('Bild raderad', 'success');
+      } catch (e) { toast(e.message, 'error'); btn.disabled = false; btn.textContent = '🗑 Radera'; }
+    });
+  });
+
+  content.querySelector('#dup-auto-btn')?.addEventListener('click', async () => {
+    const btn = /** @type {HTMLButtonElement} */ (content.querySelector('#dup-auto-btn'));
+    const count = data.reduce((s, g) => s + g.count - 1, 0);
+    if (!confirm(`Radera ${count} extra kopior? Äldst indexerad bild behålls i varje grupp.`)) return;
+    btn.disabled = true;
+    btn.textContent = '⏳ Raderar…';
+    let deleted = 0;
+    for (const group of data) {
+      for (let i = 1; i < group.assets.length; i++) {
+        try { await api.trash(group.assets[i].id); deleted++; } catch (_) {}
+      }
+    }
+    toast(`${deleted} kopior raderade`, 'success');
+    reload();
+  });
 }
 
 async function renderWatchedFolders(content) {

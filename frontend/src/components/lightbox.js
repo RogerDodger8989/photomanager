@@ -1,7 +1,9 @@
-import { api } from '../api.js';
+﻿import { api } from '../api.js';
 import { toast, formatDate, formatDateTime, isVideo } from '../utils.js';
 import { state } from '../state.js';
 import { openAddToAlbumModal } from '../views/albums.js';
+import { openShareModal } from './shareModal.js';
+import { openImageEditor } from './imageEditor.js';
 
 let currentIndex = 0;
 let items = [];
@@ -15,15 +17,15 @@ const ZOOM_MIN = 1;
 const ZOOM_MAX = 8;
 const ZOOM_STEP = 0.25;
 
-const lb              = document.getElementById('lightbox');
-const lbImg           = document.getElementById('lb-img');
-const lbVideo         = document.getElementById('lb-video');
-const lbFaces         = document.getElementById('lb-faces');
-const lbInfo          = document.getElementById('lb-info');
-const lbMetaPanel     = document.getElementById('lb-meta-panel');
-const lbMetaCont      = document.getElementById('lb-meta-content');
-const lbMediaArea     = document.getElementById('lb-media-area');
-const lbZoomLabel     = document.getElementById('lb-zoom-label');
+const lb              = /** @type {HTMLElement} */ (document.getElementById('lightbox'));
+const lbImg           = /** @type {HTMLImageElement} */ (document.getElementById('lb-img'));
+const lbVideo         = /** @type {HTMLVideoElement} */ (document.getElementById('lb-video'));
+const lbFaces         = /** @type {HTMLElement} */ (document.getElementById('lb-faces'));
+const lbInfo          = /** @type {HTMLElement} */ (document.getElementById('lb-info'));
+const lbMetaPanel     = /** @type {HTMLElement} */ (document.getElementById('lb-meta-panel'));
+const lbMetaCont      = /** @type {HTMLElement} */ (document.getElementById('lb-meta-content'));
+const lbMediaArea     = /** @type {HTMLElement} */ (document.getElementById('lb-media-area'));
+const lbZoomLabel     = /** @type {HTMLElement} */ (document.getElementById('lb-zoom-label'));
 
 const DRAWER_KEY = 'pm-drawer-open';
 
@@ -128,8 +130,9 @@ function showItem(idx) {
   lbFaces.innerHTML = '';
   if (!isVid) loadFaceOverlays(asset.id, asset.taken_at);
 
-  document.getElementById('lb-download').onclick = () => {
-    window.location = `/api/assets/${asset.id}/original`;
+  const dlBtn = document.getElementById('lb-download');
+  if (dlBtn) dlBtn.onclick = () => {
+    window.location.href = `/api/assets/${asset.id}/original`;
   };
 
   resetZoom();
@@ -178,7 +181,7 @@ async function loadFaceOverlays(assetId, takenAt) {
 
 // ── Info Drawer ──────────────────────────────────────────────────────────────
 
-document.getElementById('lb-info-btn').addEventListener('click', () => {
+document.getElementById('lb-info-btn')?.addEventListener('click', () => {
   const asset = items[currentIndex];
   if (!asset) return;
   const isOpen = !lbMetaPanel.classList.contains('hidden');
@@ -192,7 +195,7 @@ document.getElementById('lb-info-btn').addEventListener('click', () => {
   loadInfoDrawer(asset.id);
 });
 
-document.getElementById('lb-meta-close').addEventListener('click', () => {
+document.getElementById('lb-meta-close')?.addEventListener('click', () => {
   lbMetaPanel.classList.add('hidden');
   localStorage.setItem(DRAWER_KEY, '0');
 });
@@ -287,7 +290,10 @@ function buildDrawerHTML(m) {
   return sections.map(s => buildAccordion(s)).join('');
 }
 
-function buildAccordion({ id, icon, title, open, rows, custom, headerExtra }) {
+/**
+ * @param {{ id: any, icon: any, title: any, open: any, rows?: any[], custom?: string, headerExtra?: string }} param0
+ */
+function buildAccordion({ id, icon, title, open, rows = [], custom, headerExtra = '' }) {
   const bodyContent = custom ?? buildRowList(rows ?? []);
   return `
     <div class="border-b border-slate-800" data-accordion="${id}">
@@ -537,6 +543,7 @@ function initAccordions(container) {
     const body    = section.querySelector('.accordion-body');
     const chevron = section.querySelector('.accordion-chevron');
     const toggle  = () => {
+      if (!body || !chevron) return;
       const isOpen = !body.classList.contains('hidden');
       body.classList.toggle('hidden', isOpen);
       chevron.classList.toggle('rotate-180', !isOpen);
@@ -550,7 +557,7 @@ function initDrawerInteractions(container, assetId, m) {
   // ── Album-navigering ─────────────────────────────────────────────────────────
   container.querySelectorAll('[data-album-nav]').forEach(btn => {
     btn.addEventListener('click', () => {
-      const albumId = btn.dataset.albumNav;
+      const albumId = /** @type {HTMLElement} */ (btn).dataset.albumNav;
       closeLightbox();
       location.hash = `#/albums/${albumId}`;
     });
@@ -561,15 +568,15 @@ function initDrawerInteractions(container, assetId, m) {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
       try {
-        await navigator.clipboard.writeText(btn.dataset.copy);
+        await navigator.clipboard.writeText(/** @type {HTMLElement} */ (btn).dataset.copy ?? '');
         toast('Kopierat!', 'success');
       } catch { toast('Kunde inte kopiera', 'error'); }
     });
   });
 
   // ── Rubrik & Kommentar (spara vid blur/Enter) ────────────────────────────────
-  const titleEl = container.querySelector('#org-title');
-  const descEl  = container.querySelector('#org-description');
+  const titleEl = /** @type {HTMLInputElement|null} */ (container.querySelector('#org-title'));
+  const descEl  = /** @type {HTMLTextAreaElement|null} */ (container.querySelector('#org-description'));
   let saveTimer;
   const scheduleSave = () => {
     clearTimeout(saveTimer);
@@ -584,32 +591,32 @@ function initDrawerInteractions(container, assetId, m) {
   };
   titleEl?.addEventListener('input', scheduleSave);
   descEl?.addEventListener('input', scheduleSave);
-  titleEl?.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); titleEl.blur(); } });
+  titleEl?.addEventListener('keydown', e => { if (/** @type {KeyboardEvent} */ (e).key === 'Enter') { e.preventDefault(); titleEl.blur(); } });
 
   // ── Stjärnbetyg ──────────────────────────────────────────────────────────────
   let currentRating = m.organization.rating ?? 0;
   const stars = container.querySelectorAll('.star-btn');
   stars.forEach(btn => {
     btn.addEventListener('mouseenter', () => {
-      const n = parseInt(btn.dataset.star);
-      stars.forEach(s => s.classList.toggle('text-yellow-400', parseInt(s.dataset.star) <= n));
-      stars.forEach(s => s.classList.toggle('text-slate-600',  parseInt(s.dataset.star) >  n));
+      const n = parseInt(/** @type {HTMLElement} */ (btn).dataset.star ?? '0');
+      stars.forEach(s => s.classList.toggle('text-yellow-400', parseInt(/** @type {HTMLElement} */ (s).dataset.star ?? '0') <= n));
+      stars.forEach(s => s.classList.toggle('text-slate-600',  parseInt(/** @type {HTMLElement} */ (s).dataset.star ?? '0') >  n));
     });
     btn.addEventListener('mouseleave', () => {
       stars.forEach(s => {
-        const active = parseInt(s.dataset.star) <= currentRating;
+        const active = parseInt(/** @type {HTMLElement} */ (s).dataset.star ?? '0') <= currentRating;
         s.classList.toggle('text-yellow-400', active);
         s.classList.toggle('text-slate-600',  !active);
       });
     });
     btn.addEventListener('click', async () => {
-      const n = parseInt(btn.dataset.star);
+      const n = parseInt(/** @type {HTMLElement} */ (btn).dataset.star ?? '0');
       const newRating = n === currentRating ? null : n;
       try {
         await api.patchMeta(assetId, { rating: newRating });
         currentRating = newRating ?? 0;
         stars.forEach(s => {
-          const active = parseInt(s.dataset.star) <= currentRating;
+          const active = parseInt(/** @type {HTMLElement} */ (s).dataset.star ?? '0') <= currentRating;
           s.classList.toggle('text-yellow-400', active);
           s.classList.toggle('text-slate-600',  !active);
         });
@@ -620,7 +627,7 @@ function initDrawerInteractions(container, assetId, m) {
 
   // ── Ansiktsoverlay-toggle ────────────────────────────────────────────────────
   let facesVisible = true;
-  const faceToggleBtn = container.querySelector('.face-overlay-toggle');
+  const faceToggleBtn = /** @type {HTMLElement|null} */ (container.querySelector('.face-overlay-toggle'));
   if (faceToggleBtn) {
     faceToggleBtn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -644,7 +651,7 @@ function initDrawerInteractions(container, assetId, m) {
   }
 
   // ── 🔄 Kör om AI-ansiktsanalys för denna bild ────────────────────────────────
-  const faceReindexBtn = container.querySelector('.face-reindex-btn');
+  const faceReindexBtn = /** @type {HTMLElement|null} */ (container.querySelector('.face-reindex-btn'));
   if (faceReindexBtn) {
     // Kontrollera om AI är aktiv — grå ut och inaktivera om inte
     api.aiStatus().then(({ data }) => {
@@ -687,7 +694,7 @@ function initDrawerInteractions(container, assetId, m) {
 
   // ── Person-klick + hover → highlight ansiktsbox ──────────────────────────────
   container.querySelectorAll('[data-person-id]').forEach(btn => {
-    const faceIdx = btn.dataset.faceIndex;
+    const faceIdx = /** @type {HTMLElement} */ (btn).dataset.faceIndex;
     btn.addEventListener('mouseenter', () => {
       const box = lbFaces.querySelector(`[data-face-index="${faceIdx}"]`);
       if (box) { box.classList.remove('hidden'); box.classList.add('face-highlight'); }
@@ -700,7 +707,7 @@ function initDrawerInteractions(container, assetId, m) {
       }
     });
     btn.addEventListener('click', () => {
-      const personId = btn.dataset.personId;
+      const personId = /** @type {HTMLElement} */ (btn).dataset.personId;
       if (!personId || personId === 'undefined' || personId === 'null') return;
       closeLightbox();
       location.hash = `#/faces/${personId}`;
@@ -710,7 +717,7 @@ function initDrawerInteractions(container, assetId, m) {
   // ── Datum-klick ──────────────────────────────────────────────────────────────
   container.querySelectorAll('[data-filter-date]').forEach(btn => {
     btn.addEventListener('click', () => {
-      const dateFrom = btn.dataset.filterDate;
+      const dateFrom = /** @type {HTMLElement} */ (btn).dataset.filterDate;
       if (!dateFrom) return;
       closeLightbox();
       window.dispatchEvent(new CustomEvent('pm:timeline-filter', {
@@ -724,7 +731,7 @@ function initDrawerInteractions(container, assetId, m) {
     btn.addEventListener('click', () => {
       const gps = m.temporalSpatial?.gps;
       if (gps?.latitude != null) {
-        window._pmMapGoto = { lat: gps.latitude, lon: gps.longitude, zoom: 15 };
+        /** @type {any} */ (window)._pmMapGoto = { lat: gps.latitude, lon: gps.longitude, zoom: 15 };
       }
       closeLightbox();
       location.hash = '#/map';
@@ -736,7 +743,8 @@ function initDrawerInteractions(container, assetId, m) {
 
 function initFaceOverlayInteractions(assetId, onChanged) {
   lbFaces.querySelectorAll('.face-box').forEach(box => {
-    const faceId = box.dataset.faceId;
+    const hBox = /** @type {HTMLElement} */ (box);
+    const faceId = hBox.dataset.faceId;
     if (!faceId) return;
 
     box.addEventListener('mouseenter', () => box.classList.add('face-hovered'));
@@ -744,10 +752,14 @@ function initFaceOverlayInteractions(assetId, onChanged) {
 
     box.querySelector('.face-rename-btn')?.addEventListener('click', async (e) => {
       e.stopPropagation();
-      const currentName = box.dataset.personName || '';
-      showPersonSearchDialog(box, async (personId, personName) => {
+      const currentName = hBox.dataset.personName || '';
+      showPersonSearchDialog(hBox, async (personId, personName) => {
         try {
+          const oldPersonId = hBox.dataset.personId || null;
           await api.patchFace(faceId, { personId, personName });
+          window.dispatchEvent(new CustomEvent('pm:face-reassigned', {
+            detail: { faceId, assetId, oldPersonId, newPersonId: personId },
+          }));
           onChanged();
         } catch { toast('Kunde inte byta person', 'error'); }
       }, currentName);
@@ -757,12 +769,12 @@ function initFaceOverlayInteractions(assetId, onChanged) {
       e.stopPropagation();
       const snapshot = {
         faceId, assetId,
-        personId:   box.dataset.personId   || null,
-        personName: box.dataset.personName || null,
-        regionX: parseFloat(box.style.left) / 100,
-        regionY: parseFloat(box.style.top)  / 100,
-        regionW: parseFloat(box.style.width) / 100,
-        regionH: parseFloat(box.style.height) / 100,
+        personId:   hBox.dataset.personId   || null,
+        personName: hBox.dataset.personName || null,
+        regionX: parseFloat(hBox.style.left) / 100,
+        regionY: parseFloat(hBox.style.top)  / 100,
+        regionW: parseFloat(hBox.style.width) / 100,
+        regionH: parseFloat(hBox.style.height) / 100,
       };
       try {
         await api.deleteFace(faceId);
@@ -792,9 +804,9 @@ export function showUndoToast(message, onUndo) {
   el.innerHTML = `<span class="flex-1">${message}</span>
     <button class="undo-btn text-blue-400 hover:text-blue-300 font-medium text-xs uppercase tracking-wide">Ångra</button>`;
   const container = document.getElementById('toast-container');
-  container.appendChild(el);
+  container?.appendChild(el);
   let cancelled = false;
-  el.querySelector('.undo-btn').addEventListener('click', () => {
+  el.querySelector('.undo-btn')?.addEventListener('click', () => {
     cancelled = true;
     el.remove();
     onUndo();
@@ -804,7 +816,7 @@ export function showUndoToast(message, onUndo) {
 
 // ── Face-ritning ─────────────────────────────────────────────────────────────
 
-const lbMediaContainer = document.getElementById('lb-media-container');
+const lbMediaContainer = /** @type {HTMLElement} */ (document.getElementById('lb-media-container'));
 let _drawCleanup = null;
 
 function startFaceDrawMode(assetId, onCreated) {
@@ -903,6 +915,12 @@ function startFaceDrawMode(assetId, onCreated) {
 
 // ── Person-sökdialog ─────────────────────────────────────────────────────────
 
+/**
+ * @param {HTMLElement|null} anchorOrBox
+ * @param {function} onSelect
+ * @param {string} [initialQuery]
+ * @param {{ x: number, y: number, w: number, h: number }|null} [rectCoords]
+ */
 function showPersonSearchDialog(anchorOrBox, onSelect, initialQuery = '', rectCoords = null) {
   document.querySelector('#pm-person-dialog')?.remove();
 
@@ -937,19 +955,19 @@ function showPersonSearchDialog(anchorOrBox, onSelect, initialQuery = '', rectCo
 
   document.body.appendChild(dialog);
 
-  const input   = dialog.querySelector('#pm-person-search');
+  const input   = /** @type {HTMLInputElement|null} */ (dialog.querySelector('#pm-person-search'));
   const results = dialog.querySelector('#pm-person-results');
-  input.focus();
-  input.select();
+  input?.focus();
+  input?.select();
 
   let allPersons = [];
-  api.persons().then(({ data }) => { allPersons = data; renderResults(input.value); }).catch(() => {});
+  api.persons().then(({ data }) => { allPersons = data; renderResults(input?.value ?? ''); }).catch(() => {});
 
   const renderResults = (q) => {
     const filtered = q.trim()
       ? allPersons.filter(p => p.name.toLowerCase().includes(q.toLowerCase()))
       : allPersons.slice(0, 8);
-    results.innerHTML = '';
+    if (results) results.innerHTML = '';
     filtered.forEach(p => {
       const el = document.createElement('button');
       el.className = 'w-full flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-700 text-left transition-colors';
@@ -960,7 +978,7 @@ function showPersonSearchDialog(anchorOrBox, onSelect, initialQuery = '', rectCo
         <span class="text-sm text-slate-200 truncate">${p.name}</span>
         <span class="ml-auto text-xs text-slate-500">${p.photo_count} bilder</span>`;
       el.addEventListener('click', () => { dialog.remove(); onSelect(p.id, p.name); });
-      results.appendChild(el);
+      results?.appendChild(el);
     });
     // "Skapa ny"-knapp om ingen matchning
     if (q.trim() && !filtered.some(p => p.name.toLowerCase() === q.trim().toLowerCase())) {
@@ -969,24 +987,24 @@ function showPersonSearchDialog(anchorOrBox, onSelect, initialQuery = '', rectCo
       newBtn.innerHTML = `<span class="w-8 h-8 rounded-full bg-slate-600 flex items-center justify-center flex-shrink-0 text-base">+</span>
         <span class="text-sm text-slate-200">Skapa "<strong>${q.trim()}</strong>"</span>`;
       newBtn.addEventListener('click', () => { dialog.remove(); onSelect(null, q.trim()); });
-      results.appendChild(newBtn);
+      results?.appendChild(newBtn);
     }
   };
 
-  input.addEventListener('input', () => renderResults(input.value));
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
+  input?.addEventListener('input', () => renderResults(input.value));
+  input?.addEventListener('keydown', (e) => {
+    if (/** @type {KeyboardEvent} */ (e).key === 'Enter') {
       const q = input.value.trim();
       if (!q) return;
       const match = allPersons.find(p => p.name.toLowerCase() === q.toLowerCase());
       dialog.remove();
       onSelect(match?.id ?? null, q);
     }
-    if (e.key === 'Escape') dialog.remove();
+    if (/** @type {KeyboardEvent} */ (e).key === 'Escape') dialog.remove();
   });
-  dialog.querySelector('#pm-person-cancel').addEventListener('click', () => dialog.remove());
+  dialog.querySelector('#pm-person-cancel')?.addEventListener('click', () => dialog.remove());
   setTimeout(() => {
-    const outside = (e) => { if (!dialog.contains(e.target)) { dialog.remove(); document.removeEventListener('mousedown', outside); } };
+    const outside = (e) => { if (!dialog.contains(/** @type {Node} */ (e.target))) { dialog.remove(); document.removeEventListener('mousedown', outside); } };
     document.addEventListener('mousedown', outside);
   }, 100);
 }
@@ -996,22 +1014,22 @@ function updateFavBtn() {
   const btn = document.getElementById('lb-favorite');
   if (!btn) return;
   btn.title = isFav ? 'Ta bort från favoriter' : 'Lägg till som favorit';
-  btn.querySelector('svg').setAttribute('fill', isFav ? 'currentColor' : 'none');
+  btn.querySelector('svg')?.setAttribute('fill', isFav ? 'currentColor' : 'none');
   btn.classList.toggle('text-yellow-400', isFav);
   btn.classList.toggle('text-slate-400', !isFav);
 }
 
 // ── Övriga lightbox-kontroller ────────────────────────────────────────────────
 
-document.getElementById('lb-back').addEventListener('click', closeLightbox);
+document.getElementById('lb-back')?.addEventListener('click', closeLightbox);
 
-document.getElementById('lb-add-album').addEventListener('click', () => {
+document.getElementById('lb-add-album')?.addEventListener('click', () => {
   const asset = items[currentIndex];
   if (!asset) return;
   openAddToAlbumModal([asset.id]);
 });
 
-document.getElementById('lb-favorite').addEventListener('click', async () => {
+document.getElementById('lb-favorite')?.addEventListener('click', async () => {
   const asset = items[currentIndex];
   if (!asset) return;
   try {
@@ -1028,44 +1046,48 @@ document.getElementById('lb-favorite').addEventListener('click', async () => {
   } catch { toast('Kunde inte uppdatera favorit', 'error'); }
 });
 
-document.getElementById('lb-share').addEventListener('click', async () => {
+document.getElementById('lb-edit')?.addEventListener('click', () => {
   const asset = items[currentIndex];
   if (!asset) return;
-  try {
-    const { data } = await api.createShare({ shareType: 'public_link', assetId: asset.id });
-    const url = `${location.origin}/share/${data.token}`;
-    try {
-      await navigator.clipboard.writeText(url);
-      toast('Delningslänk kopierad!', 'success');
-    } catch {
-      toast(`Dela: ${url}`, 'success');
+  openImageEditor(asset, (updated) => {
+    // Uppdatera thumbnails i lightbox efter redigering
+    if (updated && updated.thumb_large_path) {
+      const cacheBust = `?t=${Date.now()}`;
+      lbImg.src = `/thumbs/${updated.thumb_large_path}${cacheBust}`;
+      items[currentIndex] = { ...items[currentIndex], ...updated };
     }
-  } catch (e) { toast(`Kunde inte skapa delningslänk: ${e.message}`, 'error'); }
+  });
 });
 
-document.getElementById('lb-prev').addEventListener('click', () => {
+document.getElementById('lb-share')?.addEventListener('click', () => {
+  const asset = items[currentIndex];
+  if (!asset) return;
+  openShareModal({ assetId: asset.id, name: asset.file_name });
+});
+
+document.getElementById('lb-prev')?.addEventListener('click', () => {
   if (currentIndex > 0) showItem(currentIndex - 1);
 });
-document.getElementById('lb-next').addEventListener('click', () => {
+document.getElementById('lb-next')?.addEventListener('click', () => {
   if (currentIndex < items.length - 1) showItem(currentIndex + 1);
 });
 
 // ── Zoom-kontroller ───────────────────────────────────────────────────────────
-document.getElementById('lb-zoom-in').addEventListener('click', () => {
+document.getElementById('lb-zoom-in')?.addEventListener('click', () => {
   const container = document.getElementById('lb-media-container');
   const rect = container?.getBoundingClientRect();
   const cx = rect ? rect.width / 2 : 0;
   const cy = rect ? rect.height / 2 : 0;
   zoomBy(ZOOM_STEP, cx, cy);
 });
-document.getElementById('lb-zoom-out').addEventListener('click', () => {
+document.getElementById('lb-zoom-out')?.addEventListener('click', () => {
   const container = document.getElementById('lb-media-container');
   const rect = container?.getBoundingClientRect();
   const cx = rect ? rect.width / 2 : 0;
   const cy = rect ? rect.height / 2 : 0;
   zoomBy(-ZOOM_STEP, cx, cy);
 });
-document.getElementById('lb-zoom-reset').addEventListener('click', resetZoom);
+document.getElementById('lb-zoom-reset')?.addEventListener('click', resetZoom);
 
 // Drag-to-pan
 if (lbMediaArea) {
@@ -1179,5 +1201,5 @@ async function trashCurrentInLightbox() {
   );
 }
 
-lb.addEventListener('click', (e) => { if (e.target === lb) closeLightbox(); });
-document.getElementById('lb-close').addEventListener('click', closeLightbox);
+lb?.addEventListener('click', (e) => { if (e.target === lb) closeLightbox(); });
+document.getElementById('lb-close')?.addEventListener('click', closeLightbox);

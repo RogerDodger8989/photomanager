@@ -1,4 +1,4 @@
-import { api } from '../api.js';
+﻿import { api } from '../api.js';
 import { openLightbox } from '../components/lightbox.js';
 import { buildPhotoCell, showAssetContextMenu } from '../components/gridCell.js';
 import { createSelectionManager } from '../components/selectionManager.js';
@@ -14,6 +14,26 @@ let sentinel = null;
 let observer = null;
 let selection = null;
 
+// Virtuell urladdning: celler utanför ~3× viewport får sin img.src rensad för att spara minne
+const _virt = new IntersectionObserver((entries) => {
+  for (const entry of entries) {
+    const img = /** @type {HTMLElement} */ (entry.target).querySelector('img');
+    if (!img) continue;
+    if (entry.isIntersecting) {
+      const stored = /** @type {HTMLElement} */ (entry.target).dataset.vsrc;
+      if (stored && /** @type {HTMLImageElement} */ (img).src !== stored) {
+        /** @type {HTMLImageElement} */ (img).src = stored;
+      }
+    } else {
+      const realSrc = /** @type {HTMLImageElement} */ (img).src;
+      if (realSrc && !realSrc.endsWith('placeholder.svg')) {
+        /** @type {HTMLElement} */ (entry.target).dataset.vsrc = realSrc;
+        /** @type {HTMLImageElement} */ (img).src = '';
+      }
+    }
+  }
+}, { rootMargin: '300% 0px' });
+
 // DEL-tangent: radera markerade bilder när lightbox är stängd och inget inputfält är aktivt
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Delete') return;
@@ -25,14 +45,14 @@ document.addEventListener('keydown', (e) => {
 
 // Synka grid när lightbox raderar/återställer en bild
 window.addEventListener('pm:asset-trashed', (e) => {
-  const id = e.detail?.id;
+  const id = /** @type {CustomEvent} */ (e).detail?.id;
   if (!id) return;
   allItems = allItems.filter((a) => a.id !== id);
   document.getElementById('photo-grid')?.querySelector(`[data-id="${id}"]`)?.remove();
 });
 
 window.addEventListener('pm:asset-restored', (e) => {
-  const { asset, index } = e.detail ?? {};
+  const { asset, index } = /** @type {CustomEvent} */ (e).detail ?? {};
   if (!asset) return;
   const insertAt = typeof index === 'number' ? index : allItems.length;
   allItems.splice(insertAt, 0, asset);
@@ -41,9 +61,11 @@ window.addEventListener('pm:asset-restored', (e) => {
   const cell = buildPhotoCell(asset, () => openLightbox(allItems, allItems.indexOf(asset)));
   selection?.attachToCell(cell, asset, insertAt);
   grid.insertBefore(cell, grid.children[insertAt] ?? null);
+  _virt.observe(cell);
 });
 
 export function renderTimeline(container, params = {}) {
+  _virt.disconnect(); // rensa virtualisering från föregående vy
   currentParams = params;
   cursor  = null;
   hasMore = true;
@@ -122,7 +144,7 @@ async function loadMore() {
     const isSearch = !!currentParams.q || !!currentParams.tags || !!currentParams.personId
       || !!currentParams.personIds || !!currentParams.dateFrom || !!currentParams.mimeType;
 
-    const params = { ...currentParams, limit: 50 };
+    const params = /** @type {Record<string, any>} */ ({ ...currentParams, limit: 50 });
     if (cursor) params.cursor = cursor;
 
     const res = isSearch
@@ -164,6 +186,7 @@ function appendToGrid(items) {
       });
     });
     grid.appendChild(cell);
+    _virt.observe(cell);
   });
 }
 

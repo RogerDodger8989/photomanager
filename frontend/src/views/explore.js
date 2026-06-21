@@ -1,4 +1,4 @@
-import { api } from '../api.js';
+﻿import { api } from '../api.js';
 import { openLightbox } from '../components/lightbox.js';
 import { buildPhotoCell } from '../components/gridCell.js';
 import { createSelectionManager } from '../components/selectionManager.js';
@@ -104,8 +104,9 @@ async function loadTrips() {
 
     // Klick → öppna event
     section.querySelectorAll('.trip-card').forEach((card) => {
-      card.addEventListener('click', async () => {
-        const { data: ev } = await api.collection(card.dataset.tripId);
+      const c = /** @type {HTMLElement} */ (card);
+      c.addEventListener('click', async () => {
+        const { data: ev } = await api.collection(c.dataset.tripId);
         openLightbox(ev.assets, 0);
       });
     });
@@ -117,7 +118,8 @@ async function loadTrips() {
 
 async function loadTripMap(tripId) {
   const mapEl = document.getElementById(`trip-map-${tripId}`);
-  if (!mapEl || typeof L === 'undefined') return;
+  const Lmap = /** @type {any} */ (window).L;
+  if (!mapEl || typeof Lmap === 'undefined') return;
   try {
     const { data: pts } = await api.tripTrack(tripId);
     if (!pts?.length) {
@@ -125,23 +127,23 @@ async function loadTripMap(tripId) {
       return;
     }
 
-    const map = L.map(mapEl, {
+    const map = Lmap.map(mapEl, {
       zoomControl: false, attributionControl: false,
       dragging: false, scrollWheelZoom: false, doubleClickZoom: false,
       keyboard: false, touchZoom: false,
     });
 
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+    Lmap.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
     const latlngs = pts.map((p) => [p.lat, p.lon]);
-    const line = L.polyline(latlngs, { color: '#60a5fa', weight: 2.5, opacity: 0.9 }).addTo(map);
+    const line = Lmap.polyline(latlngs, { color: '#60a5fa', weight: 2.5, opacity: 0.9 }).addTo(map);
 
     // Start- och slutmarkör
     if (latlngs.length >= 1) {
-      L.circleMarker(latlngs[0], { radius: 5, color: '#22c55e', fillColor: '#22c55e', fillOpacity: 1, weight: 0 }).addTo(map);
+      Lmap.circleMarker(latlngs[0], { radius: 5, color: '#22c55e', fillColor: '#22c55e', fillOpacity: 1, weight: 0 }).addTo(map);
     }
     if (latlngs.length >= 2) {
-      L.circleMarker(latlngs[latlngs.length - 1], { radius: 5, color: '#ef4444', fillColor: '#ef4444', fillOpacity: 1, weight: 0 }).addTo(map);
+      Lmap.circleMarker(latlngs[latlngs.length - 1], { radius: 5, color: '#ef4444', fillColor: '#ef4444', fillOpacity: 1, weight: 0 }).addTo(map);
     }
 
     map.fitBounds(line.getBounds(), { padding: [8, 8] });
@@ -187,8 +189,9 @@ async function loadPersonSpotlight() {
       </div>`;
 
     section.querySelectorAll('.person-card').forEach((card) => {
-      card.addEventListener('click', () => {
-        location.hash = `#/faces/${card.dataset.personId}`;
+      const c = /** @type {HTMLElement} */ (card);
+      c.addEventListener('click', () => {
+        location.hash = `#/faces/${c.dataset.personId}`;
       });
     });
   } catch {}
@@ -221,8 +224,9 @@ async function loadPlaces() {
       </div>`;
 
     section.querySelectorAll('.place-card').forEach((card) => {
-      card.addEventListener('click', () => {
-        const label = decodeURIComponent(card.dataset.place);
+      const c = /** @type {HTMLElement} */ (card);
+      c.addEventListener('click', () => {
+        const label = decodeURIComponent(c.dataset.place ?? '');
         window.dispatchEvent(new CustomEvent('pm:timeline-filter', {
           detail: { q: label },
         }));
@@ -260,6 +264,7 @@ export async function renderFavorites(container) {
   try {
     const { data } = await api.favorites();
     const grid = document.getElementById('fav-grid');
+    if (!grid) return;
     if (!data?.length) {
       grid.innerHTML = '<div class="col-span-full text-slate-400 text-sm">Inga favoriter ännu.</div>';
       return;
@@ -295,7 +300,8 @@ export async function renderFavorites(container) {
       grid.appendChild(cell);
     });
   } catch (e) {
-    document.getElementById('fav-grid').innerHTML =
+    const g = document.getElementById('fav-grid');
+    if (g) g.innerHTML =
       `<div class="col-span-full text-red-400 text-sm">Kunde inte ladda favoriter: ${e.message}</div>`;
   }
 }

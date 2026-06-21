@@ -19,6 +19,8 @@ const MIGRATIONS = [
   '012_user_settings.sql',
   '013_person_relations.sql',
   '014_face_dismissed.sql',
+  '015_smart_album_rules.sql',
+  '016_face_cluster_group.sql',
 ];
 
 export async function runMigrations(client) {

@@ -503,7 +503,7 @@ async function logout() {
 document.getElementById('logout-btn').addEventListener('click', logout);
 document.getElementById('dropdown-logout').addEventListener('click', logout);
 document.getElementById('backup-btn').addEventListener('click', () => {
-  toast('Backup-export är inte implementerad ännu', 'info');
+  showExportModal();
 });
 
 // Mobil hamburger
@@ -556,11 +556,51 @@ window.__pmReconnectSSE = connectSSE;
 
 async function renderSharePage(container, token) {
   if (!token) { container.innerHTML = '<div class="p-8 text-slate-400">Ogiltig delningslänk.</div>'; return; }
-  container.innerHTML = '<div class="p-8 text-slate-400 text-sm">Laddar delad bild…</div>';
+  container.innerHTML = '<div class="p-8 text-slate-400 text-sm">Laddar…</div>';
   try {
     const { data, error } = await api.getPublicShare(token);
     if (error) { container.innerHTML = `<div class="p-8 text-red-400">${error}</div>`; return; }
-    const { share } = data;
+    const { share, albumAssets } = data;
+
+    // ── Album-delning ──────────────────────────────────────────────────────
+    if (albumAssets) {
+      container.innerHTML = `
+        <div class="p-4 max-w-6xl mx-auto">
+          <div class="flex items-center justify-between mb-6">
+            <div>
+              <div class="text-xs text-slate-500 mb-1">Delat album</div>
+              <h1 class="text-2xl font-bold text-white">${share.album_name ?? 'Album'}</h1>
+              <p class="text-slate-400 text-sm mt-1">${albumAssets.length} bilder</p>
+            </div>
+            <span class="text-xs text-slate-600 italic">PhotoManager</span>
+          </div>
+          <div id="share-album-grid" class="grid gap-1" style="grid-template-columns: repeat(auto-fill, minmax(160px, 1fr))">
+            ${albumAssets.map((a, i) => {
+              const src = a.thumb_small_path ? `/thumbs/${a.thumb_small_path}` : '/icons/placeholder.svg';
+              const isVid = a.mime_type?.startsWith('video/');
+              return `
+                <div class="share-thumb relative group cursor-pointer aspect-square overflow-hidden bg-slate-800 rounded" data-index="${i}">
+                  <img src="${src}" loading="lazy" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300">
+                  ${isVid ? `<div class="absolute inset-0 flex items-center justify-center">
+                    <div class="bg-black/50 rounded-full p-2"><svg class="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></div>
+                  </div>` : ''}
+                </div>`;
+            }).join('')}
+          </div>
+        </div>`;
+
+      // Lightbox för albumdelning (enkel, utan navigation-state)
+      container.querySelectorAll('.share-thumb').forEach((thumb) => {
+        const t = /** @type {HTMLElement} */ (thumb);
+        t.addEventListener('click', () => {
+          const idx = Number(t.dataset.index ?? 0);
+          showShareLightbox(albumAssets, idx);
+        });
+      });
+      return;
+    }
+
+    // ── Enskild bild/video ─────────────────────────────────────────────────
     const thumbSrc = share.thumb_large_path ? `/thumbs/${share.thumb_large_path}` : null;
     const isVideo  = share.mime_type?.startsWith('video/');
 
@@ -581,10 +621,249 @@ async function renderSharePage(container, token) {
            class="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors">
           ⬇ Ladda ner original
         </a>
+        <span class="text-xs text-slate-600 italic">PhotoManager</span>
       </div>`;
   } catch (e) {
-    container.innerHTML = `<div class="p-8 text-red-400">Kunde inte ladda delad bild: ${e.message}</div>`;
+    container.innerHTML = `<div class="p-8 text-red-400">Kunde inte ladda: ${e.message}</div>`;
   }
+}
+
+function showShareLightbox(assets, startIndex) {
+  let idx = startIndex;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'fixed inset-0 z-[9999] bg-black/95 flex flex-col';
+  overlay.innerHTML = `
+    <div class="flex items-center justify-between px-4 py-3 flex-shrink-0">
+      <span class="text-slate-400 text-sm" id="slb-counter"></span>
+      <button id="slb-close" class="text-slate-400 hover:text-white text-2xl leading-none transition-colors">✕</button>
+    </div>
+    <div class="flex-1 flex items-center justify-center relative min-h-0 px-12">
+      <button id="slb-prev" class="absolute left-2 bg-black/50 hover:bg-black/80 text-white rounded-full p-2 transition-colors z-10">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+      </button>
+      <div id="slb-media" class="max-h-full max-w-full flex items-center justify-center"></div>
+      <button id="slb-next" class="absolute right-2 bg-black/50 hover:bg-black/80 text-white rounded-full p-2 transition-colors z-10">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+      </button>
+    </div>
+    <div class="flex items-center justify-between px-4 py-3 flex-shrink-0">
+      <span id="slb-name" class="text-slate-400 text-sm truncate flex-1"></span>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  const show = (i) => {
+    idx = Math.max(0, Math.min(i, assets.length - 1));
+    const asset = assets[idx];
+    const mediaEl = overlay.querySelector('#slb-media');
+    const counterEl = overlay.querySelector('#slb-counter');
+    const nameEl = overlay.querySelector('#slb-name');
+    if (!mediaEl) return;
+    if (counterEl) counterEl.textContent = `${idx + 1} / ${assets.length}`;
+    if (nameEl) nameEl.textContent = asset.file_name ?? '';
+
+    const isVid = asset.mime_type?.startsWith('video/');
+    const src = asset.thumb_large_path ? `/thumbs/${asset.thumb_large_path}` : asset.thumb_small_path ? `/thumbs/${asset.thumb_small_path}` : null;
+
+    mediaEl.innerHTML = isVid
+      ? `<video src="/api/assets/${asset.id}/stream" controls class="max-h-[80vh] max-w-full"></video>`
+      : src ? `<img src="${src}" class="max-h-[80vh] max-w-full object-contain">` : '<div class="text-slate-500">Förhandsgranskning saknas</div>';
+
+    overlay.querySelector('#slb-prev')?.classList.toggle('opacity-30', idx === 0);
+    overlay.querySelector('#slb-next')?.classList.toggle('opacity-30', idx === assets.length - 1);
+  };
+
+  overlay.querySelector('#slb-close')?.addEventListener('click', () => overlay.remove());
+  overlay.querySelector('#slb-prev')?.addEventListener('click', () => show(idx - 1));
+  overlay.querySelector('#slb-next')?.addEventListener('click', () => show(idx + 1));
+  overlay.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowLeft') show(idx - 1);
+    else if (e.key === 'ArrowRight') show(idx + 1);
+    else if (e.key === 'Escape') overlay.remove();
+  });
+  overlay.setAttribute('tabindex', '-1');
+  overlay.focus();
+
+  show(startIndex);
+}
+
+// === PWA INSTALL PROMPT ===
+
+let _deferredInstallPrompt = null;
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  _deferredInstallPrompt = e;
+  document.getElementById('pwa-install-btn')?.classList.remove('hidden');
+});
+
+window.addEventListener('appinstalled', () => {
+  _deferredInstallPrompt = null;
+  document.getElementById('pwa-install-btn')?.classList.add('hidden');
+  toast('App installerad!', 'success');
+});
+
+document.getElementById('pwa-install-btn')?.addEventListener('click', async () => {
+  if (!_deferredInstallPrompt) return;
+  _deferredInstallPrompt.prompt();
+  const { outcome } = await _deferredInstallPrompt.userChoice;
+  if (outcome === 'accepted') {
+    _deferredInstallPrompt = null;
+    document.getElementById('pwa-install-btn')?.classList.add('hidden');
+  }
+  document.getElementById('user-dropdown').classList.add('hidden');
+});
+
+// === PUSH-NOTIFIKATIONER ===
+
+let _pushSubscription = null;
+
+async function initPush() {
+  const btn = document.getElementById('push-toggle-btn');
+  if (!btn || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+    btn?.classList.add('hidden');
+    return;
+  }
+
+  try {
+    const { data } = await api.vapidKey();
+    if (!data?.enabled) { btn.classList.add('hidden'); return; }
+
+    const reg = await navigator.serviceWorker.ready;
+    _pushSubscription = await reg.pushManager.getSubscription();
+    updatePushBtn();
+  } catch {
+    btn.classList.add('hidden');
+  }
+}
+
+function updatePushBtn() {
+  const btn = document.getElementById('push-toggle-btn');
+  if (!btn) return;
+  btn.textContent = _pushSubscription ? '🔕 Avaktivera notiser' : '🔔 Aktivera notiser';
+}
+
+document.getElementById('push-toggle-btn')?.addEventListener('click', async () => {
+  document.getElementById('user-dropdown').classList.add('hidden');
+  try {
+    if (_pushSubscription) {
+      await _pushSubscription.unsubscribe();
+      await api.pushUnsubscribe(_pushSubscription.endpoint);
+      _pushSubscription = null;
+      toast('Push-notiser avaktiverade', 'success');
+    } else {
+      const { data } = await api.vapidKey();
+      if (!data?.enabled) { toast('Push-notiser inte konfigurerade på servern', 'error'); return; }
+
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') { toast('Tillåt notiser i webbläsaren för att aktivera', 'info'); return; }
+
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(data.publicKey),
+      });
+      await api.pushSubscribe({ endpoint: sub.endpoint, keys: { p256dh: arrayBufferToBase64(sub.getKey('p256dh')), auth: arrayBufferToBase64(sub.getKey('auth')) } });
+      _pushSubscription = sub;
+      toast('Push-notiser aktiverade!', 'success');
+    }
+    updatePushBtn();
+  } catch (e) { toast(e.message, 'error'); }
+});
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64  = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = window.atob(base64);
+  return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
+}
+
+function arrayBufferToBase64(buffer) {
+  return btoa(String.fromCharCode(...new Uint8Array(buffer)));
+}
+
+// === EXPORT / BACKUP MODAL ===
+
+async function showExportModal() {
+  let albums = [];
+  try { const r = await api.albums(); albums = r.data ?? []; } catch {}
+
+  const overlay = document.createElement('div');
+  overlay.className = 'fixed inset-0 z-[8000] flex items-center justify-center bg-black/70 p-4';
+  overlay.innerHTML = `
+    <div class="bg-slate-800 rounded-2xl w-full max-w-md shadow-2xl border border-slate-700">
+      <div class="flex items-center justify-between px-6 py-4 border-b border-slate-700">
+        <h2 class="text-lg font-semibold text-white">📦 Exportera / Backup</h2>
+        <button id="exp-close" class="text-slate-400 hover:text-white text-xl leading-none">✕</button>
+      </div>
+      <div class="p-6 space-y-3">
+        <p class="text-sm text-slate-400 mb-4">Välj vad du vill exportera som ZIP.</p>
+
+        <button id="exp-favorites" class="exp-option w-full flex items-center gap-3 px-4 py-3 bg-slate-700 hover:bg-slate-600 rounded-xl transition-colors text-left">
+          <span class="text-2xl">❤️</span>
+          <div>
+            <div class="text-sm font-medium text-white">Exportera favoriter</div>
+            <div class="text-xs text-slate-400">Alla bilder markerade som favorit</div>
+          </div>
+        </button>
+
+        ${albums.length ? `
+        <div>
+          <p class="text-xs text-slate-500 mb-1.5">Exportera ett album</p>
+          <select id="exp-album-select" class="w-full bg-slate-700 border border-slate-600 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500">
+            <option value="">Välj album…</option>
+            ${albums.map((al) => `<option value="${al.id}">${al.name} (${al.asset_count} bilder)</option>`).join('')}
+          </select>
+          <button id="exp-album-btn" class="mt-2 w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-xl transition-colors">
+            Exportera valt album
+          </button>
+        </div>` : ''}
+
+        <div class="border-t border-slate-700 pt-3">
+          <p class="text-xs text-slate-500 mb-1">Tips: Markera bilder i galleriet och klicka "Exportera ZIP" i verktygsfältet för ett anpassat urval.</p>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  overlay.querySelector('#exp-close')?.addEventListener('click', () => overlay.remove());
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+  overlay.querySelector('#exp-favorites')?.addEventListener('click', async () => {
+    overlay.remove();
+    toast('Hämtar favoriter…', 'info');
+    try {
+      const { data: favs } = await api.favorites();
+      if (!favs?.length) { toast('Inga favoriter att exportera', 'info'); return; }
+      const ids = favs.slice(0, 500).map((a) => a.id);
+      toast('Förbereder ZIP…', 'info');
+      const blob = await api.exportZip(ids);
+      downloadBlob(blob, `favoriter-${ids.length}-bilder.zip`);
+      toast('Export klar!', 'success');
+    } catch (e) { toast(e.message, 'error'); }
+  });
+
+  overlay.querySelector('#exp-album-btn')?.addEventListener('click', async () => {
+    const albumId = /** @type {HTMLSelectElement} */ (overlay.querySelector('#exp-album-select'))?.value;
+    if (!albumId) { toast('Välj ett album', 'error'); return; }
+    const albumName = /** @type {HTMLSelectElement} */ (overlay.querySelector('#exp-album-select'))?.selectedOptions[0]?.text ?? 'album';
+    overlay.remove();
+    toast('Förbereder ZIP…', 'info');
+    try {
+      const blob = await api.exportAlbumZip(albumId);
+      downloadBlob(blob, `${albumName}.zip`);
+      toast('Export klar!', 'success');
+    } catch (e) { toast(e.message, 'error'); }
+  });
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
 }
 
 // === INIT ===
@@ -606,6 +885,9 @@ async function initApp() {
 
   // Anslut SSE
   connectSSE();
+
+  // Initialisera push
+  initPush();
 }
 
 // === BOOTSTRAP ===

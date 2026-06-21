@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+
+    // Typkolla vanliga .js-filer utan att byta namn till .ts
+    "allowJs": true,
+    "checkJs": true,
+
+    // Producera INGA outputfiler — bara typkontroll
+    "noEmit": true,
+
+    // Strikt null-kontroll: fångar el?.addEventListener vs el.addEventListener
+    "strictNullChecks": true,
+    "strict": false,
+
+    // Tillåt import utan filändelse (som existerande kod gör)
+    "allowImportingTsExtensions": false,
+
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "skipLibCheck": true
+  },
+  "include": [
+    "src/**/*.js"
+  ],
+  "exclude": [
+    "node_modules",
+    "public"
+  ]
+}
