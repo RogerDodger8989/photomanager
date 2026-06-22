@@ -109,13 +109,24 @@ export function createSelectionManager(getGrid, getAllAssets, customActions = []
 
   function syncCellVisuals() {
     const grid = getGrid();
-    if (!grid) return;
-    grid.querySelectorAll('.photo-cell[data-id]').forEach((cell) => {
-      const id = cell.dataset.id;
-      const cb = cell.querySelector('.sel-checkbox');
+    if (grid) {
+      grid.querySelectorAll('.photo-cell[data-id]').forEach((cell) => {
+        const id = cell.dataset.id;
+        const cb = cell.querySelector('.sel-checkbox');
+        const isSelected = selected.has(id);
+        if (cb) cb.checked = isSelected;
+        cell.classList.toggle('ring-2', isSelected);
+      });
+    }
+    // Listrader
+    document.querySelectorAll('[data-list-row-id]').forEach((row) => {
+      const id = /** @type {HTMLElement} */ (row).dataset.listRowId;
+      const cb = row.querySelector('.sel-checkbox');
       const isSelected = selected.has(id);
-      if (cb) cb.checked = isSelected;
-      cell.classList.toggle('ring-2', isSelected);
+      if (cb) /** @type {HTMLInputElement} */ (cb).checked = isSelected;
+      row.classList.toggle('bg-blue-900/30', isSelected);
+      row.classList.toggle('ring-1',         isSelected);
+      row.classList.toggle('ring-blue-500',  isSelected);
     });
   }
 
@@ -203,7 +214,7 @@ export function createSelectionManager(getGrid, getAllAssets, customActions = []
   function getSelected() { return selected; }
   function isSelected(id) { return selected.has(id); }
 
-  return { mountToolbar, attachToCell, clearAll, selectAll, syncCellVisuals, deleteSelected, getSelected, isSelected };
+  return { mountToolbar, attachToCell, toggle, clearAll, selectAll, syncCellVisuals, deleteSelected, getSelected, isSelected };
 }
 
 export function downloadBlob(blob, filename) {

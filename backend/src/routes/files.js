@@ -105,17 +105,27 @@ export default async function filesRoutes(fastify) {
     const userId  = request.user.id;
     const isAdmin = request.user.role === 'admin';
 
-    // Validera: målmappen måste vara en bevakad mapp
-    const { rows: wfRows } = await query(
-      'SELECT path FROM watched_folders WHERE path = $1', [targetFolder]
-    );
-    if (!wfRows.length) {
-      return reply.status(400).send({ error: 'Målmappen är inte en bevakad mapp' });
+    // Validera: målmappen måste vara under en bevakad mapp (eller vara en bevakad mapp)
+    const { rows: wfRows } = await query('SELECT path FROM watched_folders');
+    const photosPathNorm = config.media.photosPath.replace(/\\/g, '/').replace(/\/$/, '');
+    const targetNorm     = targetFolder.replace(/\\/g, '/').replace(/\/$/, '');
+    const underWatched   = wfRows.some((wf) => {
+      const wfNorm = wf.path.replace(/\\/g, '/').replace(/\/$/, '');
+      return targetNorm === wfNorm || targetNorm.startsWith(wfNorm + '/');
+    });
+    if (!underWatched) {
+      return reply.status(400).send({ error: 'Målmappen är inte under en bevakad mapp' });
     }
 
     if (!existsSync(targetFolder)) {
       return reply.status(400).send({ error: 'Målmappen finns inte på disk' });
     }
+
+    // Hitta den bevakade rot-mappen för målmappen
+    const targetSourceFolder = wfRows.find((wf) => {
+      const wfNorm = wf.path.replace(/\\/g, '/').replace(/\/$/, '');
+      return targetNorm === wfNorm || targetNorm.startsWith(wfNorm + '/');
+    })?.path ?? targetFolder;
 
     const { rows: assets } = await query(
       `SELECT id, file_path, source_folder FROM assets
@@ -133,23 +143,24 @@ export default async function filesRoutes(fastify) {
     const moved  = [];
 
     for (const asset of assets) {
-      const fileName = basename(asset.file_path);
-      const newPath  = join(targetFolder, fileName);
+      const absOld   = resolve(config.media.photosPath, asset.file_path);
+      const fileName = basename(absOld);
+      const absNew   = join(targetFolder, fileName);
+      const relNew   = relative(config.media.photosPath, absNew).replace(/\\/g, '/');
 
-      if (asset.file_path === newPath) continue;
+      if (absOld === absNew) continue;
 
-      if (existsSync(newPath)) {
+      if (existsSync(absNew)) {
         errors.push({ id: asset.id, error: `Fil med samma namn finns redan: ${fileName}` });
         continue;
       }
 
       try {
-        await rename(asset.file_path, newPath);
+        await rename(absOld, absNew);
       } catch (err) {
         if (err.code === 'EXDEV') {
-          // Korsenhetsflytt: kopiera + ta bort
-          await copyFile(asset.file_path, newPath);
-          await unlink(asset.file_path);
+          await copyFile(absOld, absNew);
+          await unlink(absOld);
         } else {
           errors.push({ id: asset.id, error: err.message });
           continue;
@@ -158,7 +169,7 @@ export default async function filesRoutes(fastify) {
 
       await query(
         `UPDATE assets SET file_path = $1, source_folder = $2 WHERE id = $3`,
-        [newPath, targetFolder, asset.id]
+        [relNew, targetSourceFolder, asset.id]
       );
       moved.push(asset.id);
     }
@@ -267,8 +278,18 @@ export default async function filesRoutes(fastify) {
     const isAdmin = request.user.role === 'admin';
     if (!isAdmin) return reply.status(403).send({ error: 'Kräver admin' });
 
-    const { rows: wfRows } = await query('SELECT path FROM watched_folders WHERE path = $1', [targetRoot]);
-    if (!wfRows.length) return reply.status(400).send({ error: 'Målmappen är inte en bevakad mapp' });
+    const { rows: allWfRows } = await query('SELECT path FROM watched_folders');
+    const targetNormMF = targetRoot.replace(/\\/g, '/').replace(/\/$/, '');
+    const underWatchedMF = allWfRows.some((wf) => {
+      const wfNorm = wf.path.replace(/\\/g, '/').replace(/\/$/, '');
+      return targetNormMF === wfNorm || targetNormMF.startsWith(wfNorm + '/');
+    });
+    if (!underWatchedMF) return reply.status(400).send({ error: 'Målmappen är inte under en bevakad mapp' });
+
+    const targetSourceFolderMF = allWfRows.find((wf) => {
+      const wfNorm = wf.path.replace(/\\/g, '/').replace(/\/$/, '');
+      return targetNormMF === wfNorm || targetNormMF.startsWith(wfNorm + '/');
+    })?.path ?? targetRoot;
 
     if (!existsSync(folderPath)) return reply.status(404).send({ error: 'Källmappen finns inte' });
     if (!existsSync(targetRoot)) return reply.status(400).send({ error: 'Målmappen finns inte på disk' });
@@ -293,7 +314,7 @@ export default async function filesRoutes(fastify) {
          file_path     = $2 || substring(file_path from length($1)+1),
          source_folder = $3
        WHERE file_path LIKE $4`,
-      [relOld, relNew, targetRoot, relOld + '/%']
+      [relOld, relNew, targetSourceFolderMF, relOld + '/%']
     );
 
     return reply.send({ data: { folderPath, newPath } });

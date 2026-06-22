@@ -22,7 +22,7 @@ export default async function assetsRoutes(fastify) {
         properties: {
           cursor:       { type: 'string' },
           limit:        { type: 'integer', default: 50, maximum: 200 },
-          sort:         { type: 'string', enum: ['taken_at', 'file_size', 'view_count', 'indexed_at'], default: 'taken_at' },
+          sort:         { type: 'string', enum: ['taken_at', 'file_name', 'file_size', 'view_count', 'indexed_at'], default: 'taken_at' },
           order:        { type: 'string', enum: ['asc', 'desc'], default: 'desc' },
           ownOnly:      { type: 'boolean', default: false },
           sourceFolder: { type: 'string' },

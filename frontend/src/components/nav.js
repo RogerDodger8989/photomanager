@@ -12,7 +12,7 @@ const NAV_ITEMS = [
   ['tags',     'Taggar',    '🏷️',  '#/tags'],
   ['folders',  'Mappar',    '📁',  '#/folders'],
   ['upload',   'Ladda upp', '⬆️',  '#/upload'],
-  ['duplicates','Dublikat', '🔁',  '#/duplicates'],
+  ['duplicates','Dubletter', '🔁',  '#/duplicates'],
 ];
 
 const ADMIN_ITEMS = [
