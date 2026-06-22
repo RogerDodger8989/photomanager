@@ -191,16 +191,22 @@ document.addEventListener('click', (e) => {
   }
 });
 
-const doSearch = debounce((q) => {
+const doSearchDropdown = debounce((q) => {
   showPersonDropdown(q);
+}, 200);
+
+function runSearch(q) {
+  getPersonDropdown().classList.add('hidden');
   if (!q.trim()) { navigate(location.hash); return; }
   const container = document.getElementById('view-container');
+  history.pushState(null, '', '#/photos');
   renderTimeline(container, { q: q.trim() });
-}, 300);
+}
 
-globalSearch.addEventListener('input', (e) => doSearch(e.target.value));
+globalSearch.addEventListener('input', (e) => doSearchDropdown(e.target.value));
 globalSearch.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') doSearch(e.target.value);
+  if (e.key === 'Enter') { runSearch(e.target.value); }
+  if (e.key === 'Escape') { getPersonDropdown().classList.add('hidden'); globalSearch.blur(); }
 });
 
 // === AVANCERAT FILTER ===

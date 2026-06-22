@@ -13,6 +13,20 @@ let currentParams = {};
 let sentinel = null;
 let observer = null;
 let selection = null;
+let _thumbSize = parseInt(localStorage.getItem('tl-thumb-size') ?? '160', 10);
+
+function _applyThumbSize(px) {
+  _thumbSize = px;
+  localStorage.setItem('tl-thumb-size', String(px));
+  const grid = document.getElementById('photo-grid');
+  if (grid) grid.style.gridTemplateColumns = `repeat(auto-fill,minmax(${px}px,1fr))`;
+  document.querySelectorAll('.tl-size-btn').forEach((btn) => {
+    const active = /** @type {HTMLElement} */ (btn).dataset.size === String(px);
+    btn.classList.toggle('bg-slate-600', active);
+    btn.classList.toggle('text-white',   active);
+    btn.classList.toggle('text-slate-400', !active);
+  });
+}
 
 // Virtuell urladdning: celler utanför ~3× viewport får sin img.src rensad för att spara minne
 const _virt = new IntersectionObserver((entries) => {
@@ -71,32 +85,45 @@ export function renderTimeline(container, params = {}) {
   hasMore = true;
   allItems = [];
 
+  const sortLabel = { taken_at: 'Datum taget', file_size: 'Storlek', view_count: 'Populärast', indexed_at: 'Tillagd', file_name: 'Filnamn' };
+  const curSort  = params.sort ?? 'taken_at';
+  const curOrder = params.order ?? 'desc';
+
   container.innerHTML = `
     <div class="p-4">
-      <!-- Sort-bar -->
-      <div class="flex items-center gap-3 mb-2 flex-wrap">
-        <span class="text-sm text-slate-400">Sortera:</span>
-        ${[
-          ['taken_at',   'Datum'],
-          ['file_size',  'Storlek'],
-          ['view_count', 'Populärast'],
-          ['indexed_at', 'Tillagd'],
-        ].map(([val, label]) => `
-          <button data-sort="${val}" class="sort-btn text-sm px-3 py-1 rounded-full border border-slate-700
-            ${(params.sort ?? 'taken_at') === val ? 'bg-blue-600 border-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800'}">
-            ${label}
-          </button>`).join('')}
-        <button id="sort-order-toggle" class="text-slate-400 hover:text-white text-sm flex items-center gap-1">
-          <span id="sort-order-label">${params.order === 'asc' ? '↑ Äldst' : '↓ Senast'}</span>
-        </button>
-      </div>
+      <!-- Toolbar -->
+      <div class="flex items-center gap-2 mb-3 flex-wrap">
+        <!-- Urvals-toolbar (växer och tar plats till vänster) -->
+        <div id="selection-toolbar" class="flex items-center gap-3 flex-wrap flex-1 min-h-[28px]"></div>
 
-      <!-- Urvals-toolbar -->
-      <div id="selection-toolbar" class="flex items-center gap-3 mb-3 flex-wrap min-h-[28px]"></div>
+        <!-- Sort-dropdown -->
+        <select id="tl-sort-select" class="bg-slate-800 border border-slate-600 text-slate-200 text-sm rounded px-2 py-1 cursor-pointer hover:border-slate-400 transition-colors shrink-0">
+          ${Object.entries(sortLabel).map(([val, lbl]) =>
+            `<option value="${val}"${curSort === val ? ' selected' : ''}>${lbl}</option>`
+          ).join('')}
+        </select>
+
+        <!-- Order-toggle -->
+        <button id="tl-order-btn" title="${curOrder === 'asc' ? 'Stigande' : 'Fallande'}"
+          class="p-1.5 rounded hover:bg-slate-700 text-slate-300 hover:text-white transition-colors shrink-0">
+          ${curOrder === 'asc'
+            ? '<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 4h13M3 8h9M3 12h5m10 4l-4-4m0 0l-4 4m4-4v12"/></svg>'
+            : '<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 4h13M3 8h9M3 12h5m10-4l-4 4m0 0l-4-4m4 4V4"/></svg>'}
+        </button>
+
+        <div class="w-px h-5 bg-slate-700 shrink-0"></div>
+
+        <!-- S/M/L thumbnail-storlek -->
+        <div class="flex gap-0.5 shrink-0">
+          <button data-size="80"  class="tl-size-btn px-2 py-1 text-xs rounded transition-colors">S</button>
+          <button data-size="160" class="tl-size-btn px-2 py-1 text-xs rounded transition-colors">M</button>
+          <button data-size="240" class="tl-size-btn px-2 py-1 text-xs rounded transition-colors">L</button>
+        </div>
+      </div>
 
       <!-- Grid -->
       <div id="photo-grid" class="grid gap-0.5"
-        style="grid-template-columns: repeat(auto-fill, minmax(160px, 1fr))">
+        style="grid-template-columns: repeat(auto-fill, minmax(${_thumbSize}px, 1fr))">
       </div>
 
       <!-- Spinner-sentinel -->
@@ -105,19 +132,23 @@ export function renderTimeline(container, params = {}) {
       </div>
     </div>`;
 
-  // Sort-knappar
-  container.querySelectorAll('.sort-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const sort = btn.dataset.sort;
-      renderTimeline(container, { ...currentParams, sort });
-    });
+  // Sort-dropdown
+  container.querySelector('#tl-sort-select')?.addEventListener('change', (e) => {
+    const sort = /** @type {HTMLSelectElement} */ (e.target).value;
+    renderTimeline(container, { ...currentParams, sort });
   });
 
   // Order-toggle
-  container.querySelector('#sort-order-toggle').addEventListener('click', () => {
-    const order = currentParams.order === 'asc' ? 'desc' : 'asc';
+  container.querySelector('#tl-order-btn')?.addEventListener('click', () => {
+    const order = (currentParams.order ?? 'desc') === 'asc' ? 'desc' : 'asc';
     renderTimeline(container, { ...currentParams, order });
   });
+
+  // S/M/L
+  container.querySelectorAll('.tl-size-btn').forEach((btn) => {
+    btn.addEventListener('click', () => _applyThumbSize(parseInt(/** @type {HTMLElement} */ (btn).dataset.size ?? '160', 10)));
+  });
+  _applyThumbSize(_thumbSize);
 
   sentinel = container.querySelector('#grid-sentinel');
   observer = new IntersectionObserver(onSentinelVisible, { rootMargin: '200px' });
