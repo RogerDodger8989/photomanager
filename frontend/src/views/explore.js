@@ -2,6 +2,7 @@
 import { openLightbox } from '../components/lightbox.js';
 import { buildPhotoCell, showAssetContextMenu } from '../components/gridCell.js';
 import { createSelectionManager } from '../components/selectionManager.js';
+import { getThumbSettings } from '../components/thumbSettings.js';
 import { formatDate } from '../utils.js';
 
 export async function renderExplore(container) {
@@ -280,6 +281,7 @@ export async function renderFavorites(container) {
     );
     selection.mountToolbar(container.querySelector('#fav-selection-toolbar'));
 
+    const _ts = await getThumbSettings().catch(() => null);
     assets.forEach((asset, i) => {
       const cell = buildPhotoCell(
         asset,
@@ -295,6 +297,7 @@ export async function renderFavorites(container) {
             renderFavorites(container);
           }
         },
+        _ts,
       );
       selection.attachToCell(cell, asset, i);
       cell.addEventListener('contextmenu', (e) => {

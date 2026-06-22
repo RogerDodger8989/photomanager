@@ -36,6 +36,11 @@
 - Genererar **WebP-thumbnails** i två storlekar (400 px + 1 200 px) via Sharp
 - Automatisk **HEIC → WebP**-konvertering vid indexering
 - Korrekt hantering av **EXIF-rotation**
+- **Stjärnbetyg** (1–5) — sätts via högerklick eller kortkommando, visas direkt på thumbnail
+- **Flaggning** — Flaggad 🚩 / Avvisad ✗ / Ingen — via högerklick eller kortkommando
+- **Färgetiketter** — 5 färger (röd/gul/grön/blå/lila) visas som border runt thumbnail
+- **Konfigurerbar thumbnail-overlay** — välj fritt vad som visas: betyg, flagga, färgkant, filnamn, storlek, datum, dimensioner
+- Inställningarna synkroniseras mellan Bilder, Album och Favoriter-vyerna
 
 ### Video
 - **FFmpeg**-transkodning: HEVC/MOV → H.264 MP4 för sömlös webbuppspelning
@@ -137,6 +142,50 @@
 - bcrypt-hashning av lösenord
 - Rate-limiting på inloggningsendpointen (10 försök/min)
 - Granulär RBAC — per-användarbehörigheter kan t.ex. stänga av karta, ansikten eller borttagning
+
+---
+
+## Kortkommandon
+
+Gäller i **Bilder-vyn** när inget textfält är aktivt och lightboxen är stängd.
+
+### Flaggning
+| Tangent | Åtgärd |
+|---------|--------|
+| `P` | Flagga bild(er) som Flaggad 🚩 |
+| `X` | Markera bild(er) som Avvisad ✗ |
+| `U` | Ta bort flagga |
+
+### Betyg
+| Tangent | Åtgärd |
+|---------|--------|
+| `1` – `5` | Sätt stjärnbetyg 1–5 ⭐ |
+
+### Färgetikett
+| Tangent | Färg |
+|---------|------|
+| `6` | Röd |
+| `7` | Gul |
+| `8` | Grön |
+| `9` | Blå |
+| `0` | Ta bort färg |
+
+> Kortkommandona appliceras på **alla markerade bilder** (Ctrl+klik / Shift+klik). Om ingen bild är markerad appliceras de på den fokuserade bilden.
+
+### Mappar-vyn
+| Tangent | Åtgärd |
+|---------|--------|
+| `↑` / `↓` | Navigera bland filer/mappar |
+| `→` | Öppna markerad mapp / gå till filruta |
+| `←` | Fokus till mappträdet |
+| `Backspace` | Gå upp en nivå |
+| `F2` | Byt namn (öppnar dialog) |
+| `Enter` | Öppna mapp eller bild |
+| `Delete` | Radera till papperskorg |
+| `G` | Växla till gridvy |
+| `L` | Växla till listvy |
+| `Ctrl+A` | Markera alla |
+| `Ctrl+X` / `C` / `V` | Klipp ut / Kopiera / Klistra in |
 
 ---
 

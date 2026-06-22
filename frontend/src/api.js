@@ -102,7 +102,8 @@ export const api = {
   permanentDelete: (id)         => request('DELETE', `/api/trash/${id}/permanent`),
 
   // Search
-  search:  (params = {})        => request('GET', `/api/search?${qs(params)}`),
+  search:       (params = {})        => request('GET', `/api/search?${qs(params)}`),
+  suggestions:  (type, q = '')       => request('GET', `/api/search/suggestions?type=${encodeURIComponent(type)}&q=${encodeURIComponent(q)}`),
 
   // Explore
   onThisDay:   ()               => request('GET', '/api/explore/on-this-day'),

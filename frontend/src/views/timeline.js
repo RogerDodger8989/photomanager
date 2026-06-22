@@ -1,9 +1,10 @@
 ﻿import { api } from '../api.js';
 import { openLightbox } from '../components/lightbox.js';
-import { buildPhotoCell, showAssetContextMenu } from '../components/gridCell.js';
+import { buildPhotoCell, showAssetContextMenu, refreshCellOverlay } from '../components/gridCell.js';
 import { createSelectionManager } from '../components/selectionManager.js';
 import { openAddToAlbumModal } from './albums.js';
 import { thumbUrl, isVideo, formatDate, debounce } from '../utils.js';
+import { getThumbSettings } from '../components/thumbSettings.js';
 
 let cursor = null;
 let loading = false;
@@ -14,6 +15,7 @@ let sentinel = null;
 let observer = null;
 let selection = null;
 let _thumbSize = parseInt(localStorage.getItem('tl-thumb-size') ?? '160', 10);
+let _thumbSettings = null;
 
 function _applyThumbSize(px) {
   _thumbSize = px;
@@ -56,6 +58,63 @@ document.addEventListener('keydown', (e) => {
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
   if (selection) selection.deleteSelected();
 });
+
+// Kortkommandon för flagg, betyg och färg (aktiva när Bilder-vyn är öppen)
+document.addEventListener('keydown', async (e) => {
+  if (document.getElementById('lightbox')?.classList.contains('open')) return;
+  const tag = document.activeElement?.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+  if (!document.getElementById('photo-grid')) return; // bara aktiv i Bilder-vyn
+
+  const key = e.key.toLowerCase();
+  const targets = _getShortcutTargets();
+  if (!targets.length) return;
+
+  // Flagga: p=röd flagga (1), x/u=ta bort flagga (0)
+  if (key === 'p') { e.preventDefault(); await _applyToTargets(targets, { flag: 1 }); }
+  else if (key === 'x' || key === 'u') { e.preventDefault(); await _applyToTargets(targets, { flag: 0 }); }
+  // Betyg: 1–5
+  else if (['1','2','3','4','5'].includes(e.key) && !e.ctrlKey && !e.metaKey) {
+    e.preventDefault();
+    await _applyToTargets(targets, { rating: Number(e.key) });
+  }
+  // Färg: 6=röd, 7=gul, 8=grön, 9=blå, 0=ingen
+  else if (['6','7','8','9','0'].includes(e.key) && !e.ctrlKey && !e.metaKey) {
+    e.preventDefault();
+    const colorMap = { '6': 1, '7': 2, '8': 3, '9': 4, '0': 0 };
+    await _applyToTargets(targets, { colorLabel: colorMap[e.key] });
+  }
+});
+
+function _getShortcutTargets() {
+  if (!selection) return [];
+  const sel = selection.getSelected();
+  if (sel.size > 0) return allItems.filter((a) => sel.has(a.id));
+  // Ingen markering — kolla fokuserad cell
+  const focused = document.querySelector('.photo-cell:focus, .photo-cell.ring-2');
+  if (focused) {
+    const id = /** @type {HTMLElement} */ (focused).dataset.id;
+    return allItems.filter((a) => a.id === id);
+  }
+  return [];
+}
+
+async function _applyToTargets(targets, patch) {
+  const { toast } = await import('../utils.js');
+  await Promise.all(targets.map((asset) => api.patchMeta(asset.id, patch).then(() => {
+    if (patch.flag !== undefined)       asset.flag        = patch.flag;
+    if (patch.rating !== undefined)     asset.rating      = patch.rating;
+    if (patch.colorLabel !== undefined) asset.color_label = patch.colorLabel;
+    refreshCellOverlay(asset);
+  }).catch(() => {})));
+  const n = targets.length;
+  const what = patch.flag !== undefined
+    ? patch.flag === 0 ? 'Flagga borttagen' : 'Flagga satt'
+    : patch.rating !== undefined ? `Betyg ${patch.rating} ⭐`
+    : patch.colorLabel !== undefined ? (patch.colorLabel === 0 ? 'Färg borttagen' : 'Färg satt')
+    : '';
+  toast(`${what}${n > 1 ? ` (${n} bilder)` : ''}`, 'success');
+}
 
 // Synka grid när lightbox raderar/återställer en bild
 window.addEventListener('pm:asset-trashed', (e) => {
@@ -161,7 +220,11 @@ export function renderTimeline(container, params = {}) {
   );
   selection.mountToolbar(container.querySelector('#selection-toolbar'));
 
-  loadMore();
+  // Hämta thumbSettings asynkront, ladda sedan gridet
+  getThumbSettings().then((ts) => {
+    _thumbSettings = ts;
+    loadMore();
+  });
 }
 
 async function loadMore() {
@@ -205,6 +268,8 @@ function appendToGrid(items) {
     const cell = buildPhotoCell(
       asset,
       () => openLightbox(allItems, globalIndex),
+      undefined,
+      _thumbSettings,
     );
     selection?.attachToCell(cell, asset, globalIndex);
     cell.addEventListener('contextmenu', (e) => {

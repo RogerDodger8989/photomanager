@@ -13,6 +13,7 @@ import { renderUpload }              from '/src/views/upload.js';
 import { renderFolders }            from '/src/views/folders.js';
 import { renderDuplicates }         from '/src/views/duplicates.js';
 import { renderTags }               from '/src/views/tags.js';
+import { renderSearch }             from '/src/views/search.js';
 
 // Service Worker
 if ('serviceWorker' in navigator) {
@@ -93,6 +94,7 @@ function navigate(hash) {
   else if (route === 'upload')      renderUpload(container);
   else if (route === 'duplicates')  renderDuplicates(container);
   else if (route === 'tags')        renderTags(container);
+  else if (route === 'search')      renderSearch(container);
   else if (route === 'admin')     renderAdmin(container, rest[0] ?? 'stats');
   else if (route === 'share')     renderSharePage(container, rest[0]);
   else                            renderTimeline(container);

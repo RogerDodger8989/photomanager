@@ -1,5 +1,6 @@
 ﻿import { api } from '../api.js';
 import { toast, formatDateTime, formatBytes, confirm } from '../utils.js';
+import { invalidateThumbSettings } from '../components/thumbSettings.js';
 
 const TABS = ['stats', 'users', 'jobs', 'ai', 'audit', 'duplicates', 'folders', 'trash', 'settings'];
 
@@ -1208,6 +1209,55 @@ async function renderUserSettings(content) {
             </button>
           </div>`).join('')}
       </div>
+
+      <!-- Thumbnail-visning -->
+      <div class="bg-slate-800 border border-slate-700 rounded-xl p-4 space-y-4">
+        <div class="text-sm font-medium text-white">Thumbnail-visning</div>
+
+        <!-- Checkboxar för items -->
+        <div>
+          <div class="text-xs text-slate-400 mb-2">Visa på thumbnail</div>
+          <div class="grid grid-cols-2 gap-2">
+            ${[
+              ['rating',       'Betyg (stjärnor)'],
+              ['flag',         'Flagga'],
+              ['color_border', 'Färgkant'],
+              ['filename',     'Filnamn'],
+              ['file_size',    'Filstorlek (KiB)'],
+              ['modified_at',  'Senast ändrad'],
+              ['dimensions',   'Dimensioner'],
+            ].map(([val, lbl]) => {
+              const checked = (settings.thumb_overlay_items ?? ['rating','flag','color_border']).includes(val);
+              return `<label class="flex items-center gap-2 cursor-pointer text-sm text-slate-300 hover:text-white">
+                <input type="checkbox" data-overlay-item="${val}" ${checked ? 'checked' : ''}
+                  class="w-4 h-4 rounded accent-blue-500 cursor-pointer">
+                ${lbl}
+              </label>`;
+            }).join('')}
+          </div>
+        </div>
+
+        <!-- Färgnamn -->
+        <div>
+          <div class="text-xs text-slate-400 mb-2">Färgnamn</div>
+          <div class="grid grid-cols-2 gap-2">
+            ${[
+              ['1', '#ef4444', settings.color_labels?.['1'] ?? 'Röd'],
+              ['2', '#eab308', settings.color_labels?.['2'] ?? 'Gul'],
+              ['3', '#22c55e', settings.color_labels?.['3'] ?? 'Grön'],
+              ['4', '#3b82f6', settings.color_labels?.['4'] ?? 'Blå'],
+              ['5', '#a855f7', settings.color_labels?.['5'] ?? 'Lila'],
+            ].map(([idx, color, val]) => `
+              <div class="flex items-center gap-2">
+                <span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:${color};flex-shrink:0;"></span>
+                <input data-color-idx="${idx}" type="text" value="${val}"
+                  class="flex-1 bg-slate-700 border border-slate-600 rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-blue-500">
+              </div>`).join('')}
+          </div>
+        </div>
+
+        <button id="thumb-settings-save" class="px-4 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors font-medium">Spara thumbnail-inställningar</button>
+      </div>
     </div>`;
 
   let enabled = settings.face_detection_enabled;
@@ -1253,5 +1303,22 @@ async function renderUserSettings(content) {
         toast('Inställning sparad', 'success');
       } catch (e) { toast(e.message, 'error'); }
     });
+  });
+
+  // Thumbnail-visning: spara-knapp
+  content.querySelector('#thumb-settings-save')?.addEventListener('click', async () => {
+    const items = [...content.querySelectorAll('[data-overlay-item]:checked')].map((cb) => /** @type {HTMLElement} */ (cb).dataset.overlayItem);
+    const colorLabels = {};
+    content.querySelectorAll('[data-color-idx]').forEach((inp) => {
+      colorLabels[/** @type {HTMLElement} */ (inp).dataset.colorIdx] = /** @type {HTMLInputElement} */ (inp).value;
+    });
+    try {
+      await api.patchSettings({
+        thumbOverlayItems: items,
+        colorLabels,
+      });
+      invalidateThumbSettings();
+      toast('Thumbnail-inställningar sparade', 'success');
+    } catch (e) { toast(e.message, 'error'); }
   });
 }

@@ -34,10 +34,11 @@
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
 
-    /* Photo grid aspect-ratio */
-    .photo-cell { aspect-ratio: 1; overflow: hidden; cursor: pointer; }
+    /* Photo grid cell — flex-kolumn: bild ovan, info-strip under */
+    .photo-cell { display: flex; flex-direction: column; cursor: pointer; overflow: visible; }
+    .photo-img-wrap { aspect-ratio: 1; overflow: hidden; position: relative; flex-shrink: 0; }
     .photo-cell img { width: 100%; height: 100%; object-fit: cover; transition: transform .2s; }
-    .photo-cell:hover img { transform: scale(1.04); }
+    .photo-cell:hover .photo-img-wrap img { transform: scale(1.04); }
 
     /* Lightbox */
     #lightbox { display: none; }
@@ -137,10 +138,9 @@
     .rn-chip:hover { background: rgba(59,130,246,.35); border-color: #60a5fa; color: #bfdbfe; }
     .rn-chip:active { background: rgba(59,130,246,.55); }
 
-    /* Stack — "hög av foton"-visuell (DigiKam-stil) */
-    .photo-cell.is-stack { overflow: visible; }
-    .photo-cell.is-stack::before,
-    .photo-cell.is-stack::after {
+    /* Stack — "hög av foton"-visuell på bild-wrappern */
+    .photo-img-wrap.is-stack-wrap::before,
+    .photo-img-wrap.is-stack-wrap::after {
       content: '';
       position: absolute;
       inset: 0;
@@ -149,8 +149,8 @@
       background: #1e293b;
       z-index: -1;
     }
-    .photo-cell.is-stack::before { transform: rotate(2deg) translate(3px, 3px); }
-    .photo-cell.is-stack::after  { transform: rotate(4deg) translate(6px, 6px); }
+    .photo-img-wrap.is-stack-wrap::before { transform: rotate(2deg) translate(3px, 3px); }
+    .photo-img-wrap.is-stack-wrap::after  { transform: rotate(4deg) translate(6px, 6px); }
 
     /* Skeleton loading */
     .skeleton { background: linear-gradient(90deg, #1e293b 25%, #334155 50%, #1e293b 75%);

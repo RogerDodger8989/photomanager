@@ -87,7 +87,7 @@ export default async function assetsRoutes(fastify) {
       `SELECT a.id, a.file_name, a.mime_type, a.file_size, a.width, a.height,
               a.taken_at, a.indexed_at, a.thumb_small_path, a.thumb_large_path,
               a.location_label, a.view_count, a.duration, a.transcode_status,
-              a.owner_id, a.is_motion_photo,
+              a.owner_id, a.is_motion_photo, a.flag, a.color_label, a.rating,
               ST_Y(a.location::geometry) AS lat,
               ST_X(a.location::geometry) AS lon,
               (EXISTS (SELECT 1 FROM favorites f WHERE f.asset_id = a.id AND f.user_id = $${params.push(userId)})) AS is_favorite
@@ -284,6 +284,8 @@ export default async function assetsRoutes(fastify) {
           tags:          { type: 'array', items: { type: 'string' } },
           locationLabel: { type: 'string' },
           rating:        { type: ['integer', 'null'], minimum: 1, maximum: 5 },
+          flag:          { type: 'integer', enum: [-1, 0, 1] },
+          colorLabel:    { type: 'integer', minimum: 0, maximum: 5 },
           title:         { type: ['string', 'null'] },
           description:   { type: ['string', 'null'] },
         },
@@ -299,7 +301,7 @@ export default async function assetsRoutes(fastify) {
     if (!canWrite) return reply.status(403).send({ error: 'Saknar skrivrätt' });
 
     const { id } = request.params;
-    const { takenAt, tags, locationLabel, rating, title, description } = request.body;
+    const { takenAt, tags, locationLabel, rating, flag, colorLabel, title, description } = request.body;
 
     if (takenAt) {
       await query('UPDATE assets SET taken_at = $1 WHERE id = $2', [takenAt, id]);
@@ -309,6 +311,12 @@ export default async function assetsRoutes(fastify) {
     }
     if (rating !== undefined) {
       await query('UPDATE assets SET rating = $1 WHERE id = $2', [rating ?? null, id]);
+    }
+    if (flag !== undefined) {
+      await query('UPDATE assets SET flag = $1 WHERE id = $2', [flag, id]);
+    }
+    if (colorLabel !== undefined) {
+      await query('UPDATE assets SET color_label = $1 WHERE id = $2', [colorLabel, id]);
     }
     if (title !== undefined) {
       await query('UPDATE assets SET title = $1 WHERE id = $2', [title ?? null, id]);

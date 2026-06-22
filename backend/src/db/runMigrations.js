@@ -32,6 +32,7 @@ const MIGRATIONS = [
   '025_fix_decade_tag_casing.sql',
   '026_tags_drop_name_unique.sql',
   '027_fix_person_tag_flags.sql',
+  '028_flags_colors.sql',
 ];
 
 export async function runMigrations(client) {

@@ -200,7 +200,8 @@ export function createSelectionManager(getGrid, getAllAssets, customActions = []
       e.stopPropagation();
       toggle(asset.id, idx, e);
     });
-    cell.appendChild(cb);
+    const wrap = cell.querySelector('.photo-img-wrap') ?? cell;
+    wrap.appendChild(cb);
 
     // Ctrl+click på hela cellen → markera utan att öppna lightbox
     cell.addEventListener('click', (e) => {

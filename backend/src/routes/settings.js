@@ -20,6 +20,9 @@ export default async function settingsRoutes(fastify) {
         default_export_only_leaf: true,
         default_show_lifespan:    true,
         default_export_synonyms:  true,
+        thumb_overlay_items:      ['rating', 'flag', 'color_border'],
+        thumb_overlay_position:   'hover',
+        color_labels: { '1': 'Röd', '2': 'Gul', '3': 'Grön', '4': 'Blå', '5': 'Lila' },
         ...settings,
       },
     });
@@ -32,10 +35,13 @@ export default async function settingsRoutes(fastify) {
       body: {
         type: 'object',
         properties: {
-          faceDetectionEnabled:      { type: 'boolean' },
-          defaultExportOnlyLeaf:     { type: 'boolean' },
-          defaultShowLifespan:       { type: 'boolean' },
-          defaultExportSynonyms:     { type: 'boolean' },
+          faceDetectionEnabled:    { type: 'boolean' },
+          defaultExportOnlyLeaf:   { type: 'boolean' },
+          defaultShowLifespan:     { type: 'boolean' },
+          defaultExportSynonyms:   { type: 'boolean' },
+          thumbOverlayItems:       { type: 'array', items: { type: 'string' } },
+          thumbOverlayPosition:    { type: 'string', enum: ['hover', 'always'] },
+          colorLabels:             { type: 'object' },
         },
       },
     },
@@ -58,6 +64,15 @@ export default async function settingsRoutes(fastify) {
     }
     if (typeof body.defaultExportSynonyms === 'boolean') {
       patch.default_export_synonyms = body.defaultExportSynonyms;
+    }
+    if (Array.isArray(body.thumbOverlayItems)) {
+      patch.thumb_overlay_items = body.thumbOverlayItems;
+    }
+    if (body.thumbOverlayPosition) {
+      patch.thumb_overlay_position = body.thumbOverlayPosition;
+    }
+    if (body.colorLabels && typeof body.colorLabels === 'object') {
+      patch.color_labels = body.colorLabels;
     }
 
     if (Object.keys(patch).length === 0) {
@@ -84,6 +99,9 @@ export default async function settingsRoutes(fastify) {
         default_export_only_leaf: true,
         default_show_lifespan:    true,
         default_export_synonyms:  true,
+        thumb_overlay_items:      ['rating', 'flag', 'color_border'],
+        thumb_overlay_position:   'hover',
+        color_labels: { '1': 'Röd', '2': 'Gul', '3': 'Grön', '4': 'Blå', '5': 'Lila' },
         ...settings,
       },
     });

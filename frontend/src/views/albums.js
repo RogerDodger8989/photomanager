@@ -2,6 +2,7 @@
 import { openLightbox } from '../components/lightbox.js';
 import { buildPhotoCell, showAssetContextMenu } from '../components/gridCell.js';
 import { createSelectionManager } from '../components/selectionManager.js';
+import { getThumbSettings } from '../components/thumbSettings.js';
 import { toast, confirm } from '../utils.js';
 import { openShareModal } from '../components/shareModal.js';
 import { downloadBlob } from '../components/selectionManager.js';
@@ -353,11 +354,13 @@ async function loadAlbumDetail(container, albumId) {
     if (toolbarEl) sel.mountToolbar(toolbarEl);
 
     grid.innerHTML = '';
+    const _ts = await getThumbSettings().catch(() => null);
     allAssets.forEach((asset, i) => {
       const cell = buildPhotoCell(
         asset,
         () => openLightbox(allAssets, i),
         undefined,
+        _ts,
       );
 
       sel.attachToCell(cell, asset, i);

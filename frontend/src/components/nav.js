@@ -13,6 +13,7 @@ const NAV_ITEMS = [
   ['folders',  'Mappar',    '📁',  '#/folders'],
   ['upload',   'Ladda upp', '⬆️',  '#/upload'],
   ['duplicates','Dubletter', '🔁',  '#/duplicates'],
+  ['search',    'Sök',       '🔍',  '#/search'],
 ];
 
 const ADMIN_ITEMS = [
