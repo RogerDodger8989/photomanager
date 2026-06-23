@@ -158,9 +158,10 @@ export const api = {
   deleteAlbum:  (id)            => request('DELETE', `/api/albums/${id}`),
   addToAlbum:   (id, assetIds)  => request('POST', `/api/albums/${id}/assets`, { assetIds }),
   removeFromAlbum: (id, assetId)=> request('DELETE', `/api/albums/${id}/assets/${assetId}`),
-  albumRules:      (id)          => request('GET', `/api/albums/${id}/rules`),
-  saveAlbumRules:  (id, body)    => request('PUT', `/api/albums/${id}/rules`, body),
-  rebuildAlbum:    (id)          => request('POST', `/api/albums/${id}/rebuild`, {}),
+  albumRules:         (id)       => request('GET', `/api/albums/${id}/rules`),
+  saveAlbumRules:     (id, body) => request('PUT', `/api/albums/${id}/rules`, body),
+  rebuildAlbum:       (id)       => request('POST', `/api/albums/${id}/rebuild`, {}),
+  previewAlbumRules:  (body)     => request('POST', `/api/albums/preview-rules`, body),
 
   // Shares
   shares:         ()            => request('GET', '/api/shares'),

@@ -541,7 +541,12 @@ async function showRuleBuilderModal(album, onSave, onCancel = null) {
         </div>
 
         <!-- Knappar -->
-        <div class="px-6 py-4 border-t border-slate-700 flex justify-end gap-2">
+        <div class="px-6 py-4 border-t border-slate-700 flex items-center gap-2">
+          <button id="rb-preview" class="px-3 py-2 rounded-lg text-sm text-violet-300 hover:text-violet-200 hover:bg-slate-700 transition-colors flex items-center gap-1.5">
+            🔍 Förhandsgranska
+          </button>
+          <span id="rb-preview-count" class="text-xs text-slate-400"></span>
+          <div class="flex-1"></div>
           <button id="rb-cancel" class="px-4 py-2 rounded-lg text-sm text-slate-300 hover:text-white hover:bg-slate-700 transition-colors">Avbryt</button>
           <button id="rb-save" class="px-4 py-2 rounded-lg text-sm bg-violet-600 hover:bg-violet-500 text-white transition-colors">💾 Spara och kör</button>
         </div>
@@ -592,6 +597,20 @@ async function showRuleBuilderModal(album, onSave, onCancel = null) {
     overlay.querySelector('#rb-close')?.addEventListener('click', () => { overlay.remove(); onCancel?.(); });
     overlay.querySelector('#rb-cancel')?.addEventListener('click', () => { overlay.remove(); onCancel?.(); });
     overlay.addEventListener('click', (e) => { if (e.target === overlay) { overlay.remove(); onCancel?.(); } });
+
+    overlay.querySelector('#rb-preview')?.addEventListener('click', async () => {
+      const btn = /** @type {HTMLButtonElement} */ (overlay.querySelector('#rb-preview'));
+      const countEl = overlay.querySelector('#rb-preview-count');
+      if (btn) { btn.disabled = true; btn.textContent = '⏳ Söker…'; }
+      try {
+        const { data } = await api.previewAlbumRules({ rules, ruleLogic });
+        if (countEl) countEl.textContent = `${data.count} bild${data.count !== 1 ? 'er' : ''} matchar`;
+      } catch (e) {
+        if (countEl) countEl.textContent = 'Kunde inte hämta';
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '🔍 Förhandsgranska'; }
+      }
+    });
 
     overlay.querySelector('#rb-save')?.addEventListener('click', () => {
       overlay.remove();

@@ -221,6 +221,7 @@ export async function renderSearch(container) {
             <option value="file_size">Storlek</option>
             <option value="file_name">Filnamn</option>
             <option value="view_count">Populärast</option>
+            <option value="rating">Betyg</option>
           </select>
           <button id="sr-order-btn" title="Fallande"
             class="p-1.5 rounded hover:bg-slate-700 text-slate-300 hover:text-white transition-colors shrink-0">

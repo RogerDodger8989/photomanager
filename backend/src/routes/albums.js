@@ -180,6 +180,24 @@ export default async function albumsRoutes(fastify) {
     return reply.send({ data: { ok: true } });
   });
 
+  // POST /api/albums/preview-rules — räkna matchande assets utan att spara
+  fastify.post('/api/albums/preview-rules', {
+    onRequest: [fastify.authenticate],
+    schema: {
+      body: {
+        type: 'object',
+        properties: {
+          rules:     { type: 'array' },
+          ruleLogic: { type: 'string', enum: ['ALL', 'ANY'] },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { rules = [], ruleLogic = 'ALL' } = request.body;
+    const count = await previewSmartAlbumCount(request.user.id, rules, ruleLogic);
+    return reply.send({ data: { count } });
+  });
+
   // GET /api/albums/:id/rules — hämta regler för ett smart-album
   fastify.get('/api/albums/:id/rules', {
     onRequest: [fastify.authenticate],
@@ -250,29 +268,27 @@ export default async function albumsRoutes(fastify) {
 
 // ── Smart album query builder ─────────────────────────────────────────────────
 
-async function rebuildSmartAlbum(albumId, userId, rules, logic) {
-  await query('DELETE FROM album_assets WHERE album_id = $1', [albumId]);
-  if (!rules.length) return 0;
-
-  // $1 = albumId, $2 = userId — rule params start at $3
-  const params = [albumId, userId];
+function buildRuleClauses(rules, userId, params) {
   const clauses = [];
-
   for (const rule of rules) {
     const v = rule.value ?? {};
     switch (rule.rule_type) {
       case 'date_range': {
-        if (v.from) { params.push(v.from); clauses.push(`a.taken_at >= $${params.length}::timestamptz`); }
-        if (v.to)   { params.push(v.to);   clauses.push(`a.taken_at < ($${params.length}::date + interval '1 day')`); }
+        const subClauses = [];
+        if (v.from) { params.push(v.from); subClauses.push(`a.taken_at >= $${params.length}::timestamptz`); }
+        if (v.to)   { params.push(v.to);   subClauses.push(`a.taken_at < ($${params.length}::date + interval '1 day')`); }
+        if (subClauses.length) clauses.push(subClauses.join(' AND '));
         break;
       }
       case 'person': {
+        if (!v.personId) break;
         params.push(v.personId);
         clauses.push(`EXISTS (SELECT 1 FROM faces f WHERE f.asset_id = a.id AND f.person_id = $${params.length})`);
         break;
       }
       case 'location': {
-        params.push(`%${v.label ?? ''}%`);
+        if (!v.label) break;
+        params.push(`%${v.label}%`);
         clauses.push(`a.location_label ILIKE $${params.length}`);
         break;
       }
@@ -284,16 +300,40 @@ async function rebuildSmartAlbum(albumId, userId, rules, logic) {
       case 'has_gps':
         clauses.push(`a.location IS NOT NULL`);
         break;
-      case 'is_favorite':
-        clauses.push(`EXISTS (SELECT 1 FROM favorites fv WHERE fv.asset_id = a.id AND fv.user_id = $2)`);
+      case 'is_favorite': {
+        const uidIdx = params.indexOf(userId) + 1 || (() => { params.push(userId); return params.length; })();
+        clauses.push(`EXISTS (SELECT 1 FROM favorites fv WHERE fv.asset_id = a.id AND fv.user_id = $${uidIdx})`);
         break;
+      }
       case 'rating':
         params.push(Number(v.min ?? 1));
         clauses.push(`a.rating >= $${params.length}`);
         break;
     }
   }
+  return clauses;
+}
 
+async function previewSmartAlbumCount(userId, rules, logic) {
+  if (!rules.length) return 0;
+  const params = [userId];
+  const clauses = buildRuleClauses(rules, userId, params);
+  if (!clauses.length) return 0;
+  const joiner = logic === 'ANY' ? ' OR ' : ' AND ';
+  const where = clauses.map((c) => `(${c})`).join(joiner);
+  const { rows } = await query(
+    `SELECT COUNT(*)::int AS cnt FROM assets a WHERE a.owner_id = $1 AND a.status = 'active' AND (${where})`,
+    params
+  );
+  return rows[0]?.cnt ?? 0;
+}
+
+async function rebuildSmartAlbum(albumId, userId, rules, logic) {
+  await query('DELETE FROM album_assets WHERE album_id = $1', [albumId]);
+  if (!rules.length) return 0;
+
+  const params = [albumId, userId];
+  const clauses = buildRuleClauses(rules, userId, params);
   if (!clauses.length) return 0;
 
   const joiner = logic === 'ANY' ? ' OR ' : ' AND ';

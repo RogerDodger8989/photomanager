@@ -181,6 +181,7 @@ export async function renderFolders(container) {
             <option value="file_name">Filnamn</option>
             <option value="file_size">Filstorlek</option>
             <option value="view_count">Visningar</option>
+            <option value="rating">Betyg</option>
           </select>
           <button id="order-btn" title="Växla sorteringsordning" class="p-1.5 rounded hover:bg-slate-700 transition-colors text-slate-300" data-order="desc">
             <svg id="order-icon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

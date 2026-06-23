@@ -11,6 +11,45 @@ import { generateThumbnails } from '../workers/thumbnailer.js';
 import { extractMetadata } from '../services/metadataService.js';
 import { upsertAssetLocation, reverseGeocode, forwardGeocode } from '../services/geoService.js';
 
+// Transforms display-space crop fractions (lp/tp/wp/hp) into raw-image pixel extract coords,
+// accounting for EXIF orientation. Returns { left, top, width, height, rotateDeg } where
+// rotateDeg is the explicit angle to apply AFTER the extract so the output is upright.
+function exifAdjustedExtract(lp, tp, wp, hp, orientation, rW, rH) {
+  let left, top, width, height, rotateDeg;
+  switch (orientation) {
+    case 3: // 180°
+      left  = Math.round((1 - lp - wp) * rW);
+      top   = Math.round((1 - tp - hp) * rH);
+      width  = Math.round(wp * rW);
+      height = Math.round(hp * rH);
+      rotateDeg = 180;
+      break;
+    case 6: // 90°CW stored (most common portrait phone photo), display: dW=rH dH=rW
+      left  = Math.round(tp * rW);
+      top   = Math.round((1 - lp - wp) * rH);
+      width  = Math.round(hp * rW);
+      height = Math.round(wp * rH);
+      rotateDeg = 90;
+      break;
+    case 8: // 90°CCW stored, display: dW=rH dH=rW
+      left  = Math.round((1 - tp - hp) * rW);
+      top   = Math.round(lp * rH);
+      width  = Math.round(hp * rW);
+      height = Math.round(wp * rH);
+      rotateDeg = 270;
+      break;
+    default: // 1 (normal) and rare flip orientations – treat as no rotation
+      left   = Math.round(lp * rW);
+      top    = Math.round(tp * rH);
+      width  = Math.round(wp * rW);
+      height = Math.round(hp * rH);
+      rotateDeg = 0;
+  }
+  const safeW = Math.min(Math.max(0, width),  rW - Math.max(0, left));
+  const safeH = Math.min(Math.max(0, height), rH - Math.max(0, top));
+  return { left: Math.max(0, left), top: Math.max(0, top), width: Math.max(0, safeW), height: Math.max(0, safeH), rotateDeg };
+}
+
 export default async function assetsRoutes(fastify) {
 
   // GET /api/assets — tidslinje med cursor-paginering
@@ -22,7 +61,7 @@ export default async function assetsRoutes(fastify) {
         properties: {
           cursor:       { type: 'string' },
           limit:        { type: 'integer', default: 50, maximum: 200 },
-          sort:         { type: 'string', enum: ['taken_at', 'file_name', 'file_size', 'view_count', 'indexed_at'], default: 'taken_at' },
+          sort:         { type: 'string', enum: ['taken_at', 'file_name', 'file_size', 'view_count', 'indexed_at', 'rating'], default: 'taken_at' },
           order:        { type: 'string', enum: ['asc', 'desc'], default: 'desc' },
           ownOnly:      { type: 'boolean', default: false },
           sourceFolder: { type: 'string' },
@@ -77,10 +116,15 @@ export default async function assetsRoutes(fastify) {
     }
 
     // Cursor-baserad paginering
+    // För sorteringar med icke-unika värden (rating, file_size, view_count) används taken_at som cursor
+    const cursorField = ['rating', 'file_size', 'view_count', 'indexed_at'].includes(sort) ? 'taken_at' : sort;
     const op = order === 'desc' ? '<' : '>';
     if (cursor) {
-      conditions.push(`a.${sort} ${op} $${params.push(cursor)}`);
+      conditions.push(`a.${cursorField} ${op} $${params.push(cursor)}`);
     }
+
+    // Sekundär sortering på taken_at för stabilitet vid icke-unika primärsorteringar
+    const secondarySort = sort !== 'taken_at' ? `, a.taken_at ${order} NULLS LAST` : '';
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const { rows } = await query(
@@ -93,14 +137,14 @@ export default async function assetsRoutes(fastify) {
               (EXISTS (SELECT 1 FROM favorites f WHERE f.asset_id = a.id AND f.user_id = $${params.push(userId)})) AS is_favorite
        FROM assets a
        ${where}
-       ORDER BY a.${sort} ${order} NULLS LAST
+       ORDER BY a.${sort} ${order} NULLS LAST${secondarySort}
        LIMIT $1`,
       params
     );
 
     const hasMore = rows.length > limit;
     const items = hasMore ? rows.slice(0, limit) : rows;
-    const nextCursor = hasMore ? items[items.length - 1][sort] : null;
+    const nextCursor = hasMore ? items[items.length - 1][cursorField] : null;
 
     return reply.send({ data: items, meta: { hasMore, nextCursor } });
   });
@@ -344,17 +388,27 @@ export default async function assetsRoutes(fastify) {
     if (tags) {
       await query('DELETE FROM asset_tags WHERE asset_id = $1', [id]);
       for (const tagName of tags) {
-        const normalized = tagName.toLowerCase().trim();
+        const normalized = tagName.trim();
         if (!normalized) continue;
-        const { rows } = await query(
-          `INSERT INTO tags (name) VALUES ($1)
-           ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
-           RETURNING id`,
+        // name-kolumnen har inte längre UNIQUE — leta upp befintlig tagg först
+        const { rows: found } = await query(
+          'SELECT id FROM tags WHERE lower(name) = lower($1) LIMIT 1',
           [normalized]
         );
+        let tagId;
+        if (found.length) {
+          tagId = found[0].id;
+        } else {
+          const lc = normalized.toLowerCase();
+          const { rows: ins } = await query(
+            'INSERT INTO tags (name, path) VALUES ($1, $2) ON CONFLICT (path) DO UPDATE SET name = EXCLUDED.name RETURNING id',
+            [lc, lc]
+          );
+          tagId = ins[0].id;
+        }
         await query(
           'INSERT INTO asset_tags (asset_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
-          [id, rows[0].id]
+          [id, tagId]
         );
       }
     }
@@ -492,11 +546,14 @@ export default async function assetsRoutes(fastify) {
       },
     },
   }, async (request, reply) => {
+    try {
     const { id } = request.params;
     const { operations = [], saveAs = 'replace' } = request.body;
 
     const { rows } = await query(
-      "SELECT id, file_path, file_name, mime_type, owner_id FROM assets WHERE id = $1 AND status = 'active'",
+      `SELECT id, file_path, file_name, mime_type, owner_id,
+              taken_at, location_label, rating, title, description
+       FROM assets WHERE id = $1 AND status = 'active'`,
       [id]
     );
     if (!rows[0]) return reply.status(404).send({ error: 'Hittades inte' });
@@ -515,10 +572,34 @@ export default async function assetsRoutes(fastify) {
     if (!existsSync(absOriginal)) return reply.status(404).send({ error: 'Originalfil saknas' });
 
     // Bygg Sharp-pipeline
+    const origMeta = await sharp(absOriginal).metadata();
+    const rawW = origMeta.width  ?? 0;
+    const rawH = origMeta.height ?? 0;
+    const orientation = origMeta.orientation ?? 1;
+
     let pipeline = sharp(absOriginal);
+
+    // Crop hanteras separat och först: konvertera display-procent till råa pixelkoordinater
+    // med hänsyn till EXIF-orientering, och applicera sedan explicit rotation.
+    // Detta undviker det tvetydiga .rotate()-utan-argument + .extract()-kombinationen.
+    const cropOp = operations.find(op => op.type === 'crop');
+    if (cropOp) {
+      const lp = Math.max(0, Math.min(1, Number(cropOp.lp ?? 0)));
+      const tp = Math.max(0, Math.min(1, Number(cropOp.tp ?? 0)));
+      const wp = Math.max(0, Math.min(1, Number(cropOp.wp ?? 0)));
+      const hp = Math.max(0, Math.min(1, Number(cropOp.hp ?? 0)));
+      const ex = exifAdjustedExtract(lp, tp, wp, hp, orientation, rawW, rawH);
+      if (ex.width > 0 && ex.height > 0) pipeline = pipeline.extract({ left: ex.left, top: ex.top, width: ex.width, height: ex.height });
+      if (ex.rotateDeg !== 0) pipeline = pipeline.rotate(ex.rotateDeg);
+    } else {
+      // Ingen beskärning: EXIF auto-rotation är säker utan .extract()
+      pipeline = pipeline.rotate();
+    }
 
     for (const op of operations) {
       switch (op.type) {
+        case 'crop':
+          break; // already handled above
         case 'rotate':
           pipeline = pipeline.rotate(Number(op.angle) || 0);
           break;
@@ -537,7 +618,6 @@ export default async function assetsRoutes(fastify) {
           break;
         }
         case 'linear': {
-          // Kontrast: linear(a, b) where a=slope, b=offset
           const a = Number(op.a ?? 1);
           const b = Number(op.b ?? 0);
           if (a !== 1 || b !== 0) pipeline = pipeline.linear(a, b);
@@ -552,6 +632,9 @@ export default async function assetsRoutes(fastify) {
       }
     }
 
+    // Bevara EXIF-metadata (datum, GPS m.m.) men sätt orientation=1 (rotationen är inbakad)
+    pipeline = pipeline.withMetadata({ orientation: 1 });
+
     // Bevara originalformat (eller konvertera till JPEG om okänt)
     const ext = extname(asset.file_name).toLowerCase();
     const outFormat = ['.jpg', '.jpeg'].includes(ext) ? 'jpeg'
@@ -561,50 +644,92 @@ export default async function assetsRoutes(fastify) {
 
     if (saveAs === 'copy') {
       // Spara som ny fil bredvid originalet
-      const newId       = uuidv4();
-      const baseName    = basename(asset.file_name, extname(asset.file_name));
-      const newFileName = `${baseName}_edit${ext || '.jpg'}`;
-      const origDir     = dirname(asset.file_path);
-      const newRelPath  = `${origDir}/${newFileName}`.replace(/^\//, '');
-      const absNewPath  = resolve(config.media.photosPath,newRelPath);
+      const newId    = uuidv4();
+      const baseName = basename(asset.file_name, extname(asset.file_name));
+      const origDir  = dirname(asset.file_path);
+      const dirPart  = origDir && origDir !== '.' ? origDir + '/' : '';
 
-      const buf = await pipeline.toFormat(outFormat).toBuffer();
-      await writeFile(absNewPath, buf);
+      // Generera unikt filnamn — kontrollera både filsystem och DB (UNIQUE-constraint på file_path)
+      let newFileName = `${baseName}_edit${ext || '.jpg'}`;
+      let newRelPath  = dirPart + newFileName;
+      let absNewPath  = resolve(config.media.photosPath, newRelPath);
+      let counter = 2;
+      while (
+        existsSync(absNewPath) ||
+        (await query('SELECT 1 FROM assets WHERE file_path = $1', [newRelPath])).rows.length > 0
+      ) {
+        newFileName = `${baseName}_edit_${counter++}${ext || '.jpg'}`;
+        newRelPath  = dirPart + newFileName;
+        absNewPath  = resolve(config.media.photosPath, newRelPath);
+      }
 
-      // Registrera ny asset i DB (grundläggande — utan full EXIF-extraktion)
-      await query(
-        `INSERT INTO assets (id, file_name, file_path, mime_type, owner_id, source_folder, status, indexed_at)
-         VALUES ($1, $2, $3, $4, $5, $6, 'active', NOW())`,
-        [newId, newFileName, newRelPath, `image/${outFormat}`, asset.owner_id, dirname(absNewPath)]
-      );
-      await generateThumbnails(newId, absNewPath, `image/${outFormat}`);
+      try {
+        const { data: buf, info: outInfo } = await pipeline.toFormat(outFormat).toBuffer({ resolveWithObject: true });
+        await writeFile(absNewPath, buf);
 
-      await logAudit(request.user.id, 'edit_copy', id, 'asset', { operations }, request.ip);
-      const { rows: newRows } = await query('SELECT * FROM assets WHERE id = $1', [newId]);
-      return reply.status(201).send({ data: newRows[0] });
+        await query(
+          `INSERT INTO assets
+             (id, file_name, file_path, mime_type, owner_id, source_folder, status, indexed_at,
+              taken_at, location, location_label, rating, title, description,
+              file_size, width, height)
+           VALUES ($1,$2,$3,$4,$5,$6,'active',NOW(),$7,
+                   (SELECT location FROM assets WHERE id = $8),
+                   $9,$10,$11,$12,$13,$14,$15)`,
+          [newId, newFileName, newRelPath, `image/${outFormat}`, asset.owner_id, dirname(absNewPath),
+           asset.taken_at ?? null, id,
+           asset.location_label ?? null, asset.rating ?? null,
+           asset.title ?? null, asset.description ?? null,
+           outInfo.size, outInfo.width, outInfo.height]
+        );
+        // Kopiera taggar från originalet
+        await query(
+          `INSERT INTO asset_tags (asset_id, tag_id)
+           SELECT $1, tag_id FROM asset_tags WHERE asset_id = $2
+           ON CONFLICT DO NOTHING`,
+          [newId, id]
+        );
+        await generateThumbnails(newId, absNewPath, `image/${outFormat}`);
+
+        await logAudit(request.user.id, 'edit_copy', id, 'asset', { operations }, request.ip);
+        const { rows: newRows } = await query('SELECT * FROM assets WHERE id = $1', [newId]);
+        return reply.status(201).send({ data: newRows[0] });
+      } catch (err) {
+        fastify.log.error(err, 'edit-copy failed');
+        return reply.status(500).send({ error: err.message ?? 'Intern serverfel vid sparning av kopia' });
+      }
 
     } else {
       // Ersätt originalet (spara backup först)
       const backupPath = absOriginal + '.bak';
       await copyFile(absOriginal, backupPath);
 
+      let replaceInfo;
       try {
-        const buf = await pipeline.toFormat(outFormat).toBuffer();
+        const { data: buf, info } = await pipeline.toFormat(outFormat).toBuffer({ resolveWithObject: true });
+        replaceInfo = info;
         await writeFile(absOriginal, buf);
-        // Ta bort backup om det gick bra
         await unlink(backupPath).catch(() => {});
       } catch (err) {
-        // Återställ backup
         await copyFile(backupPath, absOriginal).catch(() => {});
         await unlink(backupPath).catch(() => {});
         throw err;
       }
 
+      if (replaceInfo) {
+        await query(
+          'UPDATE assets SET file_size=$1, width=$2, height=$3 WHERE id=$4',
+          [replaceInfo.size, replaceInfo.width, replaceInfo.height, id]
+        );
+      }
       await generateThumbnails(id, absOriginal, asset.mime_type);
       await logAudit(request.user.id, 'edit_replace', id, 'asset', { operations }, request.ip);
 
       const { rows: updRows } = await query('SELECT * FROM assets WHERE id = $1', [id]);
       return reply.send({ data: updRows[0] });
+    }
+    } catch (err) {
+      fastify.log.error(err, 'asset-edit failed');
+      return reply.status(500).send({ error: err.message ?? 'Intern serverfel' });
     }
   });
 
@@ -805,11 +930,17 @@ export default async function assetsRoutes(fastify) {
     // Lägg till taggar
     for (const tagName of addTags) {
       const normalized = tagName.toLowerCase().trim();
-      const { rows: tagRows } = await query(
-        `INSERT INTO tags (name, path) VALUES ($1, $1) ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id`,
-        [normalized]
-      );
-      const tagId = tagRows[0].id;
+      const { rows: foundTag } = await query('SELECT id FROM tags WHERE lower(name) = $1 LIMIT 1', [normalized]);
+      let tagId;
+      if (foundTag.length) {
+        tagId = foundTag[0].id;
+      } else {
+        const { rows: tagRows } = await query(
+          `INSERT INTO tags (name, path) VALUES ($1, $1) ON CONFLICT (path) DO UPDATE SET name = EXCLUDED.name RETURNING id`,
+          [normalized]
+        );
+        tagId = tagRows[0].id;
+      }
       await query(
         `INSERT INTO asset_tags (asset_id, tag_id)
          SELECT unnest($1::uuid[]), $2

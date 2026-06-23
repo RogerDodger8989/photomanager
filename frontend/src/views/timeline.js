@@ -137,6 +137,19 @@ window.addEventListener('pm:asset-restored', (e) => {
   _virt.observe(cell);
 });
 
+window.addEventListener('pm:asset-added', (e) => {
+  const { asset } = /** @type {CustomEvent} */ (e).detail ?? {};
+  if (!asset) return;
+  // Push to end so lightbox's currentIndex isn't shifted for open sessions
+  allItems.push(asset);
+  const grid = document.getElementById('photo-grid');
+  if (!grid) return;
+  const cell = buildPhotoCell(asset, () => openLightbox(allItems, allItems.indexOf(asset)));
+  selection?.attachToCell(cell, asset, allItems.length - 1);
+  grid.prepend(cell);
+  _virt.observe(cell);
+});
+
 export function renderTimeline(container, params = {}) {
   _virt.disconnect(); // rensa virtualisering från föregående vy
   currentParams = params;
@@ -144,7 +157,7 @@ export function renderTimeline(container, params = {}) {
   hasMore = true;
   allItems = [];
 
-  const sortLabel = { taken_at: 'Datum taget', file_size: 'Storlek', view_count: 'Populärast', indexed_at: 'Tillagd', file_name: 'Filnamn' };
+  const sortLabel = { taken_at: 'Datum taget', file_size: 'Storlek', view_count: 'Populärast', indexed_at: 'Tillagd', file_name: 'Filnamn', rating: 'Betyg' };
   const curSort  = params.sort ?? 'taken_at';
   const curOrder = params.order ?? 'desc';
 
