@@ -1,8 +1,10 @@
 import path from 'path';
 import { tmpdir } from 'os';
+import { createReadStream, existsSync } from 'fs';
 import { writeFile, unlink } from 'fs/promises';
 import { v4 as uuidv4 } from 'uuid';
 import sharp from 'sharp';
+import archiver from 'archiver';
 import { query } from '../db/pool.js';
 import { syncFacesToFile } from '../services/xmpService.js';
 import { config } from '../config.js';
@@ -50,6 +52,7 @@ export default async function personsRoutes(fastify) {
     const { rows } = await query(
       `SELECT
          p.id, p.name, p.birth_year, p.death_year, p.cover_face_id, p.created_at,
+         p.external_url, p.notes, p.custom_id,
          a.thumb_small_path AS cover_thumb,
          (SELECT f3.id
           FROM faces f3
@@ -209,6 +212,37 @@ export default async function personsRoutes(fastify) {
     reply.header('Content-Type', 'application/json');
     reply.header('Content-Disposition', `attachment; filename="${safeName}.json"`);
     return reply.send(JSON.stringify(exportData, null, 2));
+  });
+
+  // GET /api/persons/:id/export-photos — ZIP med alla originalbilder personen förekommer i
+  fastify.get('/api/persons/:id/export-photos', {
+    onRequest: [fastify.authenticate],
+  }, async (request, reply) => {
+    const { id } = request.params;
+    const { rows: pRows } = await query('SELECT name FROM persons WHERE id = $1', [id]);
+    if (!pRows[0]) return reply.status(404).send({ error: 'Person hittades inte' });
+
+    const { rows: assets } = await query(
+      `SELECT DISTINCT a.file_path, a.file_name
+       FROM faces f JOIN assets a ON a.id = f.asset_id AND a.status = 'active'
+       WHERE f.person_id = $1 ORDER BY a.file_name`,
+      [id]
+    );
+
+    const safeName = pRows[0].name.replace(/[^a-zA-Z0-9åäöÅÄÖ_-]/g, '_');
+    reply.raw.setHeader('Content-Type', 'application/zip');
+    reply.raw.setHeader('Content-Disposition', `attachment; filename="${safeName}_bilder.zip"`);
+
+    const archive = archiver('zip', { zlib: { level: 0 } }); // level 0 = store (bilder komprimeras ej)
+    archive.pipe(reply.raw);
+
+    for (const asset of assets) {
+      const absPath = path.resolve(config.media.photosPath, asset.file_path);
+      if (existsSync(absPath)) archive.file(absPath, { name: asset.file_name });
+    }
+
+    await archive.finalize();
+    return reply;
   });
 
   // POST /api/faces/search-by-image — ladda upp bild och hitta liknande ansikten/personer
@@ -655,6 +689,7 @@ export default async function personsRoutes(fastify) {
 
     const { rows: personRows } = await query(
       `SELECT p.id, p.name, p.birth_year, p.death_year, p.cover_face_id, p.created_at,
+              p.external_url, p.notes, p.custom_id,
               (SELECT f.id FROM faces f JOIN assets a ON a.id = f.asset_id AND a.status = 'active'
                WHERE f.person_id = p.id LIMIT 1) AS fallback_face_id
        FROM persons p WHERE p.id = $1`,
@@ -700,12 +735,15 @@ export default async function personsRoutes(fastify) {
           birthYear:   { type: ['integer', 'null'] },
           deathYear:   { type: ['integer', 'null'] },
           coverFaceId: { type: 'string' },
+          externalUrl: { type: ['string', 'null'] },
+          notes:       { type: ['string', 'null'] },
+          customId:    { type: ['string', 'null'] },
         },
       },
     },
   }, async (request, reply) => {
     const { id } = request.params;
-    const { name, birthYear, deathYear, coverFaceId } = request.body;
+    const { name, birthYear, deathYear, coverFaceId, externalUrl, notes, customId } = request.body;
     if (name !== undefined) {
       await query('UPDATE persons SET name = $1 WHERE id = $2', [name, id]);
     }
@@ -717,6 +755,15 @@ export default async function personsRoutes(fastify) {
     }
     if (coverFaceId !== undefined) {
       await query('UPDATE persons SET cover_face_id = $1 WHERE id = $2', [coverFaceId, id]);
+    }
+    if (externalUrl !== undefined) {
+      await query('UPDATE persons SET external_url = $1 WHERE id = $2', [externalUrl ?? null, id]);
+    }
+    if (notes !== undefined) {
+      await query('UPDATE persons SET notes = $1 WHERE id = $2', [notes ?? null, id]);
+    }
+    if (customId !== undefined) {
+      await query('UPDATE persons SET custom_id = $1 WHERE id = $2', [customId ?? null, id]);
     }
     return reply.send({ data: { ok: true } });
   });

@@ -605,6 +605,16 @@ function buildSystemSection(sys) {
         <div class="text-xs text-slate-400 font-mono break-all bg-slate-800 rounded px-2 py-1">${sys.checksum}</div>
       </div>` : ''}
       ${dupWarning}
+      ${sys.isOwner ? `
+      <div class="mt-3">
+        <div class="text-xs text-slate-500 mb-1.5">Synlighet</div>
+        <div class="flex gap-1" id="visibility-btns">
+          ${[['private','Privat','🔒'],['family','Familj','👨‍👩‍👧'],['shared','Delad','🌐']].map(([v,lbl,ico]) => `
+            <button class="vis-btn flex-1 py-1 rounded text-xs transition-colors ${(sys.visibility ?? 'family') === v ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}"
+              data-vis="${v}">${ico} ${lbl}</button>
+          `).join('')}
+        </div>
+      </div>` : ''}
       <button id="rescan-meta-btn"
         class="mt-2 w-full py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs rounded-lg transition-colors">
         🔍 Skanna om GPS & Motion Photo
@@ -636,6 +646,24 @@ function initDrawerInteractions(container, assetId, m) {
       const albumId = /** @type {HTMLElement} */ (btn).dataset.albumNav;
       closeLightbox();
       location.hash = `#/albums/${albumId}`;
+    });
+  });
+
+  // ── Synlighetsväljare ────────────────────────────────────────────────────────
+  container.querySelectorAll('.vis-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const vis = /** @type {HTMLElement} */ (btn).dataset.vis;
+      try {
+        await api.patchMeta(assetId, { visibility: vis });
+        container.querySelectorAll('.vis-btn').forEach((b) => {
+          const active = /** @type {HTMLElement} */ (b).dataset.vis === vis;
+          b.classList.toggle('bg-blue-600', active);
+          b.classList.toggle('text-white', active);
+          b.classList.toggle('bg-slate-700', !active);
+          b.classList.toggle('text-slate-300', !active);
+        });
+        toast(`Synlighet satt till ${vis === 'private' ? 'Privat' : vis === 'family' ? 'Familj' : 'Delad'}`, 'success');
+      } catch { toast('Kunde inte spara synlighet', 'error'); }
     });
   });
 

@@ -181,43 +181,152 @@ async function renderStats(content) {
 async function renderUsers(content) {
   const { data } = await api.adminUsers();
   const ALL_PERMS = ['nav.map','nav.faces','nav.sharing','nav.explore','write.metadata','write.delete'];
+  const ROLE_COLORS = {
+    admin:  'bg-purple-800 text-purple-200',
+    family: 'bg-green-800 text-green-200',
+    user:   'bg-blue-800 text-blue-200',
+    guest:  'bg-slate-700 text-slate-300',
+  };
+  const ROLE_LABEL = { admin: 'Admin', family: 'Familj', user: 'Användare', guest: 'Gäst' };
+  const PERM_LABEL = {
+    'nav.map': 'Karta', 'nav.faces': 'Ansikten', 'nav.sharing': 'Delning',
+    'nav.explore': 'Utforska', 'write.metadata': 'Redigera metadata', 'write.delete': 'Radera',
+  };
+
+  const fmtDate = (d) => d ? new Date(d).toLocaleDateString('sv-SE', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }) : 'Aldrig';
 
   content.innerHTML = `
     <div class="space-y-3">
-      ${data.map((u) => `
-        <div class="bg-slate-800 rounded-xl p-4">
-          <div class="flex items-center justify-between mb-3">
-            <div>
-              <span class="font-medium text-white">${u.username}</span>
-              <span class="ml-2 text-xs px-2 py-0.5 rounded-full ${
-                u.role === 'admin' ? 'bg-purple-800 text-purple-200' :
-                u.role === 'user'  ? 'bg-blue-800 text-blue-200' :
-                'bg-slate-700 text-slate-300'
-              }">${u.role}</span>
-              ${!u.is_active ? '<span class="ml-1 text-xs text-red-400">Inaktiv</span>' : ''}
+      <!-- Rollförklaring -->
+      <div class="grid grid-cols-2 gap-2 md:grid-cols-4">
+        ${[
+          { role:'admin',  icon:'👑', color:'border-purple-700 bg-purple-950', badge:'bg-purple-800 text-purple-200',
+            can:['Ser alla bilder (privata, familj, delade)','Redigerar metadata & taggar','Hanterar användare & inställningar','Kan ladda upp bilder'],
+            cant:[] },
+          { role:'family', icon:'👨‍👩‍👧', color:'border-green-700 bg-green-950', badge:'bg-green-800 text-green-200',
+            can:['Ser bilder märkta "Familj" eller "Delad"','Ser sina egna privata bilder','Kan ladda upp bilder'],
+            cant:['Ser inte andras privata bilder','Kan inte redigera metadata eller taggar','Kan inte hantera användare'] },
+          { role:'user',   icon:'👤', color:'border-blue-700 bg-blue-950', badge:'bg-blue-800 text-blue-200',
+            can:['Ser bilder märkta "Delad"','Ser sina egna privata bilder'],
+            cant:['Ser inte bilder märkta "Familj"','Kan inte redigera metadata eller taggar','Kan inte ladda upp','Kan inte hantera användare'] },
+          { role:'guest',  icon:'👁️', color:'border-slate-600 bg-slate-900', badge:'bg-slate-700 text-slate-300',
+            can:['Ser bilder märkta "Delad"'],
+            cant:['Ser inte Familj- eller Privata bilder','Kan inte redigera något','Kan inte ladda upp','Kan inte radera'] },
+        ].map(r => `
+          <div class="rounded-xl border ${r.color} p-3 flex flex-col gap-2">
+            <div class="flex items-center gap-2">
+              <span class="text-lg">${r.icon}</span>
+              <span class="text-xs font-semibold px-2 py-0.5 rounded-full ${r.badge}">${ROLE_LABEL[r.role]}</span>
             </div>
-            <div class="flex gap-2 text-xs">
-              <button class="toggle-active-btn text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-700"
-                data-id="${u.id}" data-active="${u.is_active}">
-                ${u.is_active ? 'Inaktivera' : 'Aktivera'}
+            <ul class="space-y-0.5">
+              ${r.can.map(c => `<li class="text-xs text-green-400 flex gap-1"><span>✓</span><span>${c}</span></li>`).join('')}
+              ${r.cant.map(c => `<li class="text-xs text-slate-500 flex gap-1"><span>✗</span><span>${c}</span></li>`).join('')}
+            </ul>
+          </div>`).join('')}
+      </div>
+
+      <!-- Skapa ny användare -->
+      <details class="bg-slate-800 rounded-xl p-4">
+        <summary class="cursor-pointer text-sm font-medium text-slate-200 select-none">+ Skapa ny användare</summary>
+        <div class="mt-3 grid grid-cols-2 gap-2 text-sm" id="create-user-form">
+          <input id="new-username" placeholder="Användarnamn" class="col-span-2 bg-slate-700 text-white rounded px-3 py-1.5 text-sm">
+          <input id="new-email" placeholder="E-post (valfritt)" type="email" class="bg-slate-700 text-white rounded px-3 py-1.5 text-sm">
+          <input id="new-password" placeholder="Lösenord (min 8 tecken)" type="password" class="bg-slate-700 text-white rounded px-3 py-1.5 text-sm">
+          <select id="new-role" class="bg-slate-700 text-white rounded px-3 py-1.5 text-sm">
+            <option value="family">Familj</option>
+            <option value="user">Användare</option>
+            <option value="guest">Gäst</option>
+            <option value="admin">Admin</option>
+          </select>
+          <button id="create-user-btn" class="bg-blue-600 hover:bg-blue-500 text-white rounded px-3 py-1.5 text-sm font-medium">Skapa</button>
+        </div>
+      </details>
+
+      ${data.map((u) => `
+        <div class="bg-slate-800 rounded-xl p-4" data-user-id="${u.id}">
+          <!-- Rubrikrad -->
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="font-medium text-white">${u.username}</span>
+              <span class="text-xs px-2 py-0.5 rounded-full ${ROLE_COLORS[u.role] ?? ROLE_COLORS.guest}">${ROLE_LABEL[u.role] ?? u.role}</span>
+              ${!u.is_active ? '<span class="text-xs text-red-400">Inaktiv</span>' : ''}
+              <span class="text-xs text-slate-500">Senaste inloggning: ${fmtDate(u.last_login)}</span>
+            </div>
+            <button class="toggle-active-btn text-xs text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-700"
+              data-id="${u.id}" data-active="${u.is_active}">
+              ${u.is_active ? 'Inaktivera' : 'Aktivera'}
+            </button>
+          </div>
+
+          ${u.role === 'admin' ? `
+          <!-- Admin: bara e-post och lösenord, ingen rollbyte -->
+          <div class="border-t border-slate-700 pt-3">
+            <div class="flex flex-wrap gap-2">
+              <input type="email" placeholder="E-post" value="${u.email ?? ''}"
+                class="email-input bg-slate-700 text-white text-xs rounded px-2 py-1 w-48" data-id="${u.id}">
+              <input type="password" placeholder="Nytt lösenord"
+                class="password-input bg-slate-700 text-white text-xs rounded px-2 py-1 w-48" data-id="${u.id}">
+              <button class="save-user-btn bg-slate-600 hover:bg-slate-500 text-white text-xs rounded px-3 py-1" data-id="${u.id}">
+                Spara ändringar
+              </button>
+            </div>
+          </div>` : `
+          <!-- Redigera roll, e-post, lösenord, uppladdning -->
+          <div class="border-t border-slate-700 pt-3 space-y-2">
+            <div class="flex flex-wrap gap-2 items-center text-xs text-slate-400">
+              <label>Roll:
+                <select class="role-select ml-1 bg-slate-700 text-white rounded px-2 py-1" data-id="${u.id}">
+                  <option value="family" ${u.role==='family'?'selected':''}>Familj</option>
+                  <option value="user"   ${u.role==='user'  ?'selected':''}>Användare</option>
+                  <option value="guest"  ${u.role==='guest' ?'selected':''}>Gäst</option>
+                  <option value="admin"  ${u.role==='admin' ?'selected':''}>Admin</option>
+                </select>
+              </label>
+              <label class="flex items-center gap-1">
+                <input type="checkbox" class="upload-toggle accent-green-500" data-id="${u.id}" ${u.can_upload ? 'checked' : ''}>
+                Kan ladda upp
+              </label>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <input type="email" placeholder="E-post" value="${u.email ?? ''}"
+                class="email-input bg-slate-700 text-white text-xs rounded px-2 py-1 w-48" data-id="${u.id}">
+              <input type="password" placeholder="Nytt lösenord"
+                class="password-input bg-slate-700 text-white text-xs rounded px-2 py-1 w-48" data-id="${u.id}">
+              <button class="save-user-btn bg-slate-600 hover:bg-slate-500 text-white text-xs rounded px-3 py-1" data-id="${u.id}">
+                Spara ändringar
               </button>
             </div>
           </div>
-          ${u.role !== 'admin' ? `
-          <div class="border-t border-slate-700 pt-3">
-            <div class="text-xs text-slate-400 mb-2">Rättigheter (${u.username}):</div>
+
+          <!-- Rättigheter -->
+          <div class="border-t border-slate-700 pt-3 mt-2">
+            <div class="text-xs text-slate-400 mb-2">Rättigheter:</div>
             <div class="flex flex-wrap gap-2">
               ${ALL_PERMS.map((key) => {
                 const isOn = u.permissions?.[key] ?? true;
-                return `<label class="flex items-center gap-1.5 cursor-pointer perm-label" data-user="${u.id}" data-key="${key}">
+                return `<label class="flex items-center gap-1.5 cursor-pointer" data-user="${u.id}" data-key="${key}">
                   <input type="checkbox" class="perm-checkbox accent-blue-500" data-user="${u.id}" data-key="${key}" ${isOn ? 'checked' : ''}>
-                  <span class="text-xs text-slate-300">${key}</span>
+                  <span class="text-xs text-slate-300">${PERM_LABEL[key] ?? key}</span>
                 </label>`;
               }).join('')}
             </div>
-          </div>` : ''}
+          </div>`}
         </div>`).join('')}
     </div>`;
+
+  // Skapa ny användare
+  content.querySelector('#create-user-btn')?.addEventListener('click', async () => {
+    const username = /** @type {HTMLInputElement} */ (content.querySelector('#new-username')).value.trim();
+    const email    = /** @type {HTMLInputElement} */ (content.querySelector('#new-email')).value.trim();
+    const password = /** @type {HTMLInputElement} */ (content.querySelector('#new-password')).value;
+    const role     = /** @type {HTMLSelectElement} */ (content.querySelector('#new-role')).value;
+    if (!username || !password) return toast('Användarnamn och lösenord krävs', 'error');
+    try {
+      await api.createUser({ username, email: email || undefined, password, role });
+      toast('Användare skapad', 'success');
+      renderUsers(content);
+    } catch (e) { toast(e.message, 'error'); }
+  });
 
   // Toggle active
   content.querySelectorAll('.toggle-active-btn').forEach((btn) => {
@@ -225,23 +334,41 @@ async function renderUsers(content) {
       const isActive = btn.dataset.active === 'true';
       try {
         await api.updateUser(btn.dataset.id, { is_active: !isActive });
-        toast('Användare uppdaterad', 'success');
+        toast('Uppdaterad', 'success');
         renderUsers(content);
       } catch (e) { toast(e.message, 'error'); }
     });
   });
 
-  // Permission checkboxes — debounced save
-  const permState = {};
+  // Spara roll + e-post + lösenord + can_upload per användare
+  content.querySelectorAll('.save-user-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.id;
+      const row = content.querySelector(`[data-user-id="${id}"]`);
+      const role     = /** @type {HTMLSelectElement|null} */ (row?.querySelector('.role-select'))?.value;
+      const email    = /** @type {HTMLInputElement|null} */ (row?.querySelector('.email-input'))?.value.trim();
+      const password = /** @type {HTMLInputElement|null} */ (row?.querySelector('.password-input'))?.value;
+      const canUpload = /** @type {HTMLInputElement|null} */ (row?.querySelector('.upload-toggle'))?.checked;
+      const patch = {};
+      if (role)       patch.role = role;
+      if (email)      patch.email = email;
+      if (password)   patch.password = password;
+      if (canUpload !== undefined) patch.can_upload = canUpload;
+      try {
+        await api.updateUser(id, patch);
+        toast('Ändringar sparade', 'success');
+        renderUsers(content);
+      } catch (e) { toast(e.message, 'error'); }
+    });
+  });
+
+  // Permission checkboxes
   content.querySelectorAll('.perm-checkbox').forEach((cb) => {
     cb.addEventListener('change', async () => {
-      const { user: uid, key } = cb.dataset;
-      if (!permState[uid]) permState[uid] = {};
-      permState[uid][key] = cb.checked;
-      // Hämta alla nuvarande perms för denna user och merge
+      const uid = /** @type {HTMLElement} */ (cb).dataset.user;
       const userPerms = {};
       content.querySelectorAll(`.perm-checkbox[data-user="${uid}"]`).forEach((c) => {
-        userPerms[c.dataset.key] = c.checked;
+        userPerms[/** @type {HTMLElement} */ (c).dataset.key] = /** @type {HTMLInputElement} */ (c).checked;
       });
       try {
         await api.setPermissions(uid, userPerms);

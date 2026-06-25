@@ -453,7 +453,7 @@ function setupPersonInput() {
   input.addEventListener('input', () => {
     const q = input.value.toLowerCase().trim();
     if (!q) { sugg.classList.add('hidden'); return; }
-    const matches = _allPersons.filter((p) => p.name.toLowerCase().includes(q) && !_personChips.find((c) => c.id === p.id)).slice(0, 8);
+    const matches = _allPersons.filter((p) => (p.name.toLowerCase().includes(q) || String(p.custom_id ?? '').toLowerCase().includes(q)) && !_personChips.find((c) => c.id === p.id)).slice(0, 8);
     if (!matches.length) { sugg.classList.add('hidden'); return; }
     const faceId = (p) => p.cover_face_id ?? p.fallback_face_id;
     sugg.innerHTML = matches.map((p) => `
@@ -464,7 +464,7 @@ function setupPersonInput() {
             ? `<img src="/api/faces/${faceId(p)}/thumb" class="w-full h-full object-cover" onerror="this.replaceWith(Object.assign(document.createElement('span'),{textContent:'👤',className:'text-sm'}))">`
             : '<span class="text-sm">👤</span>'}
         </div>
-        <span>${p.name}</span>
+        <span>${p.name}${p.custom_id != null ? ` <span class="text-slate-500">(${p.custom_id})</span>` : ''}</span>
         <span class="text-slate-500 ml-auto text-[10px]">${p.photo_count ?? ''}</span>
       </button>`).join('');
     positionDropdown(input, sugg);

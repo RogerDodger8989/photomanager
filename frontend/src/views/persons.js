@@ -27,6 +27,12 @@ function coverSrc(p) {
 
 // ── Edit Person Modal ─────────────────────────────────────────────────────────
 
+function ensureHttps(url) {
+  if (!url) return url;
+  if (/^https?:\/\//i.test(url)) return url;
+  return 'https://' + url;
+}
+
 function showEditPersonModal(person, onSave) {
   const overlay = document.createElement('div');
   overlay.className = 'fixed inset-0 z-[300] flex items-center justify-center bg-black/60 backdrop-blur-sm';
@@ -43,7 +49,18 @@ function showEditPersonModal(person, onSave) {
       <label class="text-xs text-slate-400 mb-1 block">Dödsår (valfritt)</label>
       <input id="ep-death" type="number" min="1900" max="2099" value="${person.death_year ?? ''}"
         placeholder="t.ex. 2020"
-        class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 mb-5">
+        class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 mb-3">
+      <label class="text-xs text-slate-400 mb-1 block">ID (valfritt)</label>
+      <input id="ep-cid" type="text" value="${(person.custom_id ?? '').replace(/"/g, '&quot;')}"
+        placeholder="t.ex. 42, A-12, FAM001"
+        class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 mb-3">
+      <label class="text-xs text-slate-400 mb-1 block">Extern länk (valfritt)</label>
+      <input id="ep-url" type="text" value="${(person.external_url ?? '').replace(/"/g, '&quot;')}"
+        placeholder="https://sv.wikipedia.org/wiki/..."
+        class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 mb-3">
+      <label class="text-xs text-slate-400 mb-1 block">Bio / notering (valfritt)</label>
+      <textarea id="ep-notes" rows="3" placeholder="T.ex. Min farmor från Malmö..."
+        class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 mb-5 resize-none">${(person.notes ?? '').replace(/</g, '&lt;')}</textarea>
       <div class="flex gap-2 justify-end">
         <button id="ep-cancel" class="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors rounded-lg hover:bg-slate-700">Avbryt</button>
         <button id="ep-ok" class="px-4 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors">Spara</button>
@@ -54,13 +71,23 @@ function showEditPersonModal(person, onSave) {
   const nameInput  = /** @type {HTMLInputElement|null} */ (overlay.querySelector('#ep-name'));
   const birthInput = /** @type {HTMLInputElement|null} */ (overlay.querySelector('#ep-birth'));
   const deathInput = /** @type {HTMLInputElement|null} */ (overlay.querySelector('#ep-death'));
+  const cidInput   = /** @type {HTMLInputElement|null} */ (overlay.querySelector('#ep-cid'));
+  const urlInput   = /** @type {HTMLInputElement|null} */ (overlay.querySelector('#ep-url'));
+  const notesInput = /** @type {HTMLTextAreaElement|null} */ (overlay.querySelector('#ep-notes'));
   nameInput?.focus(); nameInput?.select();
 
-  const original = { name: person.name ?? '', birth: String(person.birth_year ?? ''), death: String(person.death_year ?? '') };
+  const original = {
+    name: person.name ?? '', birth: String(person.birth_year ?? ''),
+    death: String(person.death_year ?? ''), cid: String(person.custom_id ?? ''),
+    url: person.external_url ?? '', notes: person.notes ?? '',
+  };
   const isDirty = () =>
     (nameInput?.value.trim() ?? '') !== original.name ||
     (birthInput?.value.trim() ?? '') !== original.birth ||
-    (deathInput?.value.trim() ?? '') !== original.death;
+    (deathInput?.value.trim() ?? '') !== original.death ||
+    (cidInput?.value.trim() ?? '') !== original.cid ||
+    (urlInput?.value.trim() ?? '') !== original.url ||
+    (notesInput?.value.trim() ?? '') !== original.notes;
 
   const doCancel = async () => {
     if (isDirty() && !await showSimpleConfirmModal({ title: 'Osparade ändringar', message: 'Du har osparade ändringar. Vill du ändå avbryta?' })) return;
@@ -69,20 +96,25 @@ function showEditPersonModal(person, onSave) {
   const doSave = () => {
     const name = nameInput?.value.trim();
     if (!name) return;
-    overlay.remove();
-    onSave({
+    const payload = {
       name,
-      birthYear: birthInput?.value ? parseInt(birthInput.value, 10) : null,
-      deathYear: deathInput?.value ? parseInt(deathInput.value, 10) : null,
-    });
+      birthYear:   birthInput?.value ? parseInt(birthInput.value, 10) : null,
+      deathYear:   deathInput?.value ? parseInt(deathInput.value, 10) : null,
+      customId:    cidInput?.value.trim() || null,
+      externalUrl: urlInput?.value.trim() ? ensureHttps(urlInput.value.trim()) : null,
+      notes:       notesInput?.value.trim() || null,
+    };
+    overlay.remove();
+    onSave(payload);
   };
 
   overlay.querySelector('#ep-ok')?.addEventListener('click', doSave);
   overlay.querySelector('#ep-cancel')?.addEventListener('click', doCancel);
   overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) doCancel(); });
-  [nameInput, birthInput, deathInput].forEach((inp) => {
+  [nameInput, birthInput, deathInput, cidInput, urlInput].forEach((inp) => {
     inp?.addEventListener('keydown', (e) => { if (/** @type {KeyboardEvent} */ (e).key === 'Enter') doSave(); if (/** @type {KeyboardEvent} */ (e).key === 'Escape') doCancel(); });
   });
+  notesInput?.addEventListener('keydown', (e) => { if (/** @type {KeyboardEvent} */ (e).key === 'Escape') doCancel(); });
 }
 
 // ── Merge Modal ───────────────────────────────────────────────────────────────
@@ -1296,7 +1328,7 @@ async function renderPersonList(container) {
           </div>
           <select id="persons-sort" class="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500">
             <option value="most_photos">Flest bilder</option>
-            <option value="least_photos">Färst bilder</option>
+            <option value="least_photos">Färst bilder ↑</option>
             <option value="name_asc">Namn A–Ö</option>
             <option value="name_desc">Namn Ö–A</option>
             <option value="newest">Nyast tillagd</option>
@@ -1359,7 +1391,7 @@ async function renderPersonList(container) {
       _allPersons = data ?? [];
       _selectedIds.clear();
       const q = /** @type {HTMLInputElement|null} */ (document.getElementById('person-search'))?.value?.toLowerCase() ?? '';
-      const filtered = q ? _allPersons.filter(p => p.name.toLowerCase().includes(q)) : _allPersons;
+      const filtered = q ? _allPersons.filter(p => p.name.toLowerCase().includes(q) || String(p.custom_id ?? '').includes(q)) : _allPersons;
       const merging = !document.getElementById('merge-toolbar')?.classList.contains('hidden');
       renderPersonGrid(filtered, merging);
     } catch (e) { toast(e.message, 'error'); }
@@ -1370,7 +1402,7 @@ async function renderPersonList(container) {
   // Sök
   document.getElementById('person-search')?.addEventListener('input', (e) => {
     const q = /** @type {HTMLInputElement} */ (e.target).value.toLowerCase();
-    const filtered = q ? _allPersons.filter(p => p.name.toLowerCase().includes(q)) : _allPersons;
+    const filtered = q ? _allPersons.filter(p => p.name.toLowerCase().includes(q) || String(p.custom_id ?? '').includes(q)) : _allPersons;
     const merging = !document.getElementById('merge-toolbar')?.classList.contains('hidden');
     renderPersonGrid(filtered, merging);
   });
@@ -1703,6 +1735,11 @@ async function renderRelationsTab(container, personId) {
         <!-- Lägg till relation -->
         <div class="border-t border-slate-700 pt-4">
           <div class="text-xs font-medium text-slate-400 mb-2">Lägg till relation</div>
+          <div class="flex gap-1.5 flex-wrap mb-2">
+            ${['Farmor','Farfar','Mormor','Morfar','Faster','Farbror','Moster','Morbror','Kusin','Barnbarn','Svärmor','Svärfar','Svägerska','Svåger'].map(lbl =>
+              `<button class="rel-quick px-2 py-0.5 text-xs bg-slate-700 hover:bg-blue-600 text-slate-300 hover:text-white rounded-full transition-colors" data-label="${lbl}">${lbl}</button>`
+            ).join('')}
+          </div>
           <div class="flex gap-2 flex-wrap">
             <select id="rel-type" class="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500">
               ${Object.entries(RELATION_LABELS).map(([v,l]) => `<option value="${v}">${l}</option>`).join('')}
@@ -1729,6 +1766,15 @@ async function renderRelationsTab(container, personId) {
           toast('Relation borttagen', 'success');
           reload();
         } catch (e) { toast(e.message, 'error'); }
+      });
+    });
+
+    container.querySelectorAll('.rel-quick').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const typeSelect  = /** @type {HTMLSelectElement|null} */ (container.querySelector('#rel-type'));
+        const labelInput  = /** @type {HTMLInputElement|null} */ (container.querySelector('#rel-label'));
+        if (typeSelect) typeSelect.value = 'other';
+        if (labelInput) { labelInput.value = /** @type {HTMLElement} */ (btn).dataset.label ?? ''; labelInput.focus(); }
       });
     });
 
@@ -1853,7 +1899,7 @@ function renderPersonGrid(persons, mergeMode) {
           ${src ? `<img src="${src}" class="w-full h-full object-cover" onerror="this.outerHTML='<div class=\\'w-full h-full flex items-center justify-center text-3xl\\'>👤</div>'">` : '<div class="w-full h-full flex items-center justify-center text-3xl">👤</div>'}
         </div>
         <div class="text-sm font-medium text-white truncate">${p.name}</div>
-        <div class="text-xs text-slate-400">${p.photo_count} bilder${p.birth_year ? ` · f. ${p.birth_year}` : ''}</div>
+        <div class="text-xs text-slate-400">${p.custom_id != null ? `#${p.custom_id} · ` : ''}${p.photo_count} bilder${p.birth_year ? ` · f. ${p.birth_year}` : ''}</div>
       </div>`;
   }).join('');
 
@@ -1934,22 +1980,44 @@ async function renderPersonDetail(container, personId) {
         ${src ? `<img src="${src}" class="w-full h-full object-cover" onerror="this.outerHTML='<div class=\\'w-full h-full flex items-center justify-center text-4xl\\'>👤</div>'">` : '<div class="w-full h-full flex items-center justify-center text-4xl">👤</div>'}
       </div>
       <div>
-        <div class="text-xl font-semibold text-white">${person.name}</div>
+        <div class="text-xl font-semibold text-white">${person.name}${person.custom_id != null ? ` <span class="text-base font-normal text-slate-400">(${person.custom_id})</span>` : ''}</div>
         <div class="text-sm text-slate-400">${assets.length} bilder${ageLabel ? ` · ${ageLabel}` : ''}</div>
-        <div class="flex gap-3 mt-1 flex-wrap">
+        <div class="flex gap-3 mt-1 flex-wrap items-center">
           <button id="edit-person-btn" class="text-blue-400 hover:text-blue-300 text-sm">Redigera</button>
-          <a id="export-person-btn" href="${api.personsExport(personId)}" download
-            class="text-slate-400 hover:text-white text-sm">⬇ Exportera JSON</a>
+          <button id="export-photos-btn" class="text-slate-400 hover:text-white text-sm">⬇ Exportera bilder</button>
+          ${person.external_url ? `<a href="${person.external_url}" target="_blank" rel="noopener noreferrer"
+            class="text-teal-400 hover:text-teal-300 text-sm">🔗 Extern sida ↗</a>` : ''}
         </div>
+        ${person.notes ? `<div class="text-xs text-slate-400 mt-1.5 max-w-sm leading-relaxed">${person.notes.replace(/</g, '&lt;')}</div>` : ''}
       </div>`;
 
+    document.getElementById('export-photos-btn')?.addEventListener('click', async () => {
+      const btn = /** @type {HTMLButtonElement} */ (document.getElementById('export-photos-btn'));
+      btn.textContent = '⏳ Förbereder…'; btn.disabled = true;
+      try {
+        const token = /** @type {any} */ (window).__pmToken ?? '';
+        const res = await fetch(api.personsExportPhotos(personId), { headers: { Authorization: `Bearer ${token}` } });
+        if (!res.ok) throw new Error(await res.text());
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = `${(person.name ?? 'person').replace(/[^a-zA-Z0-9åäöÅÄÖ_-]/g, '_')}_bilder.zip`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+      } catch (e) { toast('Kunde inte ladda ner: ' + e.message, 'error'); }
+      finally { btn.textContent = '⬇ Exportera bilder'; btn.disabled = false; }
+    });
+
     document.getElementById('edit-person-btn')?.addEventListener('click', () => {
-      showEditPersonModal(person, async ({ name, birthYear, deathYear }) => {
+      showEditPersonModal(person, async ({ name, birthYear, deathYear, customId, externalUrl, notes }) => {
         try {
-          await api.patchPerson(personId, { name, birthYear, deathYear });
-          person.name       = name;
-          person.birth_year = birthYear;
-          person.death_year = deathYear;
+          await api.patchPerson(personId, { name, birthYear, deathYear, customId, externalUrl, notes });
+          person.name         = name;
+          person.birth_year   = birthYear;
+          person.death_year   = deathYear;
+          person.custom_id    = customId;
+          person.external_url = externalUrl;
+          person.notes        = notes;
           updateHeader();
           toast('Sparat', 'success');
         } catch (e) { toast(e.message, 'error'); }

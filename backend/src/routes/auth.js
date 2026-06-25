@@ -39,7 +39,7 @@ export default async function authRoutes(fastify) {
     await updateLastLogin(user.id);
     const permissions = await getUserPermissions(user.id);
 
-    const payload = { id: user.id, username: user.username, role: user.role };
+    const payload = { id: user.id, username: user.username, role: user.role, can_upload: user.can_upload ?? false };
 
     const accessToken = fastify.jwt.sign(payload, {
       expiresIn: config.jwt.accessExpires,
@@ -102,7 +102,7 @@ export default async function authRoutes(fastify) {
     }
 
     const newAccessToken = fastify.jwt.sign(
-      { id: freshUser.id, username: freshUser.username, role: freshUser.role },
+      { id: freshUser.id, username: freshUser.username, role: freshUser.role, can_upload: freshUser.can_upload ?? false },
       { expiresIn: config.jwt.accessExpires }
     );
 

@@ -77,11 +77,22 @@ export default async function assetsRoutes(fastify) {
     const isAdmin = request.user.role === 'admin';
 
     const params = [limit + 1];
+    const userRole = request.user.role;
     let conditions = ["a.status = 'active'"];
 
-    // Gäster och icke-admins ser bara sina egna bilder om ownOnly är satt
-    if (ownOnly || (!isAdmin && request.user.role !== 'user')) {
-      conditions.push(`a.owner_id = $${params.push(userId)}`);
+    // Synlighetsfilter baserat på roll
+    if (!isAdmin) {
+      if (ownOnly) {
+        // Explicit eget filter — visa bara egna bilder
+        conditions.push(`a.owner_id = $${params.push(userId)}`);
+      } else {
+        // Visa bilder som användaren har rätt att se baserat på visibility + roll
+        conditions.push(
+          `(a.owner_id = $${params.push(userId)} OR a.visibility = 'shared'` +
+          (userRole === 'family' ? ` OR a.visibility = 'family'` : '') +
+          `)`
+        );
+      }
     }
 
     // Mappfiltrering — folderPath tar företräde över sourceFolder+subpath
@@ -131,7 +142,8 @@ export default async function assetsRoutes(fastify) {
       `SELECT a.id, a.file_name, a.mime_type, a.file_size, a.width, a.height,
               a.taken_at, a.indexed_at, a.thumb_small_path, a.thumb_large_path,
               a.location_label, a.view_count, a.duration, a.transcode_status,
-              a.owner_id, a.is_motion_photo, a.flag, a.color_label, a.rating,
+              a.is_motion_photo, a.flag, a.color_label, a.rating, a.visibility,
+              ${isAdmin ? 'a.owner_id,' : ''}
               ST_Y(a.location::geometry) AS lat,
               ST_X(a.location::geometry) AS lon,
               (EXISTS (SELECT 1 FROM favorites f WHERE f.asset_id = a.id AND f.user_id = $${params.push(userId)})) AS is_favorite
@@ -332,6 +344,7 @@ export default async function assetsRoutes(fastify) {
           colorLabel:    { type: 'integer', minimum: 0, maximum: 5 },
           title:         { type: ['string', 'null'] },
           description:   { type: ['string', 'null'] },
+          visibility:    { type: 'string', enum: ['private', 'family', 'shared'] },
         },
       },
     },
@@ -345,7 +358,7 @@ export default async function assetsRoutes(fastify) {
     if (!canWrite) return reply.status(403).send({ error: 'Saknar skrivrätt' });
 
     const { id } = request.params;
-    const { takenAt, tags, locationLabel, rating, flag, colorLabel, title, description } = request.body;
+    const { takenAt, tags, locationLabel, rating, flag, colorLabel, title, description, visibility } = request.body;
 
     if (takenAt) {
       await query('UPDATE assets SET taken_at = $1 WHERE id = $2', [takenAt, id]);
@@ -367,6 +380,13 @@ export default async function assetsRoutes(fastify) {
     }
     if (description !== undefined) {
       await query('UPDATE assets SET description = $1 WHERE id = $2', [description ?? null, id]);
+    }
+    if (visibility !== undefined) {
+      // Bara ägaren eller admin får ändra synlighet
+      const { rows: own } = await query('SELECT owner_id FROM assets WHERE id = $1', [id]);
+      if (own[0] && (own[0].owner_id === request.user.id || request.user.role === 'admin')) {
+        await query('UPDATE assets SET visibility = $1 WHERE id = $2', [visibility, id]);
+      }
     }
     if (rating !== undefined || title !== undefined || description !== undefined) {
       const { rows: ar } = await query('SELECT file_path FROM assets WHERE id = $1', [id]);
@@ -428,7 +448,7 @@ export default async function assetsRoutes(fastify) {
         a.id, a.file_name, a.file_size, a.mime_type, a.file_path,
         a.width, a.height, a.taken_at, a.indexed_at, a.view_count,
         a.file_hash, a.location_label, a.rating, a.title, a.description,
-        a.thumb_large_path,
+        a.thumb_large_path, a.visibility, a.owner_id,
         ST_Y(a.location::geometry) AS lat,
         ST_X(a.location::geometry) AS lon,
         u.username AS owner_name,
@@ -489,7 +509,7 @@ export default async function assetsRoutes(fastify) {
         folderPath,
         dimensions:    (a.width && a.height) ? `${a.width} × ${a.height}` : null,
         megaPixels:    mp ? `${mp} MP` : null,
-        uploadedBy:    a.owner_name ?? 'Okänd',
+        uploadedBy:    request.user.role === 'admin' ? (a.owner_name ?? 'Okänd') : null,
         thumbLargePath: a.thumb_large_path ?? null,
       },
       organization: {
@@ -528,6 +548,8 @@ export default async function assetsRoutes(fastify) {
         viewCount:       a.view_count ?? 0,
         sharedWith:      a.shared_with ?? [],
         indexedAt:       a.indexed_at,
+        visibility:      a.visibility ?? 'family',
+        isOwner:         a.owner_id === request.user.id || request.user.role === 'admin',
       },
     }});
   });

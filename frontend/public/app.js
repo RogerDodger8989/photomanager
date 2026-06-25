@@ -162,7 +162,7 @@ async function showPersonDropdown(q) {
   const dropdown = getPersonDropdown();
   if (!q) { dropdown.classList.add('hidden'); return; }
   await ensurePersonsLoaded();
-  const matches = _personSuggestions.filter((p) => p.name.toLowerCase().includes(q.toLowerCase())).slice(0, 6);
+  const matches = _personSuggestions.filter((p) => p.name.toLowerCase().includes(q.toLowerCase()) || String(p.custom_id ?? '').toLowerCase().includes(q.toLowerCase())).slice(0, 6);
   if (!matches.length) { dropdown.classList.add('hidden'); return; }
   dropdown.innerHTML = matches.map((p) => `
     <button data-pid="${p.id}" class="w-full flex items-center gap-3 px-3 py-2 hover:bg-slate-700 text-left transition-colors">
@@ -173,7 +173,7 @@ async function showPersonDropdown(q) {
             ? `<img src="/thumbs/${p.cover_thumb}" class="w-full h-full object-cover" onerror="this.replaceWith(Object.assign(document.createElement('span'),{textContent:'👤',className:'text-sm'}))">`
             : '<span class="text-sm">👤</span>'}
       </div>
-      <span class="text-sm text-white">${p.name}</span>
+      <span class="text-sm text-white">${p.name}${p.custom_id != null ? ` <span class="text-slate-500 text-xs">(${p.custom_id})</span>` : ''}</span>
       <span class="text-xs text-slate-400 ml-auto">${p.photo_count} bilder</span>
     </button>`).join('');
   dropdown.classList.remove('hidden');

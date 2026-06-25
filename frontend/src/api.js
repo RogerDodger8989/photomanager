@@ -124,7 +124,8 @@ export const api = {
   // Settings
   getSettings:   ()             => request('GET', '/api/settings'),
   patchSettings: (body)         => request('PATCH', '/api/settings', body),
-  personsExport: (id)           => `/api/persons/${id}/export`,
+  personsExport:       (id) => `/api/persons/${id}/export`,
+  personsExportPhotos: (id) => `/api/persons/${id}/export-photos`,
   personsDuplicates: ()         => request('GET', '/api/persons/duplicates'),
   personRelations:   (id)       => request('GET', `/api/persons/${id}/relations`),
   addRelation:       (id, body) => request('POST', `/api/persons/${id}/relations`, body),

@@ -186,7 +186,7 @@ export default async function adminRoutes(fastify) {
   // GET /api/admin/users — lista alla användare
   fastify.get('/api/admin/users', async (request, reply) => {
     const { rows } = await query(
-      `SELECT u.id, u.username, u.email, u.role, u.is_active,
+      `SELECT u.id, u.username, u.email, u.role, u.is_active, u.can_upload,
               u.created_at, u.last_login,
               COALESCE(
                 json_object_agg(up.permission_key, up.value)
@@ -211,18 +211,21 @@ export default async function adminRoutes(fastify) {
           username: { type: 'string', minLength: 2 },
           email:    { type: 'string' },
           password: { type: 'string', minLength: 8 },
-          role:     { type: 'string', enum: ['admin', 'user', 'guest'] },
+          role:       { type: 'string', enum: ['admin', 'family', 'user', 'guest'] },
+          can_upload: { type: 'boolean' },
         },
       },
     },
   }, async (request, reply) => {
-    const { username, email, password, role } = request.body;
+    const { username, email, password, role, can_upload } = request.body;
     const hash = await bcrypt.hash(password, 12);
+    // Admins och family-users kan ladda upp som default
+    const uploadDefault = can_upload ?? (role === 'admin' || role === 'family');
     const { rows } = await query(
-      `INSERT INTO users (id, username, email, password_hash, role)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING id, username, email, role, created_at`,
-      [uuidv4(), username, email ?? null, hash, role]
+      `INSERT INTO users (id, username, email, password_hash, role, can_upload)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id, username, email, role, can_upload, created_at`,
+      [uuidv4(), username, email ?? null, hash, role, uploadDefault]
     );
     return reply.status(201).send({ data: rows[0] });
   });
@@ -233,16 +236,17 @@ export default async function adminRoutes(fastify) {
       body: {
         type: 'object',
         properties: {
-          email:     { type: 'string' },
-          role:      { type: 'string', enum: ['admin', 'user', 'guest'] },
-          is_active: { type: 'boolean' },
-          password:  { type: 'string', minLength: 8 },
+          email:      { type: 'string' },
+          role:       { type: 'string', enum: ['admin', 'family', 'user', 'guest'] },
+          is_active:  { type: 'boolean' },
+          password:   { type: 'string', minLength: 8 },
+          can_upload: { type: 'boolean' },
         },
       },
     },
   }, async (request, reply) => {
     const { id } = request.params;
-    const { email, role, is_active, password } = request.body;
+    const { email, role, is_active, password, can_upload } = request.body;
 
     if (email !== undefined) {
       await query('UPDATE users SET email = $1 WHERE id = $2', [email, id]);
@@ -256,6 +260,9 @@ export default async function adminRoutes(fastify) {
     if (password) {
       const hash = await bcrypt.hash(password, 12);
       await query('UPDATE users SET password_hash = $1 WHERE id = $2', [hash, id]);
+    }
+    if (can_upload !== undefined) {
+      await query('UPDATE users SET can_upload = $1 WHERE id = $2', [can_upload, id]);
     }
 
     return reply.send({ data: { ok: true } });
