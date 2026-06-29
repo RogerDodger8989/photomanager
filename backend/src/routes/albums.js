@@ -85,7 +85,11 @@ export default async function albumsRoutes(fastify) {
     const { rows: assets } = await query(
       `SELECT a.id, a.file_name, a.mime_type, a.taken_at,
               a.thumb_small_path, a.thumb_large_path, a.duration,
+              a.rating, a.flag, a.color_label, a.width, a.height,
+              a.file_size, a.indexed_at, a.is_motion_photo, a.title,
+              a.stack_id, a.location_label,
               aa.sort_order,
+              (SELECT COUNT(*)::int FROM assets s WHERE s.stack_id = a.stack_id AND s.status = 'active') AS stack_size,
               EXISTS(SELECT 1 FROM favorites fv WHERE fv.asset_id = a.id AND fv.user_id = $2) AS is_favorite
        FROM album_assets aa
        JOIN assets a ON a.id = aa.asset_id AND a.status = 'active'
@@ -194,7 +198,7 @@ export default async function albumsRoutes(fastify) {
     },
   }, async (request, reply) => {
     const { rules = [], ruleLogic = 'ALL' } = request.body;
-    const count = await previewSmartAlbumCount(request.user.id, rules, ruleLogic);
+    const count = await previewSmartAlbumCount(request.user.id, rules, ruleLogic, request.user.role === 'admin');
     return reply.send({ data: { count } });
   });
 
@@ -243,7 +247,7 @@ export default async function albumsRoutes(fastify) {
       );
     }
 
-    const count = await rebuildSmartAlbum(id, request.user.id, rules, ruleLogic);
+    const count = await rebuildSmartAlbum(id, request.user.id, rules, ruleLogic, request.user.role === 'admin');
     return reply.send({ data: { ok: true, assetCount: count } });
   });
 
@@ -261,7 +265,7 @@ export default async function albumsRoutes(fastify) {
       'SELECT rule_type, value FROM smart_album_rules WHERE album_id = $1 ORDER BY sort_order',
       [id]
     );
-    const count = await rebuildSmartAlbum(id, request.user.id, rules, rows[0].rule_logic);
+    const count = await rebuildSmartAlbum(id, request.user.id, rules, rows[0].rule_logic, request.user.role === 'admin');
     return reply.send({ data: { ok: true, assetCount: count } });
   });
 }
@@ -314,36 +318,39 @@ function buildRuleClauses(rules, userId, params) {
   return clauses;
 }
 
-async function previewSmartAlbumCount(userId, rules, logic) {
+async function previewSmartAlbumCount(userId, rules, logic, isAdmin = false) {
   if (!rules.length) return 0;
-  const params = [userId];
+  // isAdmin: start empty — no owner filter, so $1 must not be unused userId
+  const params = isAdmin ? [] : [userId];
   const clauses = buildRuleClauses(rules, userId, params);
   if (!clauses.length) return 0;
   const joiner = logic === 'ANY' ? ' OR ' : ' AND ';
   const where = clauses.map((c) => `(${c})`).join(joiner);
+  const ownerClause = isAdmin ? '' : `a.owner_id = $1 AND `;
   const { rows } = await query(
-    `SELECT COUNT(*)::int AS cnt FROM assets a WHERE a.owner_id = $1 AND a.status = 'active' AND (${where})`,
+    `SELECT COUNT(*)::int AS cnt FROM assets a WHERE ${ownerClause}a.status = 'active' AND (${where})`,
     params
   );
   return rows[0]?.cnt ?? 0;
 }
 
-async function rebuildSmartAlbum(albumId, userId, rules, logic) {
+async function rebuildSmartAlbum(albumId, userId, rules, logic, isAdmin = false) {
   await query('DELETE FROM album_assets WHERE album_id = $1', [albumId]);
   if (!rules.length) return 0;
 
-  const params = [albumId, userId];
+  const params = isAdmin ? [albumId] : [albumId, userId];
   const clauses = buildRuleClauses(rules, userId, params);
   if (!clauses.length) return 0;
 
   const joiner = logic === 'ANY' ? ' OR ' : ' AND ';
   const where = clauses.map((c) => `(${c})`).join(joiner);
+  const ownerClause = isAdmin ? '' : `a.owner_id = $2 AND `;
 
   const { rowCount } = await query(
     `INSERT INTO album_assets (album_id, asset_id, sort_order)
      SELECT $1, a.id, ROW_NUMBER() OVER (ORDER BY a.taken_at DESC)
      FROM assets a
-     WHERE a.owner_id = $2 AND a.status = 'active'
+     WHERE ${ownerClause}a.status = 'active'
        AND (${where})
      ON CONFLICT DO NOTHING`,
     params

@@ -20,8 +20,9 @@ const FLAG_SVG = `<svg viewBox="0 0 16 16" fill="currentColor" xmlns="http://www
  * @param {Function} onClick
  * @param {Function} [onFavChange]
  * @param {{items:string[], position:string, colorLabels:object}|null} [ts] thumbSettings
+ * @param {{onExpandStack?: (asset:object)=>void}} [opts]
  */
-export function buildPhotoCell(asset, onClick, onFavChange, ts = null) {
+export function buildPhotoCell(asset, onClick, onFavChange, ts = null, { onExpandStack = null } = {}) {
   const cell = document.createElement('div');
   const isStack = asset.stack_id && asset.stack_size > 1;
   cell.className = 'photo-cell group';
@@ -94,9 +95,11 @@ export function buildPhotoCell(asset, onClick, onFavChange, ts = null) {
           </div>
         </div>` : ''}
       ${isStack ? `
-        <div class="absolute top-1 left-1 pointer-events-none">
-          <span class="bg-black/70 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none">${asset.stack_size}</span>
-        </div>` : ''}
+        <button class="stack-badge absolute top-7 left-0 z-10 px-0.5 py-0.5" title="Klicka för att expandera / minimera stack">
+          <span class="bg-slate-900/85 text-white text-[11px] font-bold px-2 py-1 rounded-md leading-none flex items-center gap-1 hover:bg-violet-700 transition-colors border border-white/20">
+            <span class="stack-icon">▸</span><span class="stack-count">${asset.stack_size}</span>
+          </span>
+        </button>` : ''}
       <div class="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors pointer-events-none"></div>
       <button class="fav-heart${asset.is_favorite ? ' is-fav' : ''}" title="${asset.is_favorite ? 'Ta bort favorit' : 'Lägg till favorit'}">
         ${HEART_SVG}
@@ -107,8 +110,8 @@ export function buildPhotoCell(asset, onClick, onFavChange, ts = null) {
     </div>
     ${infoStripHtml}`;
 
-  cell.addEventListener('click', (e) => {
-    if (!(/** @type {Element} */ (e.target)).closest('.fav-heart')) onClick();
+  cell.addEventListener('dblclick', (e) => {
+    if (!(/** @type {Element} */ (e.target)).closest('.fav-heart, .stack-badge')) onClick();
   });
 
   const heartBtn = cell.querySelector('.fav-heart');
@@ -117,6 +120,24 @@ export function buildPhotoCell(asset, onClick, onFavChange, ts = null) {
     e.stopPropagation();
     toggleFav(asset, heartBtn, onFavChange);
   });
+
+  // ── Stack-badge click → expandera/minimera ──
+  const stackBadgeBtn = /** @type {HTMLElement|null} */ (cell.querySelector('.stack-badge'));
+  if (stackBadgeBtn && onExpandStack) {
+    stackBadgeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      onExpandStack(asset);
+    });
+  }
+
+  // ── Drag source (HTML5 D&D) ──
+  cell.draggable = true;
+  cell.addEventListener('dragstart', (e) => {
+    e.dataTransfer.effectAllowed = 'copy';
+    e.dataTransfer.setData('text/plain', JSON.stringify({ id: asset.id, stackId: asset.stack_id ?? null }));
+    setTimeout(() => cell.classList.add('opacity-60'), 0);
+  });
+  cell.addEventListener('dragend', () => cell.classList.remove('opacity-60'));
 
   return cell;
 }
@@ -161,6 +182,13 @@ export function showAssetContextMenu(e, asset, {
   index,
   onAddToAlbum,
   onRefresh,
+  onStackCreated = null,
+  onRemoved = null,
+  onExpandStack = null,
+  onCollapseStack = null,
+  isExpanded = null,
+  onManageStack = null,
+  onDissolveStack = null,
 } = {}) {
   e.preventDefault();
   document.querySelectorAll('.asset-ctx-menu').forEach((m) => m.remove());
@@ -463,17 +491,32 @@ export function showAssetContextMenu(e, asset, {
     stackBtn.addEventListener('click', async () => {
       close();
       const { createStack } = await import('./contextActions/stackAction.js');
-      createStack(targetAssets, onRefresh);
+      createStack(targetAssets, { onRefresh, onStackCreated });
     });
     menu.append(sep(), stackBtn);
   } else if (asset.stack_id) {
-    const unStackBtn = item('🗂️', 'Ta bort från stack');
+    const expanded = isExpanded?.(asset.stack_id);
+    const expandBtn = item('🗂️', expanded ? 'Minimera stack' : 'Expandera stack');
+    expandBtn.addEventListener('click', () => {
+      close();
+      if (expanded) onCollapseStack?.(asset);
+      else onExpandStack?.(asset);
+    });
+
+    const manageBtn = item('⚙️', 'Hantera stack…');
+    manageBtn.addEventListener('click', () => { close(); onManageStack?.(asset); });
+
+    const unStackBtn = item('↩️', 'Ta bort från stack');
     unStackBtn.addEventListener('click', async () => {
       close();
       const { removeFromStack } = await import('./contextActions/stackAction.js');
-      removeFromStack(asset, onRefresh);
+      removeFromStack(asset, { onRefresh, onRemoved });
     });
-    menu.append(sep(), unStackBtn);
+
+    const dissolveBtn = item('💥', 'Lös upp stack', 'text-orange-400');
+    dissolveBtn.addEventListener('click', () => { close(); onDissolveStack?.(asset); });
+
+    menu.append(sep(), expandBtn, manageBtn, unStackBtn, dissolveBtn);
   }
 
   // ── Radera ────────────────────────────────────────────────────────────────
@@ -735,6 +778,35 @@ function _refreshCellOverlay(asset) {
     }
   } else if (existingRating) {
     existingRating.style.display = 'none';
+  }
+}
+
+// ── Stack-badge refresh ───────────────────────────────────────────────────────
+export function refreshCellStackBadge(assetId, newSize) {
+  const cell = /** @type {HTMLElement|null} */ (document.querySelector(`.photo-cell[data-id="${assetId}"]`));
+  if (!cell) return;
+  const wrap = cell.querySelector('.photo-img-wrap');
+
+  if (newSize >= 2) {
+    const existing = cell.querySelector('.stack-badge');
+    if (existing) {
+      const countEl = existing.querySelector('.stack-count');
+      if (countEl) countEl.textContent = String(newSize);
+    } else if (wrap) {
+      const btn = document.createElement('button');
+      btn.className = 'stack-badge absolute top-1 left-1 z-10';
+      btn.title = 'Expandera / Minimera stack';
+      btn.innerHTML = `<span class="bg-slate-900/85 text-white text-[11px] font-bold px-2 py-1 rounded-md leading-none flex items-center gap-1 hover:bg-violet-700 transition-colors border border-white/20"><span class="stack-icon">▸</span><span class="stack-count">${newSize}</span></span>`;
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        cell.dispatchEvent(new CustomEvent('pm:stack-badge-click', { bubbles: true, detail: { assetId } }));
+      });
+      wrap.appendChild(btn);
+    }
+    wrap?.classList.add('is-stack-wrap');
+  } else {
+    cell.querySelector('.stack-badge')?.remove();
+    wrap?.classList.remove('is-stack-wrap');
   }
 }
 

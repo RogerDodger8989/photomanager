@@ -113,6 +113,10 @@ export async function renderTags(container) {
           <div id="tem-person-fields" class="hidden space-y-2 pl-4 border-l border-slate-600">
             <div class="flex gap-2">
               <div class="flex-1">
+                <label class="block text-slate-400 text-xs mb-1">ID (valfritt)</label>
+                <input id="tem-cid" type="text" placeholder="t.ex. LL30LL" class="w-full bg-slate-700 border border-slate-600 rounded px-2 py-1 text-slate-100 text-sm focus:outline-none">
+              </div>
+              <div class="flex-1">
                 <label class="block text-slate-400 text-xs mb-1">Födelseår</label>
                 <input id="tem-birth" type="number" min="1000" max="2100" class="w-full bg-slate-700 border border-slate-600 rounded px-2 py-1 text-slate-100 text-sm focus:outline-none">
               </div>
@@ -232,7 +236,7 @@ function _renderTree() {
     /** @type {Array<any>} */
     const hits = [];
     _flatMap.forEach((n) => {
-      if (n.name.toLowerCase().includes(q) || (n.path ?? '').toLowerCase().includes(q)) hits.push(n);
+      if (n.name.toLowerCase().includes(q) || (n.path ?? '').toLowerCase().includes(q) || (n.custom_id ?? '').toLowerCase().includes(q)) hits.push(n);
     });
     tree.innerHTML = hits.map((n) => _nodeHtml(n, 0)).join('');
     return;
@@ -320,6 +324,9 @@ function _nodeHtml(node, depth, hasChildren = false, expanded = false) {
       ${node.show_lifespan && (node.birth_year || node.death_year)
         ? `<span class="text-slate-500 text-xs">(${node.birth_year ?? ''}–${node.death_year ?? ''})</span>`
         : ''}
+      ${node.custom_id != null
+        ? `<span class="text-slate-500 text-xs ml-0.5 cursor-pointer hover:text-slate-300 select-none tag-cid-badge" data-cid="${_esc(node.custom_id)}" title="Klicka för att kopiera ID">🪪 ${_esc(node.custom_id)}</span>`
+        : ''}
     </span>
     ${countBadge}
   </div>`;
@@ -364,7 +371,8 @@ async function _showTagDetail(tagId) {
           <div class="text-slate-500 text-xs mb-0.5">${_esc(node.path ?? node.name)}</div>
           <h2 class="text-slate-100 font-semibold text-lg">${_esc(node.name)}</h2>
           ${node.show_lifespan && (node.birth_year || node.death_year)
-            ? `<div class="text-slate-400 text-sm">${node.birth_year ?? ''}–${node.death_year ?? ''}</div>` : ''}
+            ? `<div class="text-slate-400 text-sm">${node.birth_year ?? ''}–${node.death_year ?? ''}${node.custom_id != null ? ` <span class="cursor-pointer hover:text-white tag-cid-badge" data-cid="${_esc(node.custom_id)}" title="Klicka för att kopiera ID">🪪 ${_esc(node.custom_id)}</span>` : ''}</div>`
+            : node.custom_id != null ? `<div class="text-slate-400 text-sm cursor-pointer hover:text-white tag-cid-badge" data-cid="${_esc(node.custom_id)}" title="Klicka för att kopiera ID">🪪 ${_esc(node.custom_id)}</div>` : ''}
         </div>
         <div class="flex gap-2">
           <button id="td-rules-btn" class="px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 text-xs text-slate-300">📁 Mappregeler</button>
@@ -382,6 +390,13 @@ async function _showTagDetail(tagId) {
 
   document.getElementById('td-edit-btn')?.addEventListener('click', () => _openEditModal(tagId));
   document.getElementById('td-rules-btn')?.addEventListener('click', _openRulesModal);
+  document.querySelectorAll('.tag-cid-badge').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const cid = /** @type {HTMLElement} */ (el).dataset.cid ?? '';
+      navigator.clipboard.writeText(cid).then(() => showToast(`Kopierade ID: ${cid}`, 'success'));
+    });
+  });
 
   // Synonymer
   _loadSynonyms(tagId);
@@ -489,6 +504,8 @@ async function _openEditModal(tagId) {
   if (synExEl) synExEl.checked = node.export_synonyms ?? _settings?.default_export_synonyms ?? true;
   birthEl.value  = node.birth_year ?? '';
   deathEl.value  = node.death_year ?? '';
+  const cidEl = document.getElementById('tem-cid');
+  if (cidEl) cidEl.value = node.custom_id ?? '';
   const lifRow = document.getElementById('tem-show-lifespan-row');
   const updatePersonFields = () => {
     pfEl?.classList.toggle('hidden', !faceEl.checked);
@@ -563,6 +580,7 @@ async function _openEditModal(tagId) {
         export_synonyms:  synExEl ? synExEl.checked : true,
         birth_year:       birthEl.value ? Number(birthEl.value) : null,
         death_year:       deathEl.value ? Number(deathEl.value) : null,
+        custom_id:        document.getElementById('tem-cid')?.value.trim() || null,
       });
       modal.classList.add('hidden');
       showToast('Tagg sparad', 'success');
@@ -1116,8 +1134,24 @@ function _bindStaticEvents() {
     if (node) _openEditModal(/** @type {HTMLElement} */ (node).dataset.id ?? '');
   });
 
+  // Klick på ID-badge — kopiera till urklipp
+  document.getElementById('tag-tree')?.addEventListener('click', (e) => {
+    const badge = /** @type {HTMLElement} */ (e.target).closest('.tag-cid-badge');
+    if (!badge) return;
+    e.stopPropagation();
+    const cid = /** @type {HTMLElement} */ (badge).dataset.cid ?? '';
+    navigator.clipboard.writeText(cid).then(() => showToast(`Kopierade ID: ${cid}`, 'success'));
+  });
+
   // Högerklick
   document.getElementById('tag-tree')?.addEventListener('contextmenu', (e) => {
+    const badge = /** @type {HTMLElement} */ (e.target).closest('.tag-cid-badge');
+    if (badge) {
+      e.preventDefault();
+      const cid = /** @type {HTMLElement} */ (badge).dataset.cid ?? '';
+      navigator.clipboard.writeText(cid).then(() => showToast(`Kopierade ID: ${cid}`, 'success'));
+      return;
+    }
     const node = /** @type {HTMLElement} */ (e.target).closest('.tag-node');
     if (node) _showContextMenu(/** @type {MouseEvent} */ (e), /** @type {HTMLElement} */ (node).dataset.id ?? '');
   });

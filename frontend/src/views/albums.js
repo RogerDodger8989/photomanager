@@ -224,11 +224,24 @@ async function renderAlbumDetail(container, albumId) {
       <button onclick="location.hash='#/albums'" class="text-slate-400 hover:text-white text-sm mb-4 flex items-center gap-1 w-fit">
         ← Alla album
       </button>
-      <div id="album-header" class="mb-4">
+      <div id="album-header" class="mb-3">
         <div id="album-title-row" class="flex items-center gap-2 flex-wrap"></div>
         <div id="album-desc-row" class="mt-1"></div>
       </div>
-      <div id="album-sel-toolbar" class="flex items-center gap-2 flex-wrap mb-3 min-h-[2rem]"></div>
+      <div id="album-controls" class="flex items-center gap-2 flex-wrap mb-2 min-h-[2rem]">
+        <div id="album-sel-toolbar" class="flex items-center gap-2 flex-wrap flex-1"></div>
+        <div class="flex items-center gap-1.5 flex-shrink-0">
+          <label class="text-xs text-slate-500">Sortera:</label>
+          <select id="album-sort" class="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500">
+            <option value="date_desc">Datum (nyast)</option>
+            <option value="date_asc">Datum (äldst)</option>
+            <option value="name_asc">Filnamn A→Z</option>
+            <option value="name_desc">Filnamn Z→A</option>
+            <option value="rating_desc">Betyg (högt)</option>
+            <option value="custom">Albumordning</option>
+          </select>
+        </div>
+      </div>
       <div id="album-grid" class="grid gap-0.5 flex-1" style="grid-template-columns: repeat(auto-fill, minmax(160px, 1fr))">
         <div class="col-span-full text-slate-400 text-sm p-2">Laddar…</div>
       </div>
@@ -239,7 +252,6 @@ async function renderAlbumDetail(container, albumId) {
 
 async function loadAlbumDetail(container, albumId) {
   try {
-    // Hämta alla bilder (paginerar internt)
     const first = await api.album(albumId, { limit: 200, offset: 0 });
     const album = first.data.album;
     let allAssets = [...first.data.assets];
@@ -251,7 +263,6 @@ async function loadAlbumDetail(container, albumId) {
       if (page.data.assets.length < 200) break;
     }
 
-    // Header: titel (inline-edit) + beskrivning
     const titleRow = document.getElementById('album-title-row');
     const descRow  = document.getElementById('album-desc-row');
 
@@ -264,6 +275,7 @@ async function loadAlbumDetail(container, albumId) {
           <button id="edit-rules-btn" class="text-xs text-violet-300 hover:text-violet-200 px-2 py-1 rounded hover:bg-slate-700 transition-colors">✨ Redigera regler</button>
           <button id="rebuild-now-btn" class="text-xs text-violet-300 hover:text-violet-200 px-2 py-1 rounded hover:bg-slate-700 transition-colors">🔄 Uppdatera</button>` : ''}
         <button id="share-album-btn" class="text-xs text-blue-400 hover:text-blue-300 px-2 py-1 rounded hover:bg-slate-700 transition-colors ml-auto">🔗 Dela album</button>`;
+
       titleRow.querySelector('#edit-rules-btn')?.addEventListener('click', () => {
         showRuleBuilderModal(album, async (rules, ruleLogic) => {
           try {
@@ -273,11 +285,9 @@ async function loadAlbumDetail(container, albumId) {
           } catch (e) { toast(e.message, 'error'); }
         });
       });
-
       titleRow.querySelector('#share-album-btn')?.addEventListener('click', () => {
         openShareModal({ albumId: albumId, name: album.name });
       });
-
       titleRow.querySelector('#rebuild-now-btn')?.addEventListener('click', async () => {
         try {
           const { data } = await api.rebuildAlbum(albumId);
@@ -285,7 +295,6 @@ async function loadAlbumDetail(container, albumId) {
           loadAlbumDetail(container, albumId);
         } catch (e) { toast(e.message, 'error'); }
       });
-
       titleRow.querySelector('#album-name-display')?.addEventListener('click', async () => {
         const name = await promptModal('Byt albumnamn', 'Albumnamn', album.name, false);
         if (!name?.trim() || name.trim() === album.name) return;
@@ -318,15 +327,12 @@ async function loadAlbumDetail(container, albumId) {
     renderTitle();
     renderDesc();
 
-    // Grid med bilder
     const grid = document.getElementById('album-grid');
     if (!grid) return;
-    if (!allAssets.length) {
-      grid.innerHTML = `<div class="col-span-full text-slate-400 text-sm p-2">Albumet är tomt. Lägg till bilder via Bilder-fliken (markera bilder → 📁 Lägg till i album).</div>`;
-      return;
-    }
 
-    // Selection manager med "Ta bort från album"-action
+    const _ts = await getThumbSettings().catch(() => null);
+    let currentSort = 'date_desc';
+
     const sel = createSelectionManager(
       () => document.getElementById('album-grid'),
       () => allAssets,
@@ -336,15 +342,9 @@ async function loadAlbumDetail(container, albumId) {
         onClick: async (ids) => {
           const count = ids.length;
           await Promise.all(ids.map((id) => api.removeFromAlbum(albumId, id).catch(() => {})));
-          ids.forEach((id) => {
-            document.getElementById('album-grid')?.querySelector(`[data-id="${id}"]`)?.remove();
-          });
           allAssets = allAssets.filter((a) => !ids.includes(a.id));
           sel.clearAll();
-          const g = document.getElementById('album-grid');
-          if (g && !g.querySelector('[data-id]')) {
-            g.innerHTML = '<div class="col-span-full text-slate-400 text-sm p-2">Albumet är tomt.</div>';
-          }
+          renderGrid();
           toast(`${count} bild${count > 1 ? 'er' : ''} borttagen${count > 1 ? 'a' : ''} från albumet`, 'success');
         },
       }],
@@ -353,67 +353,91 @@ async function loadAlbumDetail(container, albumId) {
     const toolbarEl = document.getElementById('album-sel-toolbar');
     if (toolbarEl) sel.mountToolbar(toolbarEl);
 
-    grid.innerHTML = '';
-    const _ts = await getThumbSettings().catch(() => null);
-    allAssets.forEach((asset, i) => {
-      const cell = buildPhotoCell(
-        asset,
-        () => openLightbox(allAssets, i),
-        undefined,
-        _ts,
-      );
-
-      sel.attachToCell(cell, asset, i);
-
-      // Hover-overlay: ta bort + sätt som omslag
-      const overlay = document.createElement('div');
-      overlay.className = 'album-cell-overlay absolute inset-0 flex items-end justify-between p-1.5 opacity-0 hover:opacity-100 transition-opacity pointer-events-none';
-      overlay.style.background = 'linear-gradient(to top, rgba(0,0,0,0.7) 0%, transparent 60%)';
-      overlay.innerHTML = `
-        <button class="set-cover-btn pointer-events-auto text-xs bg-black/50 hover:bg-blue-600 text-white px-2 py-0.5 rounded transition-colors"
-                title="Sätt som omslag">🖼</button>
-        <button class="remove-from-album-btn pointer-events-auto text-xs bg-black/50 hover:bg-red-600 text-white px-2 py-0.5 rounded transition-colors"
-                title="Ta bort från album">✕</button>`;
-
-      cell.style.position = 'relative';
-      cell.appendChild(overlay);
-
-      overlay.querySelector('.set-cover-btn')?.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        try {
-          await api.updateAlbum(albumId, { coverAssetId: asset.id });
-          toast('Omslag uppdaterat', 'success');
-        } catch (err) { toast(err.message, 'error'); }
+    const sortSelect = /** @type {HTMLSelectElement|null} */ (document.getElementById('album-sort'));
+    if (sortSelect) {
+      sortSelect.addEventListener('change', () => {
+        currentSort = sortSelect.value;
+        renderGrid();
       });
+    }
 
-      overlay.querySelector('.remove-from-album-btn')?.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        try {
-          await api.removeFromAlbum(albumId, asset.id);
-          cell.remove();
-          allAssets.splice(i, 1);
-          if (!grid.querySelector('[data-id]')) {
-            grid.innerHTML = '<div class="col-span-full text-slate-400 text-sm p-2">Albumet är tomt.</div>';
-          }
-        } catch (err) { toast(err.message, 'error'); }
-      });
+    const getSorted = () => {
+      const sorted = [...allAssets];
+      switch (currentSort) {
+        case 'date_asc':    sorted.sort((a, b) => new Date(a.taken_at ?? 0).getTime() - new Date(b.taken_at ?? 0).getTime()); break;
+        case 'date_desc':   sorted.sort((a, b) => new Date(b.taken_at ?? 0).getTime() - new Date(a.taken_at ?? 0).getTime()); break;
+        case 'name_asc':    sorted.sort((a, b) => (a.file_name ?? '').localeCompare(b.file_name ?? '')); break;
+        case 'name_desc':   sorted.sort((a, b) => (b.file_name ?? '').localeCompare(a.file_name ?? '')); break;
+        case 'rating_desc': sorted.sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0)); break;
+        case 'custom':      sorted.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)); break;
+      }
+      return sorted;
+    };
 
-      // Högerklicksmeny
-      cell.addEventListener('contextmenu', (e) => {
-        showAssetContextMenu(e, asset, {
-          selectionManager: sel,
-          getAllAssets: () => allAssets,
-          openLightboxFn: openLightbox,
-          allAssets,
-          index: i,
-          onAddToAlbum: null,
-          onDelete: (id) => { allAssets = allAssets.filter((a) => a.id !== id); },
-          onRefresh: () => { loadAlbumDetail(container, albumId); },
+    const renderGrid = () => {
+      if (!allAssets.length) {
+        grid.innerHTML = `<div class="col-span-full text-slate-400 text-sm p-2">Albumet är tomt. Lägg till bilder via Bilder-fliken (markera bilder → 📁 Lägg till i album).</div>`;
+        return;
+      }
+      grid.innerHTML = '';
+      const display = getSorted();
+      display.forEach((asset, i) => {
+        const cell = buildPhotoCell(
+          asset,
+          () => openLightbox(display, i),
+          undefined,
+          _ts,
+        );
+
+        sel.attachToCell(cell, asset, allAssets.indexOf(asset));
+
+        const hoverOverlay = document.createElement('div');
+        hoverOverlay.className = 'album-cell-overlay absolute inset-0 flex items-end justify-between p-1.5 opacity-0 hover:opacity-100 transition-opacity pointer-events-none';
+        hoverOverlay.style.background = 'linear-gradient(to top, rgba(0,0,0,0.7) 0%, transparent 60%)';
+        hoverOverlay.innerHTML = `
+          <button class="set-cover-btn pointer-events-auto text-xs bg-black/50 hover:bg-blue-600 text-white px-2 py-0.5 rounded transition-colors"
+                  title="Sätt som omslag">🖼</button>
+          <button class="remove-from-album-btn pointer-events-auto text-xs bg-black/50 hover:bg-red-600 text-white px-2 py-0.5 rounded transition-colors"
+                  title="Ta bort från album">✕</button>`;
+
+        cell.style.position = 'relative';
+        cell.appendChild(hoverOverlay);
+
+        hoverOverlay.querySelector('.set-cover-btn')?.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          try {
+            await api.updateAlbum(albumId, { coverAssetId: asset.id });
+            toast('Omslag uppdaterat', 'success');
+          } catch (err) { toast(err.message, 'error'); }
         });
-      });
 
-      grid.appendChild(cell);
-    });
+        hoverOverlay.querySelector('.remove-from-album-btn')?.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          try {
+            await api.removeFromAlbum(albumId, asset.id);
+            allAssets = allAssets.filter((a) => a.id !== asset.id);
+            renderGrid();
+          } catch (err) { toast(err.message, 'error'); }
+        });
+
+        cell.addEventListener('contextmenu', (e) => {
+          showAssetContextMenu(e, asset, {
+            selectionManager: sel,
+            getAllAssets: () => allAssets,
+            openLightboxFn: openLightbox,
+            allAssets: display,
+            index: i,
+            onAddToAlbum: null,
+            onDelete: (id) => { allAssets = allAssets.filter((a) => a.id !== id); renderGrid(); },
+            onRefresh: () => { loadAlbumDetail(container, albumId); },
+          });
+        });
+
+        grid.appendChild(cell);
+      });
+    };
+
+    renderGrid();
   } catch (e) {
     toast(e.message, 'error');
   }
@@ -569,22 +593,22 @@ async function showRuleBuilderModal(album, onSave, onCancel = null) {
       });
     });
 
-    // Inline value change handlers
+    // Inline value change handlers for select/date inputs (not person/location AC)
     overlay.querySelectorAll('[data-rule-idx]').forEach((el) => {
-      el.addEventListener('change', (e) => {
-        const target = /** @type {HTMLInputElement | HTMLSelectElement} */ (e.target);
-        const idx = Number(/** @type {HTMLElement} */ (el).closest('[data-rule-idx]')?.getAttribute('data-rule-idx') ?? target.dataset.ruleIdx);
-        const field = target.dataset.field ?? '';
-        if (!rules[idx]) return;
-        rules[idx].value = { ...rules[idx].value, [field]: target.value };
-      });
-      el.addEventListener('input', (e) => {
-        const target = /** @type {HTMLInputElement} */ (e.target);
-        const idx = Number(/** @type {HTMLElement} */ (el).closest('[data-rule-idx]')?.getAttribute('data-rule-idx') ?? target.dataset.ruleIdx);
-        const field = target.dataset.field ?? '';
-        if (!rules[idx]) return;
-        rules[idx].value = { ...rules[idx].value, [field]: target.value };
-      });
+      const tag = /** @type {HTMLElement} */ (el).tagName;
+      if (tag !== 'SELECT' && tag !== 'INPUT') return;
+      const inputEl = /** @type {HTMLInputElement | HTMLSelectElement} */ (el);
+      if (inputEl.classList.contains('person-ac-input')) return;
+      if (inputEl.dataset.field === 'label') return; // handled by location AC
+
+      const handler = () => {
+        const idx = Number(inputEl.dataset.ruleIdx ?? '-1');
+        const field = inputEl.dataset.field ?? '';
+        if (!rules[idx] || !field) return;
+        rules[idx].value = { ...rules[idx].value, [field]: inputEl.value };
+      };
+      el.addEventListener('change', handler);
+      el.addEventListener('input', handler);
     });
 
     // Add rule
@@ -602,11 +626,18 @@ async function showRuleBuilderModal(album, onSave, onCancel = null) {
       const btn = /** @type {HTMLButtonElement} */ (overlay.querySelector('#rb-preview'));
       const countEl = overlay.querySelector('#rb-preview-count');
       if (btn) { btn.disabled = true; btn.textContent = '⏳ Söker…'; }
+      if (countEl) countEl.textContent = '';
       try {
-        const { data } = await api.previewAlbumRules({ rules, ruleLogic });
+        const activeRules = rules.filter((r) => {
+          if (r.rule_type === 'person') return !!r.value.personId;
+          if (r.rule_type === 'location') return !!r.value.label;
+          return true;
+        });
+        const { data } = await api.previewAlbumRules({ rules: activeRules, ruleLogic });
         if (countEl) countEl.textContent = `${data.count} bild${data.count !== 1 ? 'er' : ''} matchar`;
       } catch (e) {
-        if (countEl) countEl.textContent = 'Kunde inte hämta';
+        console.error('[preview-rules]', e);
+        if (countEl) countEl.textContent = `Fel: ${e.message}`;
       } finally {
         if (btn) { btn.disabled = false; btn.textContent = '🔍 Förhandsgranska'; }
       }
@@ -616,6 +647,9 @@ async function showRuleBuilderModal(album, onSave, onCancel = null) {
       overlay.remove();
       onSave(rules, ruleLogic);
     });
+
+    // Sätt upp autocomplete-widgets efter render
+    _setupRuleWidgets(overlay, rules, allPersons);
   };
 
   render();
@@ -627,7 +661,7 @@ async function showRuleBuilderModal(album, onSave, onCancel = null) {
  * @param {any[]} allPersons
  */
 function renderRuleRow(rule, idx, allPersons) {
-  const input = (field, type, value, placeholder = '') =>
+  const inp = (field, type, value, placeholder = '') =>
     `<input type="${type}" data-rule-idx="${idx}" data-field="${field}" value="${escHtml(String(value ?? ''))}"
        placeholder="${placeholder}"
        class="bg-slate-700 border border-slate-600 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-violet-500 w-full">`;
@@ -637,22 +671,33 @@ function renderRuleRow(rule, idx, allPersons) {
     case 'date_range':
       valueHtml = `
         <div class="flex gap-1 items-center">
-          ${input('from', 'date', rule.value.from ?? '')}
+          ${inp('from', 'date', rule.value.from ?? '')}
           <span class="text-slate-500 text-xs flex-shrink-0">→</span>
-          ${input('to', 'date', rule.value.to ?? '')}
+          ${inp('to', 'date', rule.value.to ?? '')}
         </div>`;
       break;
     case 'person': {
-      const opts = allPersons.map((p) =>
-        `<option value="${p.id}" ${p.id === rule.value.personId ? 'selected' : ''}>${escHtml(p.name)}</option>`
-      ).join('');
-      valueHtml = `<select data-rule-idx="${idx}" data-field="personId"
-        class="bg-slate-700 border border-slate-600 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-violet-500 w-full">
-        <option value="">Välj person…</option>${opts}</select>`;
+      const selPerson = allPersons.find((p) => p.id === rule.value.personId);
+      const dispName = selPerson ? selPerson.name + (selPerson.custom_id != null ? ` (${selPerson.custom_id})` : '') : '';
+      valueHtml = `
+        <div class="relative person-ac-wrap">
+          <input type="text"
+            class="person-ac-input bg-slate-700 border border-slate-600 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-violet-500 w-full"
+            placeholder="Sök person…"
+            autocomplete="off"
+            value="${escHtml(dispName)}"
+            data-rule-idx="${idx}"
+            data-selected-id="${escHtml(rule.value.personId ?? '')}">
+          <div class="person-ac-drop hidden absolute left-0 top-full mt-0.5 w-full min-w-[220px] bg-slate-800 border border-slate-700 rounded-xl shadow-xl z-[200] max-h-44 overflow-y-auto"></div>
+        </div>`;
       break;
     }
     case 'location':
-      valueHtml = input('label', 'text', rule.value.label ?? '', 'T.ex. Stockholm');
+      valueHtml = `
+        <div class="relative location-ac-wrap">
+          ${inp('label', 'text', rule.value.label ?? '', 'T.ex. Stockholm')}
+          <div class="location-ac-drop hidden absolute left-0 top-full mt-0.5 w-full bg-slate-800 border border-slate-700 rounded-xl shadow-xl z-[200] max-h-40 overflow-y-auto" data-rule-idx="${idx}"></div>
+        </div>`;
       break;
     case 'mime_type':
       valueHtml = `<select data-rule-idx="${idx}" data-field="type"
@@ -681,6 +726,134 @@ function renderRuleRow(rule, idx, allPersons) {
       </div>
       <button class="rb-remove-rule flex-shrink-0 text-slate-500 hover:text-red-400 transition-colors mt-0.5" data-idx="${idx}" title="Ta bort">✕</button>
     </div>`;
+}
+
+/**
+ * Initierar autocomplete-widgets (person & plats) inuti regelbyggarens overlay.
+ * Anropas efter varje render().
+ */
+function _setupRuleWidgets(overlay, rules, allPersons) {
+  // ── Person-autocomplete ───────────────────────────────────────────────────
+  overlay.querySelectorAll('.person-ac-input').forEach((inputEl) => {
+    const el = /** @type {HTMLInputElement} */ (inputEl);
+    const drop = el.closest('.person-ac-wrap')?.querySelector('.person-ac-drop');
+    if (!drop) return;
+    const idx = Number(el.dataset.ruleIdx ?? '-1');
+
+    const showDrop = (matches) => {
+      drop.innerHTML = '';
+      if (!matches.length) {
+        drop.innerHTML = '<div class="px-3 py-2 text-xs text-slate-500">Inga träffar</div>';
+        drop.classList.remove('hidden');
+        return;
+      }
+      matches.slice(0, 12).forEach((p) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'w-full text-left px-3 py-2 flex items-center gap-2 hover:bg-slate-700 transition-colors';
+        const dispName = p.name + (p.custom_id != null ? ` (${p.custom_id})` : '');
+        const life = p.birth_year ? ` · f. ${p.birth_year}` : '';
+        btn.innerHTML = `
+          <span class="flex-1 min-w-0">
+            <span class="block text-xs text-white truncate">${escHtml(dispName)}</span>
+            ${life ? `<span class="text-[10px] text-slate-500">${escHtml(life)}</span>` : ''}
+          </span>`;
+        btn.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          el.value = dispName;
+          el.dataset.selectedId = p.id;
+          if (rules[idx]) rules[idx].value = { ...rules[idx].value, personId: p.id };
+          drop.classList.add('hidden');
+        });
+        drop.appendChild(btn);
+      });
+      drop.classList.remove('hidden');
+    };
+
+    el.addEventListener('input', () => {
+      const q = el.value.toLowerCase();
+      if (!q) { drop.classList.add('hidden'); return; }
+      const matches = allPersons.filter((p) =>
+        p.name.toLowerCase().includes(q) || String(p.custom_id ?? '').toLowerCase().includes(q)
+      );
+      showDrop(matches);
+    });
+
+    el.addEventListener('focus', () => {
+      const q = el.value.toLowerCase();
+      if (q) {
+        const matches = allPersons.filter((p) =>
+          p.name.toLowerCase().includes(q) || String(p.custom_id ?? '').toLowerCase().includes(q)
+        );
+        showDrop(matches);
+      }
+    });
+
+    el.addEventListener('blur', () => {
+      setTimeout(() => drop.classList.add('hidden'), 150);
+      // Om fältet tömdes, rensa personId
+      if (!el.value.trim() && rules[idx]) {
+        rules[idx].value = { ...rules[idx].value, personId: undefined };
+        el.dataset.selectedId = '';
+      }
+    });
+  });
+
+  // ── Plats-autocomplete ────────────────────────────────────────────────────
+  overlay.querySelectorAll('.location-ac-wrap').forEach((wrap) => {
+    const inputEl = /** @type {HTMLInputElement|null} */ (wrap.querySelector('input[data-field="label"]'));
+    const drop = wrap.querySelector('.location-ac-drop');
+    if (!inputEl || !drop) return;
+    const idx = Number(inputEl.dataset.ruleIdx ?? '-1');
+    let debounce = null;
+
+    const showLocDrop = (items) => {
+      drop.innerHTML = '';
+      if (!items.length) { drop.classList.add('hidden'); return; }
+      items.forEach((item) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'w-full text-left px-3 py-2 flex items-center justify-between hover:bg-slate-700 transition-colors';
+        btn.innerHTML = `
+          <span class="text-xs text-white truncate">${escHtml(item.label)}</span>
+          <span class="text-[10px] text-slate-500 ml-2 flex-shrink-0">${item.count} bilder</span>`;
+        btn.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          inputEl.value = item.label;
+          if (rules[idx]) rules[idx].value = { ...rules[idx].value, label: item.label };
+          drop.classList.add('hidden');
+        });
+        drop.appendChild(btn);
+      });
+      drop.classList.remove('hidden');
+    };
+
+    inputEl.addEventListener('input', () => {
+      if (rules[idx]) rules[idx].value = { ...rules[idx].value, label: inputEl.value };
+      clearTimeout(debounce);
+      const q = inputEl.value.trim();
+      if (!q) { drop.classList.add('hidden'); return; }
+      debounce = setTimeout(async () => {
+        try {
+          const { data } = await api.suggestions('location', q);
+          showLocDrop(data ?? []);
+        } catch {}
+      }, 250);
+    });
+
+    inputEl.addEventListener('focus', async () => {
+      const q = inputEl.value.trim();
+      if (!q) return;
+      try {
+        const { data } = await api.suggestions('location', q);
+        showLocDrop(data ?? []);
+      } catch {}
+    });
+
+    inputEl.addEventListener('blur', () => {
+      setTimeout(() => drop.classList.add('hidden'), 150);
+    });
+  });
 }
 
 // ── Lägg till bilder i album — modal ──────────────────────────────────────────

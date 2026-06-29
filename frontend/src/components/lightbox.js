@@ -1052,7 +1052,7 @@ function initFaceOverlayInteractions(assetId, onChanged) {
   });
 }
 
-export function showUndoToast(message, onUndo) {
+export function showUndoToast(message, onUndo, duration = 3000) {
   const el = document.createElement('div');
   el.className = 'toast flex items-center gap-3 bg-slate-700 border border-slate-600 text-slate-200 text-sm px-4 py-2.5 rounded-lg shadow-lg';
   el.innerHTML = `<span class="flex-1">${message}</span>
@@ -1065,7 +1065,7 @@ export function showUndoToast(message, onUndo) {
     el.remove();
     onUndo();
   });
-  setTimeout(() => { if (!cancelled) el.remove(); }, 3000);
+  setTimeout(() => { if (!cancelled) el.remove(); }, duration);
 }
 
 // ── Face-ritning ─────────────────────────────────────────────────────────────

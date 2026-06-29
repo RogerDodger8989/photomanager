@@ -126,6 +126,9 @@ export default async function assetsRoutes(fastify) {
       }
     }
 
+    // Visa bara stack-covers i tidslinjen (inte non-cover members)
+    conditions.push(`(a.stack_id IS NULL OR a.id = (SELECT cover_asset_id FROM stacks WHERE id = a.stack_id))`);
+
     // Cursor-baserad paginering
     // För sorteringar med icke-unika värden (rating, file_size, view_count) används taken_at som cursor
     const cursorField = ['rating', 'file_size', 'view_count', 'indexed_at'].includes(sort) ? 'taken_at' : sort;
@@ -143,6 +146,8 @@ export default async function assetsRoutes(fastify) {
               a.taken_at, a.indexed_at, a.thumb_small_path, a.thumb_large_path,
               a.location_label, a.view_count, a.duration, a.transcode_status,
               a.is_motion_photo, a.flag, a.color_label, a.rating, a.visibility,
+              a.stack_id,
+              (SELECT COUNT(*)::int FROM assets s WHERE s.stack_id = a.stack_id AND s.status = 'active') AS stack_size,
               ${isAdmin ? 'a.owner_id,' : ''}
               ST_Y(a.location::geometry) AS lat,
               ST_X(a.location::geometry) AS lon,
@@ -1053,6 +1058,45 @@ export default async function assetsRoutes(fastify) {
       }
     }
     return reply.send({ data: { updated: assets.length } });
+  });
+
+  // POST /api/assets/batch-metadata — hämtar kamera, taggar och personnamn för batch-rename
+  fastify.post('/api/assets/batch-metadata', {
+    onRequest: [fastify.authenticate],
+    schema: {
+      body: {
+        type: 'object',
+        required: ['assetIds'],
+        properties: { assetIds: { type: 'array', items: { type: 'string' } } },
+      },
+    },
+  }, async (request, reply) => {
+    const { assetIds } = request.body;
+    if (!assetIds.length) return reply.send({ data: {} });
+
+    const { rows } = await query(
+      `SELECT a.id,
+         (SELECT value FROM asset_metadata WHERE asset_id = a.id AND key = '271' LIMIT 1) AS camera_make,
+         (SELECT value FROM asset_metadata WHERE asset_id = a.id AND key = '272' LIMIT 1) AS camera_model,
+         ARRAY_REMOVE(ARRAY_AGG(DISTINCT tg.name), NULL)  AS tag_names,
+         ARRAY_REMOVE(ARRAY_AGG(DISTINCT p.name),  NULL)  AS person_names
+       FROM assets a
+       LEFT JOIN asset_tags at2 ON at2.asset_id = a.id
+       LEFT JOIN tags tg ON tg.id = at2.tag_id
+       LEFT JOIN faces f ON f.asset_id = a.id AND f.person_id IS NOT NULL
+       LEFT JOIN persons p ON p.id = f.person_id
+       WHERE a.id = ANY($1::uuid[])
+       GROUP BY a.id`,
+      [assetIds],
+    );
+
+    const map = Object.fromEntries(rows.map((r) => [r.id, {
+      camera_make:   r.camera_make  ?? null,
+      camera_model:  r.camera_model ?? null,
+      tag_names:     r.tag_names    ?? [],
+      person_names:  r.person_names ?? [],
+    }]));
+    return reply.send({ data: map });
   });
 }
 

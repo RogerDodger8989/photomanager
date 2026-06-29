@@ -84,9 +84,9 @@ export function createSelectionManager(getGrid, getAllAssets, customActions = []
       else selected.add(assetId);
       lastIdx = idx;
     } else {
-      // Vanligt klick på checkbox — toggle
-      if (selected.has(assetId)) selected.delete(assetId);
-      else selected.add(assetId);
+      // Enkelt klick → välj bara denna, avmarkera alla andra (Lightroom/Digikam-stil)
+      selected.clear();
+      selected.add(assetId);
       lastIdx = idx;
     }
 
@@ -198,19 +198,23 @@ export function createSelectionManager(getGrid, getAllAssets, customActions = []
     cb.className = 'sel-checkbox absolute top-1.5 left-1.5 z-10 w-4 h-4 rounded accent-blue-500 cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity';
     cb.addEventListener('click', (e) => {
       e.stopPropagation();
-      toggle(asset.id, idx, e);
+      toggle(asset.id, idx, { ctrlKey: true }); // kryssruta toggar alltid utan att rensa andra
     });
     const wrap = cell.querySelector('.photo-img-wrap') ?? cell;
     wrap.appendChild(cb);
 
-    // Ctrl+click på hela cellen → markera utan att öppna lightbox
+    // Enkelklick på cellen → markera (alla klick utom på sub-kontroller)
     cell.addEventListener('click', (e) => {
-      if (e.ctrlKey || e.metaKey || e.shiftKey) {
-        e.stopImmediatePropagation();
-        toggle(asset.id, idx, e);
-      }
-    }, true); // capture — körs innan lightbox-klick
+      if (/** @type {Element} */ (e.target).closest('.fav-heart, .stack-badge')) return;
+      e.stopImmediatePropagation();
+      toggle(asset.id, idx, e);
+    }, true); // capture — körs innan eventuella andra click-lyssnare
   }
+
+  // Escape-tangent rensar markering
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && selected.size > 0) clearAll();
+  });
 
   function getSelected() { return selected; }
   function isSelected(id) { return selected.has(id); }

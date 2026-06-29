@@ -112,7 +112,7 @@ export async function getTagTree(userId, isAdmin) {
     `SELECT
        t.id, t.name, t.path, t.parent_id, t.color, t.icon_thumb,
        t.is_face_tag, t.export_only_leaf, t.show_lifespan,
-       t.birth_year, t.death_year, t.sort_order,
+       t.birth_year, t.death_year, t.custom_id, t.sort_order,
        COUNT(DISTINCT at2.asset_id)::int AS asset_count
      FROM tags t
      LEFT JOIN asset_tags at2 ON at2.tag_id = t.id ${ownerJoin}

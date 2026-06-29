@@ -164,6 +164,15 @@ export const api = {
   rebuildAlbum:       (id)       => request('POST', `/api/albums/${id}/rebuild`, {}),
   previewAlbumRules:  (body)     => request('POST', `/api/albums/preview-rules`, body),
 
+  // Stacks
+  createStack:     (body)     => request('POST',   '/api/stacks', body),
+  getStack:        (id)       => request('GET',    `/api/stacks/${id}`),
+  addToStack:      (id, body) => request('POST',   `/api/stacks/${id}/assets`, body),
+  removeFromStack: (sid, aid) => request('DELETE', `/api/stacks/${sid}/assets/${aid}`),
+  dissolveStack:   (id)       => request('DELETE', `/api/stacks/${id}`),
+  setStackCover:   (id, body) => request('PATCH',  `/api/stacks/${id}`, body),
+  reorderStack:    (id, body) => request('PUT',    `/api/stacks/${id}/order`, body),
+
   // Shares
   shares:         ()            => request('GET', '/api/shares'),
   received:       ()            => request('GET', '/api/shares/received'),
@@ -178,6 +187,7 @@ export const api = {
   moveFiles:     (body)        => request('POST', '/api/files/move', body),
   copyFiles:     (body)        => request('POST', '/api/files/copy', body),
   renameAsset:   (body)        => request('POST', '/api/files/rename-asset', body),
+  batchMetadata: (body)        => request('POST', '/api/assets/batch-metadata', body),
   renameFolder:  (body)        => request('PATCH', '/api/files/rename-folder', body),
   moveFolderTo:  (body)        => request('POST', '/api/files/move-folder', body),
   trashFolder:   (body)        => request('POST', '/api/files/trash-folder', body),

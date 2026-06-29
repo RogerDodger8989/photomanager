@@ -138,19 +138,31 @@
     .rn-chip:hover { background: rgba(59,130,246,.35); border-color: #60a5fa; color: #bfdbfe; }
     .rn-chip:active { background: rgba(59,130,246,.55); }
 
-    /* Stack — "hög av foton"-visuell på bild-wrappern */
-    .photo-img-wrap.is-stack-wrap::before,
-    .photo-img-wrap.is-stack-wrap::after {
-      content: '';
-      position: absolute;
-      inset: 0;
-      border: 1px solid rgba(255,255,255,.12);
-      border-radius: 2px;
-      background: #1e293b;
-      z-index: -1;
+    /* Stack — "kortlek"-visuell via box-shadow (påverkar INTE grid-radshöjden) */
+    .photo-img-wrap.is-stack-wrap {
+      box-shadow:
+        3px 3px 0 2px #334155,
+        6px 6px 0 2px #1e2537;
     }
-    .photo-img-wrap.is-stack-wrap::before { transform: rotate(2deg) translate(3px, 3px); }
-    .photo-img-wrap.is-stack-wrap::after  { transform: rotate(4deg) translate(6px, 6px); }
+
+    /* Expanderad cover — tydlig violett ram */
+    .photo-cell.stack-cover-expanded .photo-img-wrap {
+      box-shadow: 3px 3px 0 2px #334155, 6px 6px 0 2px #1e2537, inset 0 0 0 3px #7c3aed !important;
+    }
+
+    /* Stack-member-celler — violett vänsterkant + tonad bakgrund */
+    .photo-cell.stack-member-cell {
+      background: rgba(124,58,237,.08);
+      border-radius: 2px;
+    }
+    .photo-cell.stack-member-cell .photo-img-wrap {
+      box-shadow: inset 3px 0 0 0 #7c3aed;
+      outline: 1px solid rgba(124,58,237,.4);
+      outline-offset: -1px;
+    }
+
+    /* D&D drop-target — lila ring */
+    .photo-cell.drop-target .photo-img-wrap { outline: 3px solid #7c3aed !important; outline-offset: -2px; }
 
     /* Skeleton loading */
     .skeleton { background: linear-gradient(90deg, #1e293b 25%, #334155 50%, #1e293b 75%);

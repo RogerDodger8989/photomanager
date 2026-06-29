@@ -142,7 +142,11 @@ export default async function searchRoutes(fastify) {
     const params = [];
     const isAdmin = request.user.role === 'admin';
     const userRole = request.user.role;
-    const conditions = ["a.status = 'active'"];
+    const conditions = [
+      "a.status = 'active'",
+      // Visa bara stack-covers (inte non-cover members)
+      "(a.stack_id IS NULL OR a.id = (SELECT cover_asset_id FROM stacks WHERE id = a.stack_id))",
+    ];
 
     // Synlighetsfilter — samma logik som GET /api/assets
     if (!isAdmin) {
@@ -315,6 +319,8 @@ export default async function searchRoutes(fastify) {
          a.taken_at, a.indexed_at, a.thumb_small_path, a.thumb_large_path,
          a.location_label, a.view_count, a.duration, a.width, a.height,
          a.is_motion_photo, a.flag, a.color_label, a.rating, a.visibility,
+         a.stack_id,
+         (SELECT COUNT(*)::int FROM assets s WHERE s.stack_id = a.stack_id AND s.status = 'active') AS stack_size,
          ST_Y(a.location::geometry) AS lat,
          ST_X(a.location::geometry) AS lon,
          (EXISTS (SELECT 1 FROM favorites f WHERE f.asset_id = a.id AND f.user_id = $${params.length})) AS is_favorite

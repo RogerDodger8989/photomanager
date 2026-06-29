@@ -33,6 +33,11 @@ const MIGRATIONS = [
   '026_tags_drop_name_unique.sql',
   '027_fix_person_tag_flags.sql',
   '028_flags_colors.sql',
+  '029_visibility_and_upload_perm.sql',
+  '030_person_fields.sql',
+  '031_person_custom_id.sql',
+  '032_tag_custom_id.sql',
+  '033_fix_stack_duplicates.sql',
 ];
 
 export async function runMigrations(client) {

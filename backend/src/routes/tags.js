@@ -214,6 +214,7 @@ export default async function tagsRoutes(fastify) {
           show_lifespan:    { type: 'boolean' },
           birth_year:       { type: 'integer', nullable: true },
           death_year:       { type: 'integer', nullable: true },
+          custom_id:        { type: 'string', nullable: true },
           sort_order:       { type: 'integer' },
         },
       },
@@ -245,6 +246,7 @@ export default async function tagsRoutes(fastify) {
       export_synonyms:  parentUnderPersoner ? false : (body.export_synonyms !== undefined ? body.export_synonyms : (tag.export_synonyms ?? true)),
       birth_year:       body.birth_year       !== undefined ? body.birth_year               : tag.birth_year,
       death_year:       body.death_year       !== undefined ? body.death_year               : tag.death_year,
+      custom_id:        body.custom_id        !== undefined ? body.custom_id                : tag.custom_id,
       sort_order:       body.sort_order       !== undefined ? body.sort_order               : tag.sort_order,
     };
 
@@ -266,21 +268,23 @@ export default async function tagsRoutes(fastify) {
       UPDATE tags SET
         name = $1, path = $2, parent_id = $3, color = $4, icon_thumb = $5,
         is_face_tag = $6, export_only_leaf = $7, show_lifespan = $8,
-        birth_year = $9, death_year = $10, sort_order = $11, export_synonyms = $12
-      WHERE id = $13
+        birth_year = $9, death_year = $10, sort_order = $11, export_synonyms = $12,
+        custom_id = $13
+      WHERE id = $14
       RETURNING *
     `, [
       updated.name, newPath, updated.parent_id, updated.color, updated.icon_thumb,
       updated.is_face_tag, updated.export_only_leaf, updated.show_lifespan,
-      updated.birth_year, updated.death_year, updated.sort_order, updated.export_synonyms, id,
+      updated.birth_year, updated.death_year, updated.sort_order, updated.export_synonyms,
+      updated.custom_id ?? null, id,
     ]);
 
-    // Synkronisera birth_year/death_year till kopplad person om det är en face tag
-    if (updated.is_face_tag && (body.birth_year !== undefined || body.death_year !== undefined)) {
+    // Synkronisera birth_year/death_year/custom_id till kopplad person om det är en face tag
+    if (updated.is_face_tag && (body.birth_year !== undefined || body.death_year !== undefined || body.custom_id !== undefined)) {
       await query(`
-        UPDATE persons SET birth_year = $1, death_year = $2
-        WHERE name = $3 AND (birth_year IS DISTINCT FROM $1 OR death_year IS DISTINCT FROM $2)
-      `, [updated.birth_year, updated.death_year, updated.name]);
+        UPDATE persons SET birth_year = $1, death_year = $2, custom_id = $4
+        WHERE name = $3 AND (birth_year IS DISTINCT FROM $1 OR death_year IS DISTINCT FROM $2 OR custom_id IS DISTINCT FROM $4)
+      `, [updated.birth_year, updated.death_year, updated.name, updated.custom_id ?? null]);
     }
 
     // Uppdatera barn-noder rekursivt om path ändrades

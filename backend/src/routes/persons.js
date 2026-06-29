@@ -470,7 +470,7 @@ export default async function personsRoutes(fastify) {
     // Synka XMP för berörda assets
     const xmpPlaceholders = faceIds.map((_, i) => `$${i + 1}`).join(',');
     const { rows: affected } = await query(
-      `SELECT DISTINCT asset_id FROM faces WHERE id IN (${xmpPlaceholders})`,
+      `SELECT DISTINCT f.asset_id FROM faces f JOIN assets a ON a.id = f.asset_id AND a.status = 'active' WHERE f.id IN (${xmpPlaceholders})`,
       faceIds
     );
     for (const { asset_id } of affected) {
@@ -479,6 +479,23 @@ export default async function personsRoutes(fastify) {
 
     // Hämta personnamn om vi fick ett ID
     const { rows: personRows } = await query('SELECT name FROM persons WHERE id = $1', [personId]);
+
+    // Synka face-assignment till asset_tags (person-taggen)
+    if (personRows[0]) {
+      const { rows: tagRows } = await query(
+        `SELECT id FROM tags WHERE is_face_tag = true AND name = $1 LIMIT 1`,
+        [personRows[0].name]
+      );
+      if (tagRows[0]) {
+        const tagId = tagRows[0].id;
+        for (const { asset_id } of affected) {
+          await query(
+            'INSERT INTO asset_tags (asset_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+            [asset_id, tagId]
+          );
+        }
+      }
+    }
 
     return reply.send({ data: { personId, personName: personRows[0]?.name ?? personName } });
   });

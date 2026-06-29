@@ -1,10 +1,11 @@
 ﻿import { api } from '../api.js';
 import { openLightbox } from '../components/lightbox.js';
-import { buildPhotoCell, showAssetContextMenu, refreshCellOverlay } from '../components/gridCell.js';
+import { buildPhotoCell, showAssetContextMenu, refreshCellOverlay, refreshCellStackBadge } from '../components/gridCell.js';
 import { createSelectionManager } from '../components/selectionManager.js';
 import { openAddToAlbumModal } from './albums.js';
 import { thumbUrl, isVideo, formatDate, debounce } from '../utils.js';
 import { getThumbSettings } from '../components/thumbSettings.js';
+import { expandStack, collapseStack, openStackModal, dissolveStackOp } from '../components/contextActions/stackAction.js';
 
 let cursor = null;
 let loading = false;
@@ -16,6 +17,7 @@ let observer = null;
 let selection = null;
 let _thumbSize = parseInt(localStorage.getItem('tl-thumb-size') ?? '160', 10);
 let _thumbSettings = null;
+let expandedStacks = new Set();
 
 function _applyThumbSize(px) {
   _thumbSize = px;
@@ -84,6 +86,18 @@ document.addEventListener('keydown', async (e) => {
     const colorMap = { '6': 1, '7': 2, '8': 3, '9': 4, '0': 0 };
     await _applyToTargets(targets, { colorLabel: colorMap[e.key] });
   }
+  // F2: döp om markerade filer
+  else if (e.key === 'F2') {
+    e.preventDefault();
+    const sel = selection?.getSelected();
+    if (!sel?.size) return;
+    const renameTargets = allItems.filter((a) => sel.has(a.id));
+    const { openRenameModal } = await import('../components/modals/renameModal.js');
+    openRenameModal(renameTargets, () => {
+      allItems = [];
+      renderTimeline(document.getElementById('main-content'), currentParams);
+    });
+  }
 });
 
 function _getShortcutTargets() {
@@ -115,6 +129,19 @@ async function _applyToTargets(targets, patch) {
     : '';
   toast(`${what}${n > 1 ? ` (${n} bilder)` : ''}`, 'success');
 }
+
+// Stack-badge click från celler som inte byggdes via buildPhotoCell med onExpandStack
+document.addEventListener('pm:stack-badge-click', (e) => {
+  const assetId = /** @type {CustomEvent} */ (e).detail?.assetId;
+  if (!assetId) return;
+  const asset = allItems.find((a) => a.id === assetId);
+  if (!asset?.stack_id) return;
+  const grid = document.getElementById('photo-grid');
+  if (!grid) return;
+  if (expandedStacks.has(asset.stack_id)) collapseStack(asset, { grid, expandedStacks });
+  else expandStack(asset, { grid, allItems, thumbSettings: _thumbSettings, expandedStacks,
+    onCellBuilt: (cell, member) => selection?.attachToCell(cell, member, allItems.findIndex((x) => x.id === member.id)) });
+});
 
 // Synka grid när lightbox raderar/återställer en bild
 window.addEventListener('pm:asset-trashed', (e) => {
@@ -156,6 +183,7 @@ export function renderTimeline(container, params = {}) {
   cursor  = null;
   hasMore = true;
   allItems = [];
+  expandedStacks = new Set();
 
   const sortLabel = { taken_at: 'Datum taget', file_size: 'Storlek', view_count: 'Populärast', indexed_at: 'Tillagd', file_name: 'Filnamn', rating: 'Betyg' };
   const curSort  = params.sort ?? 'taken_at';
@@ -283,9 +311,25 @@ function appendToGrid(items) {
       () => openLightbox(allItems, globalIndex),
       undefined,
       _thumbSettings,
+      {
+        onExpandStack: (a) => {
+          const g = document.getElementById('photo-grid');
+          if (!g) return;
+          if (expandedStacks.has(a.stack_id)) collapseStack(a, { grid: g, expandedStacks });
+          else expandStack(a, { grid: g, allItems, thumbSettings: _thumbSettings, expandedStacks,
+            onCellBuilt: (cell, member) => selection?.attachToCell(cell, member, allItems.findIndex((x) => x.id === member.id)) });
+        },
+      },
     );
     selection?.attachToCell(cell, asset, globalIndex);
+
+    // ── Kontextmeny ────────────────────────────────────────────────────────
     cell.addEventListener('contextmenu', (e) => {
+      // Högerklick på ej markerat objekt → välj bara detta (Digikam/Lightroom-beteende)
+      // Högerklick på redan markerat i multi-urval → behåll hela urvalet
+      if (selection && !selection.isSelected(asset.id)) {
+        selection.toggle(asset.id, globalIndex, {}); // {} = plain → clear + select only this
+      }
       showAssetContextMenu(e, asset, {
         selectionManager: selection,
         getAllAssets: () => allItems,
@@ -294,9 +338,130 @@ function appendToGrid(items) {
         index: globalIndex,
         onAddToAlbum: openAddToAlbumModal,
         onDelete: (id) => { allItems = allItems.filter((a) => a.id !== id); },
-        onRefresh: () => { allItems = []; renderTimeline(document.getElementById('main-content'), currentParams); },
+        onRefresh: () => { expandedStacks = new Set(); allItems = []; renderTimeline(document.getElementById('main-content'), currentParams); },
+
+        // Stack DOM-callbacks (undviker full omladdning)
+        onStackCreated: (stackId, coverAssetId, memberIds) => {
+          memberIds.filter((id) => id !== coverAssetId).forEach((id) => {
+            allItems = allItems.filter((a) => a.id !== id);
+            grid.querySelector(`[data-id="${id}"]`)?.remove();
+          });
+          const cover = allItems.find((a) => a.id === coverAssetId);
+          if (cover) { cover.stack_id = stackId; cover.stack_size = memberIds.length; }
+          const coverCell = grid.querySelector(`[data-id="${coverAssetId}"]`);
+          if (coverCell) coverCell.dataset.stackId = stackId;
+          refreshCellStackBadge(coverAssetId, memberIds.length);
+        },
+        onRemoved: (removedId, res) => {
+          if (res?.stackDeleted) {
+            allItems.forEach((a) => { if (a.stack_id === asset.stack_id) { a.stack_id = null; a.stack_size = null; } });
+            grid.querySelectorAll(`[data-stack-id="${asset.stack_id}"]`).forEach((c) => {
+              c.querySelector('.photo-img-wrap')?.classList.remove('is-stack-wrap');
+              c.querySelector('.stack-badge')?.remove();
+            });
+          } else {
+            const cover = allItems.find((a) => a.stack_id === asset.stack_id && a.id !== removedId);
+            if (cover) { cover.stack_size = Math.max(1, (cover.stack_size ?? 2) - 1); refreshCellStackBadge(cover.id, cover.stack_size); }
+            grid.querySelector(`[data-stack-member="${asset.stack_id}"][data-id="${removedId}"]`)?.remove();
+          }
+        },
+
+        // Expand / Collapse
+        isExpanded: (stackId) => expandedStacks.has(stackId),
+        onExpandStack: (a) => expandStack(a, { grid, allItems, thumbSettings: _thumbSettings, expandedStacks,
+          onCellBuilt: (cell, member) => selection?.attachToCell(cell, member, allItems.findIndex((x) => x.id === member.id)) }),
+        onCollapseStack: (a) => collapseStack(a, { grid, expandedStacks }),
+
+        // Hantera stack-modal
+        onManageStack: (a) => openStackModal(a, {
+          onMemberRemoved: (removedId, res) => {
+            if (res?.stackDeleted) {
+              allItems.forEach((item) => { if (item.stack_id === a.stack_id) { item.stack_id = null; item.stack_size = null; } });
+              grid.querySelectorAll(`[data-stack-member="${a.stack_id}"]`).forEach((el) => el.remove());
+              grid.querySelectorAll(`[data-stack-id="${a.stack_id}"]`).forEach((c) => {
+                c.querySelector('.photo-img-wrap')?.classList.remove('is-stack-wrap', 'overflow-visible');
+                c.querySelector('.photo-img-wrap')?.classList.add('overflow-hidden');
+                c.querySelector('.stack-badge')?.remove();
+              });
+              expandedStacks.delete(a.stack_id);
+            } else {
+              grid.querySelector(`[data-stack-member="${a.stack_id}"][data-id="${removedId}"]`)?.remove();
+              const cover = allItems.find((item) => item.stack_id === a.stack_id && item.id !== removedId);
+              if (cover) { cover.stack_size = Math.max(1, (cover.stack_size ?? 2) - 1); refreshCellStackBadge(cover.id, cover.stack_size); }
+            }
+          },
+          onDissolve: () => {
+            allItems.forEach((item) => { if (item.stack_id === a.stack_id) { item.stack_id = null; item.stack_size = null; } });
+            grid.querySelectorAll(`[data-stack-member="${a.stack_id}"]`).forEach((el) => el.remove());
+            grid.querySelectorAll(`[data-stack-id="${a.stack_id}"]`).forEach((c) => {
+              c.querySelector('.photo-img-wrap')?.classList.remove('is-stack-wrap');
+              c.querySelector('.stack-badge')?.remove();
+            });
+            expandedStacks.delete(a.stack_id);
+          },
+          onCoverChanged: () => {},
+        }),
+
+        // Lös upp stack direkt
+        onDissolveStack: (a) => dissolveStackOp(a, { grid, allItems, expandedStacks }),
       });
     });
+
+    // ── Drag-and-drop: drop target (cellerna är redan draggable via buildPhotoCell) ──
+    cell.addEventListener('dragover', (e) => {
+      if (!e.dataTransfer?.types?.includes('text/plain')) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      cell.classList.add('drop-target');
+    });
+
+    cell.addEventListener('dragleave', (e) => {
+      if (!cell.contains(/** @type {Node} */ (e.relatedTarget))) cell.classList.remove('drop-target');
+    });
+
+    cell.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      cell.classList.remove('drop-target');
+
+      let dragData;
+      try { dragData = JSON.parse(e.dataTransfer.getData('text/plain')); } catch { return; }
+      const { id: srcId } = dragData;
+      if (!srcId || srcId === asset.id) return;
+
+      const srcAsset = allItems.find((a) => a.id === srcId);
+      if (!srcAsset) return;
+
+      const { toast } = await import('../utils.js');
+
+      if (asset.stack_id) {
+        if (!confirm(`Lägg till "${srcAsset.file_name ?? srcId}" i stacken?`)) return;
+        try {
+          await api.addToStack(asset.stack_id, { assetIds: [srcId] });
+          toast('Bilden lagd i stacken', 'success');
+          allItems = allItems.filter((a) => a.id !== srcId);
+          grid.querySelector(`[data-id="${srcId}"]`)?.remove();
+          const cover = allItems.find((a) => a.id === asset.id);
+          if (cover) { cover.stack_size = (cover.stack_size ?? 1) + 1; refreshCellStackBadge(asset.id, cover.stack_size); }
+        } catch (err) {
+          toast('Kunde inte lägga till i stack: ' + err.message, 'error');
+        }
+      } else {
+        if (!confirm(`Skapa stack av "${srcAsset.file_name ?? srcId}" och "${asset.file_name ?? asset.id}"?`)) return;
+        try {
+          const { data } = await api.createStack({ assetIds: [asset.id, srcId], coverId: asset.id });
+          toast('Stack skapad med 2 bilder', 'success');
+          allItems = allItems.filter((a) => a.id !== srcId);
+          grid.querySelector(`[data-id="${srcId}"]`)?.remove();
+          const cover = allItems.find((a) => a.id === asset.id);
+          if (cover) { cover.stack_id = data.stackId; cover.stack_size = 2; }
+          cell.dataset.stackId = data.stackId;
+          refreshCellStackBadge(asset.id, 2);
+        } catch (err) {
+          toast('Kunde inte skapa stack: ' + err.message, 'error');
+        }
+      }
+    });
+
     grid.appendChild(cell);
     _virt.observe(cell);
   });
