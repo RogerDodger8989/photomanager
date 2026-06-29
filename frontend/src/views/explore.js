@@ -280,6 +280,11 @@ export async function renderFavorites(container) {
       () => assets,
     );
     selection.mountToolbar(container.querySelector('#fav-selection-toolbar'));
+    window.__pmCurrentSelection = {
+      getSelected: () => selection?.getSelected(),
+      getAllItems: () => assets,
+      onDone: () => renderFavorites(container),
+    };
 
     const _ts = await getThumbSettings().catch(() => null);
     assets.forEach((asset, i) => {

@@ -18,6 +18,10 @@ let _sort           = 'taken_at';
 let _order          = 'desc';
 let _thumbSize      = parseInt(localStorage.getItem('fm-thumb-size') ?? '140', 10);
 
+export function getNavState() {
+  return activeFolderKey ? { activeFolderKey, recursive: _recursive, sort: _sort, order: _order } : null;
+}
+
 /** Focused item element in the content area (for keyboard navigation) */
 let _focusedEl   = null;
 /** Cut/Copy clipboard: { op:'cut'|'copy', assetIds:string[], folderPath:string|null } */
@@ -153,8 +157,15 @@ window.addEventListener('pm:asset-restored', (e) => {
 
 // ── Render ────────────────────────────────────────────────────────────────────
 
-export async function renderFolders(container) {
+export async function renderFolders(container, navState = null) {
   _container = container;
+  // Återställ sparad state (gäller också på sidladdning via backend-sync)
+  if (navState) {
+    if (navState.activeFolderKey) activeFolderKey = navState.activeFolderKey;
+    if (typeof navState.recursive === 'boolean') _recursive = navState.recursive;
+    if (navState.sort)  _sort  = navState.sort;
+    if (navState.order) _order = navState.order;
+  }
   container.innerHTML = `
     <div class="flex h-full overflow-hidden">
       <!-- Sidopanel: mappträd -->
@@ -269,6 +280,10 @@ export async function renderFolders(container) {
     if (activeFolderKey) selectFolder(activeFolderKey, _treeData);
   });
   _updateOrderIcon();
+  // Spegla modulstate i UI-kontroller (viktigt vid åternavigering)
+  if (sortSel) sortSel.value = _sort;
+  const recursiveCb = /** @type {HTMLInputElement|null} */ (container.querySelector('#recursive-cb'));
+  if (recursiveCb) recursiveCb.checked = _recursive;
 
   // S / M / L thumbnail-storlek
   container.querySelectorAll('.size-btn').forEach((btn) => {
@@ -298,6 +313,11 @@ export async function renderFolders(container) {
   );
   const selToolbar = document.getElementById('folder-sel-toolbar');
   if (selToolbar) selToolbar.innerHTML = '';
+  window.__pmCurrentSelection = {
+    getSelected: () => sel?.getSelected(),
+    getAllItems: () => allAssets,
+    onDone: () => {},
+  };
 
   container.querySelector('#load-more-btn')?.addEventListener('click', _loadMoreAssets);
 
@@ -307,6 +327,8 @@ export async function renderFolders(container) {
     const { data: tree } = await api.folderTree();
     _treeData = tree;
     _renderTree(container, tree);
+    // Återöppna tidigare vald mapp (in-session eller efter sidladdning)
+    if (activeFolderKey) selectFolder(activeFolderKey, tree);
   } catch {
     const ti = document.getElementById('folder-tree-inner');
     if (ti) ti.innerHTML = '<div class="px-3 text-red-400 text-xs py-2">Kunde inte ladda mappar</div>';

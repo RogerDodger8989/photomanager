@@ -1,6 +1,7 @@
 ﻿import { api } from '../api.js';
 import { openLightbox } from '../components/lightbox.js';
-import { buildPhotoCell, attachFavHeart, showAssetContextMenu } from '../components/gridCell.js';
+import { buildPhotoCell, showAssetContextMenu } from '../components/gridCell.js';
+import { createSelectionManager } from '../components/selectionManager.js';
 import { toast, toastWithUndo } from '../utils.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -2057,24 +2058,31 @@ function renderPhotosTab(container, assets, person, personId, onCoverUpdated) {
     container.innerHTML = '<div class="text-slate-400 text-sm p-2">Inga bilder.</div>';
     return;
   }
-  container.innerHTML = `<div id="photo-grid" class="grid gap-0.5" style="grid-template-columns: repeat(auto-fill, minmax(160px, 1fr))"></div>`;
+  container.innerHTML = `
+    <div id="person-photo-sel-toolbar" class="flex items-center gap-3 mb-2 flex-wrap min-h-[28px]"></div>
+    <div id="photo-grid" class="grid gap-0.5" style="grid-template-columns: repeat(auto-fill, minmax(160px, 1fr))"></div>`;
 
   const grid = document.getElementById('photo-grid');
   if (!grid) return;
-  assets.forEach((asset, i) => {
-    const cell = document.createElement('div');
-    cell.className = 'photo-cell relative group cursor-pointer';
-    const age = ageAtPhoto(person.birth_year, asset.taken_at);
-    cell.innerHTML = `
-      ${asset.thumb_small_path
-        ? `<img src="/thumbs/${asset.thumb_small_path}" loading="lazy" class="w-full aspect-square object-cover">`
-        : `<div class="w-full aspect-square bg-slate-700"></div>`}
-      ${age !== null ? `<div class="absolute bottom-0 left-0 right-0 bg-black/60 text-xs text-white text-center py-0.5 opacity-0 group-hover:opacity-100 transition-opacity">${age} år</div>` : ''}`;
 
-    attachFavHeart(cell, asset);
-    cell.addEventListener('click', () => openLightbox(assets, i));
+  const sel = createSelectionManager(
+    () => document.getElementById('photo-grid'),
+    () => assets,
+  );
+  sel.mountToolbar(container.querySelector('#person-photo-sel-toolbar'));
+  window.__pmCurrentSelection = {
+    getSelected: () => sel?.getSelected(),
+    getAllItems: () => assets,
+    onDone: () => {},
+  };
+
+  assets.forEach((asset, i) => {
+    const cell = buildPhotoCell(asset, () => openLightbox(assets, i));
+    sel.attachToCell(cell, asset, i);
     cell.addEventListener('contextmenu', (e) => {
       showAssetContextMenu(e, asset, {
+        selectionManager: sel,
+        getAllAssets: () => assets,
         openLightboxFn: openLightbox,
         allAssets: assets,
         index: i,

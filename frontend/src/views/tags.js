@@ -20,9 +20,25 @@ let _container = null;
 /** @type {Record<string,any>} */
 let _settings = {};
 
+export function getNavState() {
+  return {
+    selectedTagId: _selectedTagId,
+    filter:        _filter,
+    searchQ:       _searchQ,
+    expanded:      [..._expanded],
+  };
+}
+
 // ── Entry point ───────────────────────────────────────────────────────────────
-export async function renderTags(container) {
+export async function renderTags(container, navState = null) {
   _container = container;
+  // Återställ state (gäller vid sidladdning via backend-sync; vid in-session navigering är modulvars redan satta)
+  if (navState) {
+    if (navState.selectedTagId !== undefined) _selectedTagId = navState.selectedTagId;
+    if (navState.filter)  _filter  = navState.filter;
+    if (navState.searchQ) _searchQ = navState.searchQ;
+    if (Array.isArray(navState.expanded)) { _expanded.clear(); navState.expanded.forEach((id) => _expanded.add(id)); }
+  }
   _container.innerHTML = `
     <div class="flex h-full overflow-hidden bg-slate-900 text-slate-100">
       <!-- Vänster panel: träd -->
@@ -202,6 +218,22 @@ export async function renderTags(container) {
   // Ladda inställningar för standardvärden
   try { const sr = await api.getSettings(); _settings = sr.data ?? {}; } catch { /* ok */ }
   await _loadTree();
+
+  // Återspegla filter och sökfält i UI (viktigt efter sidladdning)
+  if (_filter !== 'all') {
+    document.querySelectorAll('.tag-filter-btn').forEach((b) => {
+      const active = /** @type {HTMLElement} */ (b).dataset.filter === _filter;
+      b.classList.toggle('bg-blue-700',    active);
+      b.classList.toggle('text-white',     active);
+      b.classList.toggle('bg-slate-800',  !active);
+      b.classList.toggle('text-slate-400', !active);
+    });
+  }
+  const tagSearchInp = /** @type {HTMLInputElement|null} */ (document.getElementById('tag-search'));
+  if (tagSearchInp && _searchQ) { tagSearchInp.value = _searchQ; }
+
+  // Återöppna tidigare vald tagg
+  if (_selectedTagId) _showTagDetail(_selectedTagId);
 }
 
 // ── Ladda träd ────────────────────────────────────────────────────────────────
@@ -414,6 +446,11 @@ async function _showTagDetail(tagId) {
   );
   const toolbarEl = document.getElementById('td-sel-toolbar');
   if (toolbarEl) sel.mountToolbar(toolbarEl);
+  window.__pmCurrentSelection = {
+    getSelected: () => sel?.getSelected(),
+    getAllItems: () => allAssets,
+    onDone: () => {},
+  };
 
   async function loadPage() {
     const res = await api.tagAssets(tagId, { limit: PAGE, offset });

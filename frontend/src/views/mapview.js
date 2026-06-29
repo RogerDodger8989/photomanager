@@ -7,7 +7,13 @@ let leafletMap  = null;
 let markerGroup = null;
 let _debTimer   = null;
 
-export function renderMap(container) {
+export function getNavState() {
+  return leafletMap
+    ? { center: [leafletMap.getCenter().lat, leafletMap.getCenter().lng], zoom: leafletMap.getZoom() }
+    : null;
+}
+
+export function renderMap(container, navState = null) {
   container.innerHTML = `<div id="leaflet-map" class="w-full h-full" style="position:relative;"></div>`;
 
   requestAnimationFrame(async () => {
@@ -43,6 +49,9 @@ export function renderMap(container) {
       const { lat, lon, zoom } = _w._pmMapGoto;
       _w._pmMapGoto = null;
       leafletMap.setView([lat, lon], zoom ?? 12);
+    } else if (navState?.center && navState?.zoom != null) {
+      // Återställ sparad kartposition
+      leafletMap.setView(navState.center, navState.zoom);
     } else {
       // Auto-centrera till där fotona faktiskt finns
       try {

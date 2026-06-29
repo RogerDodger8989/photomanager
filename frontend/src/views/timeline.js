@@ -13,6 +13,8 @@ let hasMore = true;
 let allItems = [];
 let currentParams = {};
 let sentinel = null;
+
+export function getNavState() { return Object.keys(currentParams).length ? { ...currentParams } : null; }
 let observer = null;
 let selection = null;
 let _thumbSize = parseInt(localStorage.getItem('tl-thumb-size') ?? '160', 10);
@@ -85,18 +87,6 @@ document.addEventListener('keydown', async (e) => {
     e.preventDefault();
     const colorMap = { '6': 1, '7': 2, '8': 3, '9': 4, '0': 0 };
     await _applyToTargets(targets, { colorLabel: colorMap[e.key] });
-  }
-  // F2: döp om markerade filer
-  else if (e.key === 'F2') {
-    e.preventDefault();
-    const sel = selection?.getSelected();
-    if (!sel?.size) return;
-    const renameTargets = allItems.filter((a) => sel.has(a.id));
-    const { openRenameModal } = await import('../components/modals/renameModal.js');
-    openRenameModal(renameTargets, () => {
-      allItems = [];
-      renderTimeline(document.getElementById('main-content'), currentParams);
-    });
   }
 });
 
@@ -260,6 +250,11 @@ export function renderTimeline(container, params = {}) {
     () => allItems,
   );
   selection.mountToolbar(container.querySelector('#selection-toolbar'));
+  window.__pmCurrentSelection = {
+    getSelected: () => selection?.getSelected(),
+    getAllItems: () => allItems,
+    onDone: () => { allItems = []; renderTimeline(document.getElementById('main-content'), currentParams); },
+  };
 
   // Hämta thumbSettings asynkront, ladda sedan gridet
   getThumbSettings().then((ts) => {
@@ -474,4 +469,5 @@ function onSentinelVisible(entries) {
 export function destroyTimeline() {
   observer?.disconnect();
   observer = null;
+  window.__pmCurrentSelection = null;
 }

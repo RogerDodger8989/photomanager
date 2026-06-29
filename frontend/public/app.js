@@ -2,23 +2,50 @@ import { api, setToken, clearToken } from '/src/api.js';
 import { state, setUser, on }        from '/src/state.js';
 import { renderNav, updateActiveNav } from '/src/components/nav.js';
 import { toast, debounce }            from '/src/utils.js';
-import { renderTimeline, destroyTimeline } from '/src/views/timeline.js';
+import { renderTimeline, destroyTimeline, getNavState as tlGetNavState } from '/src/views/timeline.js';
 import { renderExplore, renderFavorites } from '/src/views/explore.js';
-import { renderMap, destroyMap }      from '/src/views/mapview.js';
+import { renderMap, destroyMap, getNavState as mapGetNavState } from '/src/views/mapview.js';
 import { renderAlbums }               from '/src/views/albums.js';
 import { renderPersons }              from '/src/views/persons.js';
 import { renderSharing }              from '/src/views/sharing.js';
 import { renderAdmin }                from '/src/views/admin.js';
 import { renderUpload }              from '/src/views/upload.js';
-import { renderFolders }            from '/src/views/folders.js';
+import { renderFolders, getNavState as fldGetNavState } from '/src/views/folders.js';
 import { renderDuplicates }         from '/src/views/duplicates.js';
-import { renderTags }               from '/src/views/tags.js';
-import { renderSearch }             from '/src/views/search.js';
+import { renderTags, getNavState as tagGetNavState }   from '/src/views/tags.js';
+import { renderSearch, getNavState as srGetNavState }  from '/src/views/search.js';
+import { initNavState, saveViewState, getViewState }   from '/src/navState.js';
+
+const _NAV_STATE_GETTERS = {
+  photos:  tlGetNavState,
+  folders: fldGetNavState,
+  tags:    tagGetNavState,
+  search:  srGetNavState,
+  map:     mapGetNavState,
+};
 
 // Service Worker
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').catch(console.error);
 }
+
+// Globalt F2-kortkommando: döp om markerade filer i alla vyer
+document.addEventListener('keydown', async (e) => {
+  if (e.key !== 'F2') return;
+  if (document.getElementById('lightbox')?.classList.contains('open')) return;
+  const tag = document.activeElement?.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+  const pm = /** @type {any} */ (window).__pmCurrentSelection;
+  if (!pm) return;
+  const sel = pm.getSelected?.();
+  if (!sel?.size) return;
+  const allItems = pm.getAllItems?.() ?? [];
+  const targets = allItems.filter((a) => sel.has(a.id));
+  if (!targets.length) return;
+  e.preventDefault();
+  const { openRenameModal } = await import('/src/components/modals/renameModal.js');
+  openRenameModal(targets, pm.onDone ?? (() => {}));
+});
 
 // === AUTH ===
 
@@ -74,6 +101,12 @@ window.addEventListener('auth:logout', showLogin);
 let currentCleanup = null;
 
 function navigate(hash) {
+  // Spara state för den vy vi lämnar
+  const prevRoute = state.currentView;
+  if (prevRoute && _NAV_STATE_GETTERS[prevRoute]) {
+    saveViewState(prevRoute, _NAV_STATE_GETTERS[prevRoute]());
+  }
+
   // Kör cleanup för föregående vy
   if (currentCleanup) { currentCleanup(); currentCleanup = null; }
 
@@ -82,22 +115,23 @@ function navigate(hash) {
   container.innerHTML = '';
 
   const [route, ...rest] = (hash.replace('#/', '') || 'photos').split('/');
+  state.currentView = route;
 
-  if (route === 'photos')    { renderTimeline(container); currentCleanup = destroyTimeline; }
+  if (route === 'photos')    { renderTimeline(container, getViewState('photos') ?? {}); currentCleanup = destroyTimeline; }
   else if (route === 'explore')   renderExplore(container);
-  else if (route === 'map')     { renderMap(container);      currentCleanup = destroyMap; }
+  else if (route === 'map')     { renderMap(container, getViewState('map'));      currentCleanup = destroyMap; }
   else if (route === 'albums')    renderAlbums(container, rest[0]);
   else if (route === 'faces')     renderPersons(container, rest[0]);
   else if (route === 'sharing')   renderSharing(container);
   else if (route === 'favorites') renderFavorites(container);
-  else if (route === 'folders')   renderFolders(container);
+  else if (route === 'folders')   renderFolders(container, getViewState('folders'));
   else if (route === 'upload')      renderUpload(container);
   else if (route === 'duplicates')  renderDuplicates(container);
-  else if (route === 'tags')        renderTags(container);
-  else if (route === 'search')      renderSearch(container);
+  else if (route === 'tags')        renderTags(container, getViewState('tags'));
+  else if (route === 'search')      renderSearch(container, getViewState('search'));
   else if (route === 'admin')     renderAdmin(container, rest[0] ?? 'stats');
   else if (route === 'share')     renderSharePage(container, rest[0]);
-  else                            renderTimeline(container);
+  else                            renderTimeline(container, getViewState('photos') ?? {});
 }
 
 window.addEventListener('hashchange', () => navigate(location.hash));
@@ -891,6 +925,9 @@ async function initApp() {
 
   // Bygg nav baserat på permissions
   renderNav();
+
+  // Ladda sparad nav-state från backend (innan första navigate)
+  await initNavState();
 
   // Navigera till startvy
   navigate(location.hash || '#/photos');

@@ -25,15 +25,68 @@ let _thumbSize  = parseInt(localStorage.getItem('sr-thumb-size') ?? '160', 10);
 let _thumbSettings = null;
 let _sortField  = 'taken_at';
 let _sortOrder  = 'desc';
+/** @type {Record<string,any>|null} */
+let _pendingNavState = null;
 
 const _debouncedSearch = debounce(() => doSearch(), 400);
 
+export function getNavState() {
+  return {
+    tagChips:    [..._tagChips],
+    personChips: [..._personChips],
+    sortField:   _sortField,
+    sortOrder:   _sortOrder,
+    formVals:    _collectFormVals(),
+  };
+}
+
+function _collectFormVals() {
+  const ids = ['sf-q','sf-location','sf-date-from','sf-date-to','sf-changed-from','sf-changed-to',
+                'sf-rating-min','sf-rating-max','sf-size-min','sf-size-max',
+                'sf-width-min','sf-width-max','sf-height-min','sf-height-max',
+                'sf-camera-make','sf-camera-model'];
+  const vals = {};
+  for (const id of ids) {
+    const el = /** @type {HTMLInputElement|null} */ (document.getElementById(id));
+    if (el?.value) vals[id] = el.value;
+  }
+  ['sf-mime','sf-motion','sf-gps','sf-fav'].forEach((name) => {
+    const checked = /** @type {HTMLInputElement|null} */ (document.querySelector(`input[name="${name}"]:checked`));
+    if (checked?.value) vals[name] = checked.value;
+  });
+  const flags  = [...document.querySelectorAll('.sf-flag:checked')].map((cb) => /** @type {HTMLInputElement} */ (cb).value);
+  const colors = [...document.querySelectorAll('.sf-color:checked')].map((cb) => /** @type {HTMLInputElement} */ (cb).value);
+  if (flags.length)  vals._flags  = flags;
+  if (colors.length) vals._colors = colors;
+  return vals;
+}
+
+function _applyNavState(ns) {
+  if (!ns) return;
+  if (ns.tagChips)    { _tagChips    = ns.tagChips;    renderTagChips(); }
+  if (ns.personChips) { _personChips = ns.personChips; renderPersonChips(); }
+  if (ns.sortField)   { _sortField   = ns.sortField;   const el = document.getElementById('sr-sort'); if (el) /** @type {HTMLSelectElement} */ (el).value = _sortField; }
+  if (ns.sortOrder)   { _sortOrder   = ns.sortOrder; }
+  const fv = ns.formVals ?? {};
+  for (const [id, val] of Object.entries(fv)) {
+    if (id.startsWith('_')) continue;
+    const el = document.getElementById(id);
+    if (el) /** @type {HTMLInputElement} */ (el).value = String(val);
+    // Radio inputs (mime, motion, gps, fav)
+    const radio = document.querySelector(`input[name="${id}"][value="${val}"]`);
+    if (radio) /** @type {HTMLInputElement} */ (radio).checked = true;
+  }
+  if (fv._flags)  fv._flags.forEach((v) => { const cb = /** @type {HTMLInputElement|null} */ (document.querySelector(`.sf-flag[value="${v}"]`)); if (cb) cb.checked = true; });
+  if (fv._colors) fv._colors.forEach((v) => { const cb = /** @type {HTMLInputElement|null} */ (document.querySelector(`.sf-color[value="${v}"]`)); if (cb) cb.checked = true; });
+}
+
 // ── Huvud-render ──────────────────────────────────────────────────────────────
 
-export async function renderSearch(container) {
+export async function renderSearch(container, navState = null) {
   _assets = [];
   _tagChips = [];
   _personChips = [];
+  _pendingNavState = navState;
 
   container.innerHTML = `
     <div class="flex h-full overflow-hidden">
@@ -266,6 +319,9 @@ export async function renderSearch(container) {
   setupSuggestInput('sf-camera-model', 'sf-model-sugg',  'cameraModel');
   setupSuggestInput('sf-location',     'sf-location-sugg','location');
 
+  // Återställ sparad state
+  if (_pendingNavState) { _applyNavState(_pendingNavState); _pendingNavState = null; }
+
   // Knappar
   document.getElementById('search-run-btn').addEventListener('click', doSearch);
   document.getElementById('search-reset-btn').addEventListener('click', resetForm);
@@ -294,6 +350,11 @@ export async function renderSearch(container) {
     () => _assets,
   );
   _sel.mountToolbar(document.getElementById('sr-sel-toolbar'));
+  window.__pmCurrentSelection = {
+    getSelected: () => _sel?.getSelected(),
+    getAllItems: () => _assets,
+    onDone: () => {},
+  };
 
   // Realtidssökning
   setupRealtimeSearch();

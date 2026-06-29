@@ -22,7 +22,8 @@ export default async function settingsRoutes(fastify) {
         default_export_synonyms:  true,
         thumb_overlay_items:      ['rating', 'flag', 'color_border'],
         thumb_overlay_position:   'hover',
-        color_labels: { '1': 'Röd', '2': 'Gul', '3': 'Grön', '4': 'Blå', '5': 'Lila' },
+        color_labels:             { '1': 'Röd', '2': 'Gul', '3': 'Grön', '4': 'Blå', '5': 'Lila' },
+        navigation_state:         {},
         ...settings,
       },
     });
@@ -73,6 +74,9 @@ export default async function settingsRoutes(fastify) {
     }
     if (body.colorLabels && typeof body.colorLabels === 'object') {
       patch.color_labels = body.colorLabels;
+    }
+    if (body.navigationState && typeof body.navigationState === 'object') {
+      patch.navigation_state = body.navigationState;
     }
 
     if (Object.keys(patch).length === 0) {
