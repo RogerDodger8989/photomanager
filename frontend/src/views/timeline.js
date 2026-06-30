@@ -20,6 +20,7 @@ let selection = null;
 let _thumbSize = parseInt(localStorage.getItem('tl-thumb-size') ?? '160', 10);
 let _thumbSettings = null;
 let expandedStacks = new Set();
+let _focusedIdx = -1;
 
 function _applyThumbSize(px) {
   _thumbSize = px;
@@ -120,6 +121,93 @@ async function _applyToTargets(targets, patch) {
   toast(`${what}${n > 1 ? ` (${n} bilder)` : ''}`, 'success');
 }
 
+// ── Tangentbordsnavigering i grid ─────────────────────────────────────────────
+
+function _countCols() {
+  const grid = document.getElementById('photo-grid');
+  if (!grid) return 1;
+  const cells = /** @type {NodeListOf<HTMLElement>} */ (grid.querySelectorAll('.photo-cell'));
+  if (cells.length < 2) return 1;
+  const firstTop = cells[0].getBoundingClientRect().top;
+  let cols = 0;
+  while (cols < cells.length && Math.abs(cells[cols].getBoundingClientRect().top - firstTop) < 4) cols++;
+  return Math.max(1, cols);
+}
+
+function _focusCell(idx, smooth = true) {
+  const grid = document.getElementById('photo-grid');
+  if (!grid) return;
+  const cells = /** @type {NodeListOf<HTMLElement>} */ (grid.querySelectorAll('.photo-cell'));
+  if (!cells.length || idx < 0 || idx >= cells.length) return;
+
+  // Ta bort outline från föregående fokus
+  if (_focusedIdx >= 0 && _focusedIdx < cells.length) {
+    cells[_focusedIdx].style.outline = '';
+    cells[_focusedIdx].style.outlineOffset = '';
+    cells[_focusedIdx].removeAttribute('tabindex');
+  }
+
+  _focusedIdx = idx;
+  const cell = cells[idx];
+  cell.tabIndex = 0;
+  cell.style.outline = '2px solid #60a5fa';
+  cell.style.outlineOffset = '-2px';
+  cell.focus({ preventScroll: true });
+  if (smooth) cell.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+document.addEventListener('keydown', (e) => {
+  if (document.getElementById('lightbox')?.classList.contains('open')) return;
+  const tag = document.activeElement?.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+  const grid = document.getElementById('photo-grid');
+  if (!grid) return;
+
+  // Ctrl+A — markera alla
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+    e.preventDefault();
+    selection?.selectAll();
+    return;
+  }
+
+  const navKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', ' '];
+  if (!navKeys.includes(e.key)) return;
+
+  const cells = /** @type {NodeListOf<HTMLElement>} */ (grid.querySelectorAll('.photo-cell'));
+  const total = cells.length;
+  if (!total) return;
+  e.preventDefault();
+
+  // Sätt startfokus om inget är fokuserat
+  if (_focusedIdx < 0 || _focusedIdx >= total) {
+    _focusCell(0);
+    return;
+  }
+
+  const cols = _countCols();
+
+  if (e.key === 'ArrowRight') {
+    _focusCell(Math.min(_focusedIdx + 1, total - 1));
+  } else if (e.key === 'ArrowLeft') {
+    _focusCell(Math.max(_focusedIdx - 1, 0));
+  } else if (e.key === 'ArrowDown') {
+    const next = _focusedIdx + cols;
+    _focusCell(Math.min(next, total - 1));
+  } else if (e.key === 'ArrowUp') {
+    _focusCell(Math.max(_focusedIdx - cols, 0));
+  } else if (e.key === 'Enter') {
+    const cell = cells[_focusedIdx];
+    const id = cell?.dataset.id;
+    const idx = allItems.findIndex((a) => a.id === id);
+    if (idx >= 0) openLightbox(allItems, idx);
+  } else if (e.key === ' ') {
+    const cell = cells[_focusedIdx];
+    const id = cell?.dataset.id;
+    const idx = allItems.findIndex((a) => a.id === id);
+    if (idx >= 0 && selection) selection.toggle(id, idx, { ctrlKey: true });
+  }
+});
+
 // Stack-badge click från celler som inte byggdes via buildPhotoCell med onExpandStack
 document.addEventListener('pm:stack-badge-click', (e) => {
   const assetId = /** @type {CustomEvent} */ (e).detail?.assetId;
@@ -174,6 +262,7 @@ export function renderTimeline(container, params = {}) {
   hasMore = true;
   allItems = [];
   expandedStacks = new Set();
+  _focusedIdx = -1;
 
   const sortLabel = { taken_at: 'Datum taget', file_size: 'Storlek', view_count: 'Populärast', indexed_at: 'Tillagd', file_name: 'Filnamn', rating: 'Betyg' };
   const curSort  = params.sort ?? 'taken_at';
@@ -317,6 +406,20 @@ function appendToGrid(items) {
       },
     );
     selection?.attachToCell(cell, asset, globalIndex);
+
+    // Spåra musklick för att synka _focusedIdx med tangentbordsnavigering
+    cell.addEventListener('mousedown', () => {
+      const cells = grid.querySelectorAll('.photo-cell');
+      const clickedIdx = Array.from(cells).indexOf(cell);
+      if (clickedIdx >= 0) {
+        // Rensa outline från föregående kb-fokus
+        if (_focusedIdx >= 0 && _focusedIdx < cells.length && _focusedIdx !== clickedIdx) {
+          /** @type {HTMLElement} */ (cells[_focusedIdx]).style.outline = '';
+          /** @type {HTMLElement} */ (cells[_focusedIdx]).style.outlineOffset = '';
+        }
+        _focusedIdx = clickedIdx;
+      }
+    }, { capture: true });
 
     // ── Kontextmeny ────────────────────────────────────────────────────────
     cell.addEventListener('contextmenu', (e) => {

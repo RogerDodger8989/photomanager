@@ -11,6 +11,7 @@ import { renderSharing }              from '/src/views/sharing.js';
 import { renderAdmin }                from '/src/views/admin.js';
 import { renderUpload }              from '/src/views/upload.js';
 import { renderFolders, getNavState as fldGetNavState } from '/src/views/folders.js';
+import { renderTimelineOverview } from '/src/views/timelineOverview.js';
 import { renderDuplicates }         from '/src/views/duplicates.js';
 import { renderTags, getNavState as tagGetNavState }   from '/src/views/tags.js';
 import { renderSearch, getNavState as srGetNavState }  from '/src/views/search.js';
@@ -117,7 +118,16 @@ function navigate(hash) {
   const [route, ...rest] = (hash.replace('#/', '') || 'photos').split('/');
   state.currentView = route;
 
-  if (route === 'photos')    { renderTimeline(container, getViewState('photos') ?? {}); currentCleanup = destroyTimeline; }
+  if (route === 'photos') {
+    let params = getViewState('photos') ?? {};
+    // #/photos/year/YYYY — filtrera på år direkt från URL
+    if (rest[0] === 'year' && rest[1]) {
+      const y = rest[1];
+      params = { dateFrom: `${y}-01-01`, dateTo: `${y}-12-31` };
+    }
+    renderTimeline(container, params);
+    currentCleanup = destroyTimeline;
+  }
   else if (route === 'explore')   renderExplore(container);
   else if (route === 'map')     { renderMap(container, getViewState('map'));      currentCleanup = destroyMap; }
   else if (route === 'albums')    renderAlbums(container, rest[0]);
@@ -128,7 +138,8 @@ function navigate(hash) {
   else if (route === 'upload')      renderUpload(container);
   else if (route === 'duplicates')  renderDuplicates(container);
   else if (route === 'tags')        renderTags(container, getViewState('tags'));
-  else if (route === 'search')      renderSearch(container, getViewState('search'));
+  else if (route === 'search')      renderSearch(container, getViewState('search'))
+  else if (route === 'timeline')    renderTimelineOverview(container);
   else if (route === 'admin')     renderAdmin(container, rest[0] ?? 'stats');
   else if (route === 'share')     renderSharePage(container, rest[0]);
   else                            renderTimeline(container, getViewState('photos') ?? {});

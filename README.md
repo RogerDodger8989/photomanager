@@ -430,13 +430,14 @@ Funktioner som planeras implementeras, i prioritetsordning. Bockas av när de ä
 | 2A | Touch-gester i lightbox | Swipe-navigation + pinch-zoom + touch-panorering |
 | 3A | Kamerastatistik | ISO/bländare/slutartid/brännvidd/objektiv-histograms i admin |
 | 3B | Minnesvy + push-notis | "Denna dag i historien" + daglig push kl 08:00 |
+| 3C | Lagringsanalys | Diskutrymme per år/album/person — ny "Lagring"-flik i admin |
+| 2C | Tangentbordsnavigering i gallery | ↑↓←→ i fotogrid, Enter öppnar lightbox, Space markerar, Ctrl+A markera alla |
+| 2B | Decennietal/årsvy | Ny "Tidslinje"-vy (#/timeline): dekad → år → månad, klick-filtrering till bilder |
+| 2D | Digital fotoram | Helskärms-slideshow på /frame.html, token-skyddad, konfig i Admin → Inställningar |
 
 ### Kvar att bygga 🔜
 | # | Funktion | Beskrivning |
 |---|----------|-------------|
-| 3C | Lagringsanalys | Diskutrymme per år/album/person — stapeldiagram i admin |
-| 2C | Tangentbordsnavigering i gallery | ↑↓←→ i fotogrid, Enter öppnar lightbox, Ctrl+A markera alla |
-| 2B | Decennietal/årsvy | Ny tidslinjegruppering: dekad → år → månad → dag vid klick |
 | 2D | Digital fotoram | Helskärm slideshow-sida (frame.html) utan inloggning, konfigurerbar källa och intervall |
 | 4A | Vattenstämpel vid export | Text/logga compositas med Sharp vid ZIP-export, toggle i exportdialog |
 | 4B | Redigera EXIF (utökat) | Ändra datum, GPS (karta), kameramodell — skrivs tillbaka via exiftool/XMP-sidecar |

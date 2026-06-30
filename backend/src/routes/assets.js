@@ -166,6 +166,74 @@ export default async function assetsRoutes(fastify) {
     return reply.send({ data: items, meta: { hasMore, nextCursor } });
   });
 
+  // GET /api/assets/timeline-summary — dekad/år/månads-grupperingsöversikt
+  fastify.get('/api/assets/timeline-summary', {
+    onRequest: [fastify.authenticate],
+    schema: {
+      querystring: {
+        type: 'object',
+        properties: {
+          groupBy: { type: 'string', enum: ['decade', 'year', 'month'] },
+          decade:  { type: 'integer' },
+          year:    { type: 'integer' },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const groupBy = request.query.groupBy ?? 'decade';
+    const decade  = request.query.decade  != null ? parseInt(request.query.decade,  10) : null;
+    const year    = request.query.year    != null ? parseInt(request.query.year,    10) : null;
+    const { isAdmin, id: userId } = request.user;
+
+    const ownerA  = isAdmin ? 'TRUE' : `a.owner_id  = '${userId}'`;
+    const ownerA2 = isAdmin ? 'TRUE' : `a2.owner_id = '${userId}'`;
+
+    let groupSql, thumbMatchSql, extraFilter = '';
+    const params = [];
+
+    if (groupBy === 'decade') {
+      groupSql     = `(FLOOR(EXTRACT(YEAR FROM a.taken_at) / 10) * 10)::int`;
+      thumbMatchSql = `(FLOOR(EXTRACT(YEAR FROM a2.taken_at) / 10) * 10)::int = grp.label`;
+    } else if (groupBy === 'year') {
+      groupSql     = `EXTRACT(YEAR FROM a.taken_at)::int`;
+      thumbMatchSql = `EXTRACT(YEAR FROM a2.taken_at)::int = grp.label`;
+      if (decade != null) {
+        params.push(decade);
+        extraFilter = `AND (FLOOR(EXTRACT(YEAR FROM a.taken_at) / 10) * 10)::int = $${params.length}`;
+      }
+    } else {
+      groupSql     = `TO_CHAR(DATE_TRUNC('month', a.taken_at), 'YYYY-MM')`;
+      thumbMatchSql = `TO_CHAR(DATE_TRUNC('month', a2.taken_at), 'YYYY-MM') = grp.label`;
+      if (year != null) {
+        params.push(year);
+        extraFilter = `AND EXTRACT(YEAR FROM a.taken_at)::int = $${params.length}`;
+      }
+    }
+
+    const { rows } = await query(`
+      SELECT grp.label, grp.count, thumbs.paths AS thumbs
+      FROM (
+        SELECT ${groupSql} AS label, COUNT(*)::int AS count
+        FROM assets a
+        WHERE a.status = 'active' AND a.taken_at IS NOT NULL AND ${ownerA} ${extraFilter}
+        GROUP BY label
+      ) grp,
+      LATERAL (
+        SELECT COALESCE(json_agg(t.p), '[]'::json) AS paths
+        FROM (
+          SELECT a2.thumb_small_path AS p
+          FROM assets a2
+          WHERE a2.status = 'active' AND a2.thumb_small_path IS NOT NULL AND ${ownerA2}
+            AND ${thumbMatchSql}
+          ORDER BY a2.taken_at DESC LIMIT 4
+        ) t
+      ) thumbs
+      ORDER BY grp.label DESC
+    `, params);
+
+    return reply.send({ data: rows });
+  });
+
   // GET /api/assets/duplicates — grupper av innehållsidentiska filer
   fastify.get('/api/assets/duplicates', {
     onRequest: [fastify.authenticate],

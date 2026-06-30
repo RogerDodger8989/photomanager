@@ -12,6 +12,49 @@ export default async function adminRoutes(fastify) {
   // Alla admin-routes kräver admin-roll
   fastify.addHook('onRequest', fastify.requireAdmin);
 
+  // GET /api/admin/stats/storage — lagringsanalys per år/album/person
+  fastify.get('/api/admin/stats/storage', async (_request, reply) => {
+    const [yearRows, albumRows, personRows] = await Promise.all([
+      query(`
+        SELECT EXTRACT(YEAR FROM taken_at)::int AS label,
+               COUNT(*)::int                    AS count,
+               COALESCE(SUM(file_size), 0)::bigint AS bytes
+        FROM assets
+        WHERE status = 'active' AND taken_at IS NOT NULL
+        GROUP BY label
+        ORDER BY label DESC
+      `),
+      query(`
+        SELECT al.name AS label,
+               COUNT(DISTINCT aa.asset_id)::int        AS count,
+               COALESCE(SUM(a.file_size), 0)::bigint   AS bytes
+        FROM albums al
+        JOIN album_assets aa ON aa.album_id = al.id
+        JOIN assets a ON a.id = aa.asset_id AND a.status = 'active'
+        GROUP BY al.id, al.name
+        ORDER BY bytes DESC
+        LIMIT 15
+      `),
+      query(`
+        SELECT p.name AS label,
+               COUNT(DISTINCT f.asset_id)::int        AS count,
+               COALESCE(SUM(a.file_size), 0)::bigint  AS bytes
+        FROM persons p
+        JOIN faces f ON f.person_id = p.id
+        JOIN assets a ON a.id = f.asset_id AND a.status = 'active'
+        GROUP BY p.id, p.name
+        ORDER BY bytes DESC
+        LIMIT 15
+      `),
+    ]);
+
+    return reply.send({ data: {
+      year:   yearRows.rows,
+      album:  albumRows.rows,
+      person: personRows.rows,
+    }});
+  });
+
   // GET /api/admin/stats/camera — kamerastatistik för histogram-vyn
   fastify.get('/api/admin/stats/camera', async (_request, reply) => {
     const [isoRows, apertureRows, shutterRows, focalRows, lensRows] = await Promise.all([

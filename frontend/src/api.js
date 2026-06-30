@@ -232,6 +232,11 @@ export const api = {
   // Admin
   adminStats:         ()        => request('GET', '/api/admin/stats'),
   cameraStats:        ()        => request('GET', '/api/admin/stats/camera'),
+  storageStats:       ()        => request('GET', '/api/admin/stats/storage'),
+  timelineSummary:    (p = {})  => request('GET', `/api/assets/timeline-summary?${new URLSearchParams(p)}`),
+  frameConfig:        ()        => request('GET',   '/api/frame/config'),
+  frameConfigPatch:   (b)       => request('PATCH', '/api/frame/config', b),
+  frameRegenerateToken: ()      => request('POST',  '/api/frame/config/regenerate-token', {}),
   adminJobs:          ()        => request('GET', '/api/admin/jobs'),
   retryJob:           (id)      => request('POST', `/api/admin/jobs/${id}/retry`),
   requeueThumbnails:  ()        => request('POST', '/api/admin/requeue-thumbnails', {}),

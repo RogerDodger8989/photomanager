@@ -2,7 +2,7 @@
 import { toast, formatDateTime, formatBytes, confirm } from '../utils.js';
 import { invalidateThumbSettings } from '../components/thumbSettings.js';
 
-const TABS = ['stats', 'users', 'jobs', 'ai', 'audit', 'duplicates', 'folders', 'trash', 'settings'];
+const TABS = ['stats', 'storage', 'users', 'jobs', 'ai', 'audit', 'duplicates', 'folders', 'trash', 'settings'];
 
 export async function renderAdmin(container, tab = 'stats') {
   container.innerHTML = `
@@ -32,13 +32,14 @@ export async function renderAdmin(container, tab = 'stats') {
 }
 
 function tabLabel(t) {
-  return { stats:'Statistik', users:'Användare', jobs:'Jobb', ai:'AI-förslag', audit:'Logg', duplicates:'Duplikat', folders:'Mappar', trash:'🗑 Papperskorg', settings:'Inställningar' }[t] ?? t;
+  return { stats:'Statistik', storage:'Lagring', users:'Användare', jobs:'Jobb', ai:'AI-förslag', audit:'Logg', duplicates:'Duplikat', folders:'Mappar', trash:'🗑 Papperskorg', settings:'Inställningar' }[t] ?? t;
 }
 
 async function loadTab(tab, content) {
   content.innerHTML = '<div class="text-slate-400 text-sm">Laddar…</div>';
   try {
     if (tab === 'stats')      await renderStats(content);
+    if (tab === 'storage')    await renderStorage(content);
     if (tab === 'users')      await renderUsers(content);
     if (tab === 'jobs')       await renderJobs(content);
     if (tab === 'ai')         await renderAiSuggestions(content);
@@ -225,6 +226,77 @@ function buildCameraStatsSection(cam) {
         <div class="bg-slate-800 rounded-xl p-4 sm:col-span-2 lg:col-span-2">
           <h3 class="text-xs font-medium text-slate-400 uppercase tracking-wide mb-3">Objektiv</h3>
           ${buildCameraBarChart(cam.lenses, 'bg-orange-500')}
+        </div>
+      </div>
+    </div>`;
+}
+
+function buildStorageRows(rows, urlFn) {
+  if (!rows?.length) return '<p class="text-xs text-slate-500 italic">Ingen data</p>';
+  const maxBytes = Math.max(...rows.map((r) => Number(r.bytes)));
+  return rows.map((r) => {
+    const pct = maxBytes > 0 ? Math.round((Number(r.bytes) / maxBytes) * 100) : 0;
+    const url = urlFn ? urlFn(r) : null;
+    const wrapStart = url
+      ? `<a href="${url}" class="block group hover:bg-slate-700/50 rounded-lg px-2 py-1 -mx-2 transition-colors cursor-pointer">`
+      : '<div class="px-2 py-1">';
+    const wrapEnd = url ? '</a>' : '</div>';
+    return `${wrapStart}
+      <div class="flex items-center gap-2 text-xs">
+        <span class="text-slate-300 truncate shrink-0" style="min-width:5rem;max-width:9rem" title="${r.label}">${r.label}</span>
+        <div class="flex-1 bg-slate-700 rounded-full h-2 min-w-0">
+          <div class="bg-teal-500 h-2 rounded-full transition-all" style="width:${pct}%"></div>
+        </div>
+        <span class="text-slate-300 text-right shrink-0 w-20">${formatBytes(Number(r.bytes))}</span>
+        <span class="text-slate-500 text-right shrink-0 w-16">${r.count} st</span>
+      </div>
+    ${wrapEnd}`;
+  }).join('');
+}
+
+async function renderStorage(content) {
+  content.innerHTML = '<div class="text-slate-400 text-sm animate-pulse">Laddar lagringsanalys…</div>';
+  const { data } = await api.storageStats();
+
+  const totalBytes = data.year.reduce((s, r) => s + Number(r.bytes), 0);
+  const totalCount = data.year.reduce((s, r) => s + Number(r.count), 0);
+
+  content.innerHTML = `
+    <div class="space-y-6">
+      <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        <div class="bg-slate-800 rounded-xl p-4">
+          <div class="text-2xl font-bold text-white">${formatBytes(totalBytes)}</div>
+          <div class="text-xs text-slate-400 mt-1">Totalt arkiverat</div>
+        </div>
+        <div class="bg-slate-800 rounded-xl p-4">
+          <div class="text-2xl font-bold text-white">${totalCount.toLocaleString('sv-SE')}</div>
+          <div class="text-xs text-slate-400 mt-1">Aktiva mediafiler</div>
+        </div>
+        <div class="bg-slate-800 rounded-xl p-4">
+          <div class="text-2xl font-bold text-white">${totalCount > 0 ? formatBytes(Math.round(totalBytes / totalCount)) : '–'}</div>
+          <div class="text-xs text-slate-400 mt-1">Snittfilstorlek</div>
+        </div>
+      </div>
+
+      <div class="bg-slate-800 rounded-xl p-4">
+        <h3 class="text-sm font-semibold text-slate-300 mb-3">📅 Per år</h3>
+        <div class="space-y-0.5 max-h-[32rem] overflow-y-auto pr-1">
+          ${buildStorageRows(data.year, (r) => `/#/photos/year/${r.label}`)}
+        </div>
+      </div>
+
+      <div class="grid sm:grid-cols-2 gap-4">
+        <div class="bg-slate-800 rounded-xl p-4">
+          <h3 class="text-sm font-semibold text-slate-300 mb-3">🗂️ Per album <span class="text-slate-500 font-normal">(topp 15)</span></h3>
+          <div class="space-y-0.5">
+            ${buildStorageRows(data.album, null)}
+          </div>
+        </div>
+        <div class="bg-slate-800 rounded-xl p-4">
+          <h3 class="text-sm font-semibold text-slate-300 mb-3">👤 Per person <span class="text-slate-500 font-normal">(topp 15)</span></h3>
+          <div class="space-y-0.5">
+            ${buildStorageRows(data.person, null)}
+          </div>
         </div>
       </div>
     </div>`;
@@ -1526,6 +1598,12 @@ async function renderUserSettings(content) {
 
         <button id="thumb-settings-save" class="px-4 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors font-medium">Spara thumbnail-inställningar</button>
       </div>
+
+      <!-- Digital fotoram -->
+      <div id="frame-section" class="bg-slate-800 border border-slate-700 rounded-xl p-4 space-y-4">
+        <div class="text-sm font-medium text-white">🖼️ Digital fotoram</div>
+        <div class="text-slate-400 text-sm animate-pulse">Laddar…</div>
+      </div>
     </div>`;
 
   let enabled = settings.face_detection_enabled;
@@ -1589,4 +1667,153 @@ async function renderUserSettings(content) {
       toast('Thumbnail-inställningar sparade', 'success');
     } catch (e) { toast(e.message, 'error'); }
   });
+
+  // Digital fotoram
+  const frameSection = content.querySelector('#frame-section');
+  if (frameSection) loadFrameSection(frameSection).catch(console.error);
+}
+
+async function loadFrameSection(section) {
+  let cfg;
+  try {
+    ({ data: cfg } = await api.frameConfig());
+  } catch (e) {
+    section.innerHTML = `<div class="text-sm font-medium text-white">🖼️ Digital fotoram</div>
+      <div class="text-red-400 text-xs">${e.message}</div>`;
+    return;
+  }
+
+  const albums = await api.albums().then((r) => r.data ?? []).catch(() => []);
+  const frameUrl = cfg.token
+    ? `${location.origin}/frame.html?token=${cfg.token}&interval=${cfg.interval ?? 10}`
+    : null;
+
+  function renderSection() {
+    section.innerHTML = `
+      <div class="flex items-center justify-between">
+        <div class="text-sm font-medium text-white">🖼️ Digital fotoram</div>
+        <button id="frame-toggle" role="switch"
+          aria-checked="${cfg.enabled ? 'true' : 'false'}"
+          class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${cfg.enabled ? 'bg-blue-600' : 'bg-slate-600'}">
+          <span class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${cfg.enabled ? 'translate-x-6' : 'translate-x-1'}"></span>
+        </button>
+      </div>
+
+      <div class="grid sm:grid-cols-2 gap-3">
+        <div>
+          <label class="text-xs text-slate-400 block mb-1">Källa</label>
+          <select id="frame-source" class="w-full bg-slate-700 border border-slate-600 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500">
+            <option value="random"    ${cfg.source === 'random'    ? 'selected' : ''}>Slumpmässigt</option>
+            <option value="favorites" ${cfg.source === 'favorites' ? 'selected' : ''}>Favoriter</option>
+            <option value="album"     ${cfg.source === 'album'     ? 'selected' : ''}>Album</option>
+          </select>
+        </div>
+        <div id="frame-album-wrap" class="${cfg.source === 'album' ? '' : 'opacity-40 pointer-events-none'}">
+          <label class="text-xs text-slate-400 block mb-1">Album</label>
+          <select id="frame-album" class="w-full bg-slate-700 border border-slate-600 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500">
+            <option value="">— välj album —</option>
+            ${albums.map((a) => `<option value="${a.id}" ${cfg.album_id === a.id ? 'selected' : ''}>${a.name}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+
+      <div>
+        <label class="text-xs text-slate-400 block mb-1">Bildintervall: <span id="frame-interval-label">${cfg.interval ?? 10}</span> sek</label>
+        <input id="frame-interval" type="range" min="3" max="120" step="1"
+          value="${cfg.interval ?? 10}" class="w-full accent-blue-500">
+      </div>
+
+      <div class="flex items-center justify-between">
+        <div>
+          <div class="text-sm text-slate-200">Visa datum och plats</div>
+          <div class="text-xs text-slate-400 mt-0.5">Info-overlay längst ned i bild</div>
+        </div>
+        <button id="frame-info-toggle" role="switch"
+          aria-checked="${cfg.show_info !== false ? 'true' : 'false'}"
+          class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${cfg.show_info !== false ? 'bg-blue-600' : 'bg-slate-600'}">
+          <span class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${cfg.show_info !== false ? 'translate-x-6' : 'translate-x-1'}"></span>
+        </button>
+      </div>
+
+      <div class="flex gap-2 flex-wrap">
+        <button id="frame-save" class="px-4 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors font-medium">Spara</button>
+        <button id="frame-regen" class="px-3 py-1.5 text-xs text-slate-300 hover:text-white bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors">Nytt token</button>
+      </div>
+
+      ${frameUrl ? `
+        <div class="bg-slate-900 rounded-lg p-3 space-y-1.5">
+          <div class="text-xs text-slate-400">Fotoram-URL (öppna i webbläsare)</div>
+          <div class="flex items-center gap-2">
+            <input id="frame-url-input" type="text" readonly value="${frameUrl}"
+              class="flex-1 bg-transparent text-xs text-teal-300 font-mono focus:outline-none truncate">
+            <button id="frame-url-copy" class="text-xs text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-700 shrink-0">Kopiera</button>
+          </div>
+          <a href="${frameUrl}" target="_blank"
+            class="inline-flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 transition-colors">
+            Öppna fotoram ↗
+          </a>
+        </div>` : '<div class="text-xs text-slate-500">Spara för att generera URL.</div>'}`;
+
+    bindFrameHandlers();
+  }
+
+  function bindFrameHandlers() {
+    section.querySelector('#frame-interval')?.addEventListener('input', (e) => {
+      section.querySelector('#frame-interval-label').textContent = e.target.value;
+    });
+
+    section.querySelector('#frame-source')?.addEventListener('change', (e) => {
+      const albumWrap = section.querySelector('#frame-album-wrap');
+      if (albumWrap) {
+        const isAlbum = e.target.value === 'album';
+        albumWrap.classList.toggle('opacity-40', !isAlbum);
+        albumWrap.classList.toggle('pointer-events-none', !isAlbum);
+      }
+    });
+
+    section.querySelector('#frame-toggle')?.addEventListener('click', () => {
+      cfg.enabled = !cfg.enabled;
+      const btn = section.querySelector('#frame-toggle');
+      btn.setAttribute('aria-checked', String(cfg.enabled));
+      btn.className = `relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${cfg.enabled ? 'bg-blue-600' : 'bg-slate-600'}`;
+      btn.querySelector('span').className = `inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${cfg.enabled ? 'translate-x-6' : 'translate-x-1'}`;
+    });
+
+    section.querySelector('#frame-info-toggle')?.addEventListener('click', () => {
+      cfg.show_info = cfg.show_info === false ? true : false;
+      const btn = section.querySelector('#frame-info-toggle');
+      btn.setAttribute('aria-checked', String(cfg.show_info !== false));
+      btn.className = `relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${cfg.show_info !== false ? 'bg-blue-600' : 'bg-slate-600'}`;
+      btn.querySelector('span').className = `inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${cfg.show_info !== false ? 'translate-x-6' : 'translate-x-1'}`;
+    });
+
+    section.querySelector('#frame-save')?.addEventListener('click', async () => {
+      const source    = section.querySelector('#frame-source')?.value;
+      const album_id  = section.querySelector('#frame-album')?.value || null;
+      const interval  = parseInt(section.querySelector('#frame-interval')?.value ?? '10', 10);
+      try {
+        const { data } = await api.frameConfigPatch({ enabled: cfg.enabled, source, album_id, interval, show_info: cfg.show_info !== false });
+        cfg = data;
+        renderSection();
+        toast('Fotoram-inställningar sparade', 'success');
+      } catch (e) { toast(e.message, 'error'); }
+    });
+
+    section.querySelector('#frame-regen')?.addEventListener('click', async () => {
+      if (!confirm('Nuvarande URL slutar fungera. Nytt token?')) return;
+      try {
+        const { data } = await api.frameRegenerateToken();
+        cfg = data;
+        renderSection();
+        toast('Nytt token genererat', 'success');
+      } catch (e) { toast(e.message, 'error'); }
+    });
+
+    section.querySelector('#frame-url-copy')?.addEventListener('click', () => {
+      const input = /** @type {HTMLInputElement} */ (section.querySelector('#frame-url-input'));
+      navigator.clipboard.writeText(input.value).then(() => toast('URL kopierad', 'success')).catch(() => {});
+    });
+  }
+
+  renderSection();
 }

@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PhotoManager — Fotoram</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #000;
+      color: #fff;
+      font-family: system-ui, -apple-system, sans-serif;
+      overflow: hidden;
+      height: 100dvh;
+      width: 100dvw;
+      cursor: none;
+    }
+
+    #frame-wrap {
+      position: fixed;
+      inset: 0;
+    }
+
+    .frame-img {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      opacity: 0;
+      transition: opacity 1.2s ease;
+    }
+    .frame-img.visible  { opacity: 1; }
+    .frame-img.fading   { opacity: 0; }
+
+    #frame-info {
+      position: fixed;
+      bottom: 2rem;
+      left: 2rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+      opacity: 0;
+      transition: opacity 0.6s ease;
+    }
+    #frame-info.show { opacity: 1; }
+    #frame-date {
+      font-size: 1.1rem;
+      font-weight: 600;
+      text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+    }
+    #frame-loc {
+      font-size: 0.85rem;
+      color: rgba(255,255,255,0.7);
+      text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+    }
+
+    #frame-clock {
+      position: fixed;
+      top: 1.5rem;
+      right: 2rem;
+      text-align: right;
+      opacity: 0;
+      transition: opacity 0.6s ease;
+    }
+    #frame-clock.show { opacity: 1; }
+    #clock-time {
+      font-size: 3rem;
+      font-weight: 200;
+      letter-spacing: -0.02em;
+      text-shadow: 0 2px 8px rgba(0,0,0,0.8);
+    }
+    #clock-date-str {
+      font-size: 0.85rem;
+      color: rgba(255,255,255,0.6);
+      text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+    }
+
+    #frame-error {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 1rem;
+      text-align: center;
+      padding: 2rem;
+      background: #0f172a;
+    }
+    #frame-error h1 { font-size: 1.5rem; color: #f87171; }
+    #frame-error p  { color: #94a3b8; font-size: 0.9rem; max-width: 30rem; }
+  </style>
+</head>
+<body>
+
+<div id="frame-wrap"></div>
+
+<div id="frame-info">
+  <div id="frame-date"></div>
+  <div id="frame-loc"></div>
+</div>
+
+<div id="frame-clock">
+  <div id="clock-time"></div>
+  <div id="clock-date-str"></div>
+</div>
+
+<div id="frame-error" style="display:none">
+  <h1>Fotoram ej tillgänglig</h1>
+  <p id="frame-error-msg">Kontrollera token-parametern i URL:en och att fotoram är aktiverat i admin.</p>
+</div>
+
+<script>
+  const params  = new URLSearchParams(location.search);
+  const token   = params.get('token') ?? '';
+  const wrap    = document.getElementById('frame-wrap');
+  const infoEl  = document.getElementById('frame-info');
+  const dateEl  = document.getElementById('frame-date');
+  const locEl   = document.getElementById('frame-loc');
+  const clockEl = document.getElementById('frame-clock');
+  const errEl   = document.getElementById('frame-error');
+
+  let photos    = [];
+  let idx       = 0;
+  let interval  = 10_000;
+  let showInfo  = true;
+  let timer     = null;
+  let imgA      = null;
+  let imgB      = null;
+  let useA      = true;
+
+  // ── Klocka ────────────────────────────────────────────────────────────────
+  const DAYS_SV   = ['söndag','måndag','tisdag','onsdag','torsdag','fredag','lördag'];
+  const MONTHS_SV = ['jan','feb','mar','apr','maj','jun','jul','aug','sep','okt','nov','dec'];
+
+  function tickClock() {
+    const now = new Date();
+    const hh  = String(now.getHours()).padStart(2, '0');
+    const mm  = String(now.getMinutes()).padStart(2, '0');
+    document.getElementById('clock-time').textContent = `${hh}:${mm}`;
+    const ds = `${DAYS_SV[now.getDay()]} ${now.getDate()} ${MONTHS_SV[now.getMonth()]}`;
+    document.getElementById('clock-date-str').textContent = ds;
+  }
+  tickClock();
+  setInterval(tickClock, 15_000);
+
+  // ── Bilder ─────────────────────────────────────────────────────────────────
+  function createImg() {
+    const el = document.createElement('img');
+    el.className = 'frame-img';
+    wrap.appendChild(el);
+    return el;
+  }
+
+  imgA = createImg();
+  imgB = createImg();
+
+  function formatDate(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    return d.toLocaleDateString('sv-SE', { year: 'numeric', month: 'long', day: 'numeric' });
+  }
+
+  function showPhoto(photo) {
+    const current = useA ? imgA : imgB;
+    const next    = useA ? imgB : imgA;
+
+    next.src = `/thumbs/${photo.thumb_large_path}`;
+    next.onload = () => {
+      current.classList.remove('visible');
+      current.classList.add('fading');
+      next.classList.add('visible');
+      next.classList.remove('fading');
+      useA = !useA;
+
+      if (showInfo) {
+        dateEl.textContent = formatDate(photo.taken_at);
+        locEl.textContent  = photo.location_label ?? '';
+        locEl.style.display = photo.location_label ? '' : 'none';
+        infoEl.classList.add('show');
+        clockEl.classList.add('show');
+      }
+    };
+  }
+
+  function nextPhoto() {
+    if (!photos.length) return;
+    showPhoto(photos[idx]);
+    idx = (idx + 1) % photos.length;
+    // Ladda om batchen när vi nått slutet
+    if (idx === 0) fetchPhotos();
+  }
+
+  async function fetchPhotos() {
+    try {
+      const res  = await fetch(`/api/frame/photos?token=${encodeURIComponent(token)}&limit=30`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        showError(body.error ?? 'Okänt fel');
+        return;
+      }
+      const { data } = await res.json();
+      if (!data?.length) { showError('Inga bilder hittades för denna fotoram.'); return; }
+      photos = data;
+      idx    = 0;
+    } catch {
+      if (!photos.length) showError('Kunde inte ansluta till servern.');
+    }
+  }
+
+  function showError(msg) {
+    errEl.style.display = '';
+    document.getElementById('frame-error-msg').textContent = msg;
+    wrap.style.display = 'none';
+    infoEl.style.display = 'none';
+    clockEl.style.display = 'none';
+  }
+
+  async function init() {
+    if (!token) { showError('Inget token angivet i URL:en. Lägg till ?token=xxx'); return; }
+
+    await fetchPhotos();
+    if (!photos.length) return;
+
+    // Hämta interval-inställning från första batch-svaret — nej, vi hämtar via config
+    // Använd default tills sidladdning via config-endpoint möjliggörs
+    // Istället låter vi den anropande URL:en ha ?interval=X som override
+    const urlInterval = parseInt(params.get('interval') ?? '0', 10);
+    if (urlInterval >= 3) interval = urlInterval * 1000;
+
+    nextPhoto();
+    timer = setInterval(nextPhoto, interval);
+  }
+
+  init();
+</script>
+</body>
+</html>

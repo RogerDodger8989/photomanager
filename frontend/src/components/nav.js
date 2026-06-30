@@ -2,8 +2,9 @@
 
 // Nav-items: [key, label, emoji, route]
 const NAV_ITEMS = [
-  ['photos',   'Bilder',    '🖼️',  '#/photos'],
-  ['explore',  'Utforska',  '✨',  '#/explore'],
+  ['photos',    'Bilder',    '🖼️',  '#/photos'],
+  ['timeline',  'Tidslinje', '🗓️',  '#/timeline'],
+  ['explore',   'Utforska',  '✨',  '#/explore'],
   ['map',      'Karta',     '🗺️',  '#/map'],
   ['sharing',  'Delning',   '🔗',  '#/sharing'],
   ['favorites','Favoriter', '❤️',  '#/favorites'],

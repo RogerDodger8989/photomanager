@@ -41,6 +41,7 @@ const MIGRATIONS = [
   '034_phash.sql',
   '035_ai_tags.sql',
   '036_camera_stats.sql',
+  '037_system_settings.sql',
 ];
 
 export async function runMigrations(client) {
