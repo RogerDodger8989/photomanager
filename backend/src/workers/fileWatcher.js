@@ -4,6 +4,7 @@ import { config } from '../config.js';
 import { query } from '../db/pool.js';
 import { indexFile, removeFileFromIndex } from './indexer.js';
 import { mountCifsShare, isMounted } from '../services/mountService.js';
+import { createSession, closeSession } from '../services/importSessionService.js';
 
 const MEDIA_EXTENSIONS = /\.(jpg|jpeg|png|webp|heic|heif|tiff|tif|gif|avif|bmp|cr2|cr3|nef|arw|dng|orf|rw2|raf|pef|mp4|mov|avi|mkv|webm|mpg|mpeg|3gp|wmv|m4v)$/i;
 
@@ -12,13 +13,35 @@ const processingQueue = new Set();
 // Map: sökväg → chokidar-instans
 const watchers = new Map();
 
+// Session-state per bevakad mapp: debounce 30s efter sista filen
+const sessionState = new Map(); // folderKey → { sessionId, timer }
+
+async function getOrCreateSession(folderKey) {
+  let state = sessionState.get(folderKey);
+  if (!state) {
+    // Sätt placeholder SYNKRONT innan första await för att hindra race conditions
+    // (alla parallella handleAdd-anrop ser samma state-objekt)
+    state = { sessionId: null, timer: null };
+    sessionState.set(folderKey, state);
+    state.sessionId = await createSession('watcher', folderKey).catch(() => null);
+  }
+  // Återställ debounce-timer — stänger sessionen 30s efter sista filen
+  if (state.timer) clearTimeout(state.timer);
+  state.timer = setTimeout(async () => {
+    sessionState.delete(folderKey);
+    await closeSession(state.sessionId).catch(() => {});
+  }, 30_000);
+  return state.sessionId;
+}
+
 async function handleAdd(filePath, sourceFolderKey = null) {
   if (!MEDIA_EXTENSIONS.test(filePath)) return;
   if (processingQueue.has(filePath)) return;
   processingQueue.add(filePath);
   try {
     await new Promise((r) => setTimeout(r, 2000));
-    await indexFile(filePath, sourceFolderKey);
+    const sessionId = await getOrCreateSession(sourceFolderKey ?? 'default');
+    await indexFile(filePath, sourceFolderKey, sessionId);
   } catch (err) {
     console.error(`Indexeringsfel för ${filePath}:`, err.message);
   } finally {

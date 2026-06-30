@@ -2,7 +2,7 @@
 import { toast, formatDateTime, formatBytes, confirm } from '../utils.js';
 import { invalidateThumbSettings } from '../components/thumbSettings.js';
 
-const TABS = ['stats', 'storage', 'users', 'jobs', 'ai', 'audit', 'duplicates', 'folders', 'trash', 'settings'];
+const TABS = ['stats', 'storage', 'users', 'jobs', 'ai', 'audit', 'duplicates', 'folders', 'trash', 'settings', 'import'];
 
 export async function renderAdmin(container, tab = 'stats') {
   container.innerHTML = `
@@ -32,7 +32,7 @@ export async function renderAdmin(container, tab = 'stats') {
 }
 
 function tabLabel(t) {
-  return { stats:'Statistik', storage:'Lagring', users:'Användare', jobs:'Jobb', ai:'AI-förslag', audit:'Logg', duplicates:'Duplikat', folders:'Mappar', trash:'🗑 Papperskorg', settings:'Inställningar' }[t] ?? t;
+  return { stats:'Statistik', storage:'Lagring', users:'Användare', jobs:'Jobb', ai:'AI-förslag', audit:'Logg', duplicates:'Duplikat', folders:'Mappar', trash:'🗑 Papperskorg', settings:'Inställningar', import:'Import' }[t] ?? t;
 }
 
 async function loadTab(tab, content) {
@@ -48,6 +48,7 @@ async function loadTab(tab, content) {
     if (tab === 'folders')    await renderWatchedFolders(content);
     if (tab === 'trash')      await renderTrash(content);
     if (tab === 'settings')   await renderUserSettings(content);
+    if (tab === 'import')     await renderImportSessions(content);
   } catch (e) { content.innerHTML = `<div class="text-red-400 text-sm">${e.message}</div>`; }
 }
 
@@ -1919,4 +1920,70 @@ async function loadFrameSection(section) {
   }
 
   renderSection();
+}
+
+async function renderImportSessions(content) {
+  content.innerHTML = '<div class="text-slate-400 text-sm">Laddar…</div>';
+  const { data: sessions } = await api.importSessions(100);
+
+  function fmtDuration(started, ended) {
+    if (!ended) return 'Pågår';
+    const ms = new Date(ended) - new Date(started);
+    if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
+    return `${Math.round(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`;
+  }
+
+  function fmtDate(iso) {
+    return iso ? new Date(iso).toLocaleString('sv-SE', { dateStyle: 'short', timeStyle: 'short' }) : '–';
+  }
+
+  // Filtrera bort rena "startup-scan"-sessioner (bara hoppade, inga riktiga importer)
+  const realSessions = sessions.filter((s) => s.imported > 0 || s.errors > 0);
+  const hiddenCount  = sessions.length - realSessions.length;
+
+  if (!realSessions.length) {
+    content.innerHTML = `<p class="text-sm text-slate-400">Inga importsessioner med nya filer hittades.${sessions.length ? ` (${sessions.length} uppstartsscanningar döljs)` : ''} Sessioner skapas automatiskt när nya filer läggs till i bevakade mappar.</p>`;
+    return;
+  }
+
+  content.innerHTML = `
+    <div class="space-y-1">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-base font-semibold text-white">Import-historik</h2>
+        <span class="text-xs text-slate-500">${realSessions.length} sessioner${hiddenCount ? ` · ${hiddenCount} uppstartsscanningar döljs` : ''}</span>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs text-left">
+          <thead>
+            <tr class="text-slate-400 border-b border-slate-700">
+              <th class="pb-2 pr-4 font-medium">Startad</th>
+              <th class="pb-2 pr-4 font-medium">Källa</th>
+              <th class="pb-2 pr-4 font-medium text-right">Importerade</th>
+              <th class="pb-2 pr-4 font-medium text-right">Hoppade</th>
+              <th class="pb-2 pr-4 font-medium text-right">Fel</th>
+              <th class="pb-2 pr-4 font-medium text-right">Totalt</th>
+              <th class="pb-2 font-medium text-right">Tid</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-800">
+            ${realSessions.map((s) => `
+              <tr class="hover:bg-slate-800/50 transition-colors">
+                <td class="py-2 pr-4 text-slate-300 whitespace-nowrap">${fmtDate(s.started_at)}</td>
+                <td class="py-2 pr-4 text-slate-400 max-w-[160px] truncate" title="${s.source_path ?? s.source}">
+                  ${s.source === 'upload' ? '⬆ Uppladdning' : s.source_path ? `📁 ${s.source_path.split(/[\\/]/).pop()}` : '👁 Bevakare'}
+                </td>
+                <td class="py-2 pr-4 text-right">
+                  <span class="${s.imported > 0 ? 'text-green-400 font-medium' : 'text-slate-500'}">${s.imported}</span>
+                </td>
+                <td class="py-2 pr-4 text-right text-slate-500">${s.skipped}</td>
+                <td class="py-2 pr-4 text-right">
+                  <span class="${s.errors > 0 ? 'text-red-400 font-medium' : 'text-slate-500'}">${s.errors}</span>
+                </td>
+                <td class="py-2 pr-4 text-right text-slate-400">${s.total}</td>
+                <td class="py-2 text-right text-slate-500 whitespace-nowrap">${fmtDuration(s.started_at, s.ended_at)}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
 }

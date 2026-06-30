@@ -711,4 +711,18 @@ export default async function adminRoutes(fastify) {
     const result = await backfillMotionPhotos();
     return reply.send({ data: result });
   });
+
+  // GET /api/admin/import-sessions — senaste import-sessioner
+  fastify.get('/api/admin/import-sessions', async (request, reply) => {
+    const limit = Math.min(parseInt(request.query.limit ?? '100', 10), 200);
+    const { rows } = await query(
+      `SELECT id, source, source_path, started_at, ended_at,
+              total, imported, skipped, errors
+       FROM import_sessions
+       ORDER BY started_at DESC
+       LIMIT $1`,
+      [limit]
+    );
+    return reply.send({ data: rows });
+  });
 }

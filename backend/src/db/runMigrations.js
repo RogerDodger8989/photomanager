@@ -43,6 +43,7 @@ const MIGRATIONS = [
   '036_camera_stats.sql',
   '037_system_settings.sql',
   '038_watermark_settings.sql',
+  '039_import_sessions.sql',
 ];
 
 export async function runMigrations(client) {

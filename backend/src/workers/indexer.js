@@ -10,6 +10,7 @@ import { createJob } from '../services/jobService.js';
 import { broadcast } from '../services/sseService.js';
 import { processAssetFaces, isAiAvailable } from '../services/aiService.js';
 import { computeAndStorePHash } from '../services/pHashService.js';
+import { recordResult } from '../services/importSessionService.js';
 
 // Hämtar om ansiktsigenkänning är aktiverad för ägaren av given bevakad mapp
 async function getFaceSettings(sourceFolderPath) {
@@ -30,11 +31,11 @@ async function getFaceSettings(sourceFolderPath) {
 }
 
 // Kallas från fileWatcher när en ny fil detekteras
-export async function indexFile(absolutePath, sourceFolderPath = null) {
+export async function indexFile(absolutePath, sourceFolderPath = null, sessionId = null) {
   const mimeType = getMimeType(absolutePath);
 
   // Filtrera bort icke-mediafiler (t.ex. .DS_Store, .tmp)
-  if (!isImage(mimeType) && !isVideo(mimeType)) return;
+  if (!isImage(mimeType) && !isVideo(mimeType)) return { status: 'skipped' };
 
   const relPath = relative(config.media.photosPath, absolutePath).replace(/\\/g, '/');
   const fileName = absolutePath.split(/[\\/]/).pop();
@@ -69,7 +70,8 @@ export async function indexFile(absolutePath, sourceFolderPath = null) {
       }
       broadcast('asset.indexed', { assetId: row.id, fileName, mimeType });
       console.log(`Återställd (${row.status}): ${relPath}`);
-      return row.id;
+      await recordResult(sessionId, 'imported');
+      return { status: 'restored', assetId: row.id };
     }
     // Koppla till den mapp som nu bevakar filen (om den saknas eller skiljer sig)
     if (sourceFolderPath && row.source_folder !== sourceFolderPath) {
@@ -136,7 +138,8 @@ export async function indexFile(absolutePath, sourceFolderPath = null) {
         console.warn(`Backfill GPS/faces misslyckades för ${relPath}:`, err.message);
       }
     }
-    return;
+    await recordResult(sessionId, 'skipped');
+    return { status: 'skipped' };
   }
 
   // 2. SHA-256 hash + duplikat-kontroll
@@ -145,7 +148,8 @@ export async function indexFile(absolutePath, sourceFolderPath = null) {
     fileHash = await computeFileHash(absolutePath);
   } catch {
     console.warn(`Kan inte läsa fil: ${absolutePath}`);
-    return;
+    await recordResult(sessionId, 'error');
+    return { status: 'error' };
   }
 
   // 3. Extrahera metadata
@@ -336,8 +340,9 @@ export async function indexFile(absolutePath, sourceFolderPath = null) {
   // Notifiera alla inloggade klienter om ny fil
   broadcast('asset.indexed', { assetId, fileName, mimeType: meta.mimeType });
 
+  await recordResult(sessionId, 'imported');
   console.log(`Indexerad: ${relPath}`);
-  return assetId;
+  return { status: 'imported', assetId };
 }
 
 /**

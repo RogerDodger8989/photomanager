@@ -263,6 +263,7 @@ export const api = {
   objectDetectionModelStatus: () => request('GET', '/api/admin/object-detection/model-status'),
   objectDetectionDownloadModel: () => request('POST', '/api/admin/object-detection/download-model', {}),
   objectDetectionBackfill: ()   => request('POST', '/api/admin/object-detection/backfill', {}),
+  importSessions: (limit = 100) => request('GET', `/api/admin/import-sessions?limit=${limit}`),
 
   // Tags
   tagTree:          ()              => request('GET', '/api/tags/tree'),
