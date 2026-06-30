@@ -33,6 +33,7 @@ import settingsRoutes     from './routes/settings.js';
 import tagsRoutes         from './routes/tags.js';
 import stacksRoutes       from './routes/stacks.js';
 import frameRoutes        from './routes/frame.js';
+import socialRoutes       from './routes/social.js';
 
 // Workers
 import { startFileWatcher }     from './workers/fileWatcher.js';
@@ -82,6 +83,7 @@ await fastify.register(settingsRoutes);
 await fastify.register(tagsRoutes);
 await fastify.register(stacksRoutes);
 await fastify.register(frameRoutes);
+await fastify.register(socialRoutes);
 
 // Health check
 fastify.get('/api/health', async () => ({

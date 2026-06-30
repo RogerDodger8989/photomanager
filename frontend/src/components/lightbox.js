@@ -5,6 +5,7 @@ import { state } from '../state.js';
 import { openAddToAlbumModal } from '../views/albums.js';
 import { openShareModal } from './shareModal.js';
 import { openImageEditor } from './imageEditor.js';
+import { mountSocialPanel } from './socialPanel.js';
 
 let currentIndex = 0;
 let items = [];
@@ -272,6 +273,9 @@ async function loadInfoDrawer(assetId) {
     // Ladda om face-overlays så nyskapade faces syns direkt
     lbFaces.innerHTML = '';
     loadFaceOverlays(assetId);
+    // Social-panel monteras i den placeholder som buildDrawerHTML skapade
+    const socialMount = lbMetaCont.querySelector('#lb-social-mount');
+    if (socialMount) mountSocialPanel(socialMount, assetId, state.user).catch(() => {});
   } catch (err) {
     lbMetaCont.innerHTML = `
       <div class="p-4 text-red-400 text-sm">Kunde inte ladda metadata: ${err.message}</div>`;
@@ -338,6 +342,13 @@ function buildDrawerHTML(m) {
       title: 'System & Verktyg',
       open: false,
       custom: buildSystemSection(m.system),
+    },
+    {
+      id: 'social',
+      icon: '💬',
+      title: 'Reaktioner & Kommentarer',
+      open: true,
+      custom: '<div id="lb-social-mount" class="pb-1"></div>',
     },
   ];
 

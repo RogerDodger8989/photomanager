@@ -44,6 +44,7 @@ const MIGRATIONS = [
   '037_system_settings.sql',
   '038_watermark_settings.sql',
   '039_import_sessions.sql',
+  '040_social.sql',
 ];
 
 export async function runMigrations(client) {
