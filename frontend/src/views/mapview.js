@@ -261,19 +261,18 @@ function updateTruncationBadge(truncated, shown, total) {
 
 async function openAsset(assetId) {
   try {
-    // api.asset() returnerar ett nested objekt — bygg ett flat asset-objekt för lightboxen
+    // api.asset() anropar GET /api/assets/:id → returnerar flat a.* objekt
     const { data } = await api.asset(assetId);
-    const flat = {
-      id:               data.assetId,
-      file_name:        data.fileInfo?.fileName,
-      mime_type:        data.fileInfo?.mimeType,
-      thumb_small_path: null,
-      thumb_large_path: data.fileInfo?.thumbLargePath ?? null,
-      taken_at:         data.temporalSpatial?.capturedAt ?? null,
-      duration:         data.fileInfo?.duration ?? null,
-      is_motion_photo:  false,
-    };
-    openLightbox([flat], 0);
+    openLightbox([{
+      id:               data.id,
+      file_name:        data.file_name,
+      mime_type:        data.mime_type,
+      thumb_small_path: data.thumb_small_path ?? null,
+      thumb_large_path: data.thumb_large_path ?? null,
+      taken_at:         data.taken_at ?? null,
+      duration:         data.duration ?? null,
+      is_motion_photo:  data.is_motion_photo ?? false,
+    }], 0);
   } catch {}
 }
 

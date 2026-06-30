@@ -1,8 +1,11 @@
 import { createReadStream, existsSync } from 'fs';
 import { join, resolve, extname, basename } from 'path';
 import archiver from 'archiver';
+import sharp from 'sharp';
 import { query } from '../db/pool.js';
 import { config } from '../config.js';
+
+const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.tiff', '.tif']);
 
 function buildXmp(asset, tags, persons) {
   const subjects = tags.map((t) => `      <rdf:li>${escXml(t)}</rdf:li>`).join('\n');
@@ -36,14 +39,94 @@ function escXml(str) {
     .replace(/"/g, '&quot;');
 }
 
+async function buildWatermarkBuffer(filePath, cfg) {
+  const ext = extname(filePath).toLowerCase();
+  if (!IMAGE_EXTS.has(ext)) return null;
+
+  const meta = await sharp(filePath).metadata();
+  const w = meta.width  ?? 1920;
+  const h = meta.height ?? 1080;
+
+  const fontSize = Math.max(16, Math.round(Math.min(w, h) * 0.035));
+  const pad      = Math.round(fontSize * 1.4);
+  const opacity  = cfg.opacity ?? 0.65;
+  const stroke   = Math.max(1, Math.round(fontSize / 14));
+  const text     = escXml(cfg.text ?? '© PhotoManager');
+
+  let tx, ty, anchor;
+  switch (cfg.position) {
+    case 'southwest': tx = pad;         ty = h - pad;          anchor = 'start';  break;
+    case 'northeast': tx = w - pad;     ty = fontSize + pad;   anchor = 'end';    break;
+    case 'northwest': tx = pad;         ty = fontSize + pad;   anchor = 'start';  break;
+    case 'center':    tx = w / 2 | 0;  ty = h / 2 | 0;       anchor = 'middle'; break;
+    default:          tx = w - pad;     ty = h - pad;          anchor = 'end';    // southeast
+  }
+
+  const svg = Buffer.from(
+    `<svg width="${w}" height="${h}" xmlns="http://www.w3.org/2000/svg">
+       <text x="${tx}" y="${ty}" text-anchor="${anchor}"
+             font-family="Arial,Helvetica,sans-serif" font-size="${fontSize}"
+             fill="white" fill-opacity="${opacity}"
+             stroke="black" stroke-width="${stroke}"
+             stroke-opacity="${opacity * 0.55}" paint-order="stroke">
+         ${text}
+       </text>
+     </svg>`
+  );
+
+  return sharp(filePath)
+    .rotate()
+    .composite([{ input: svg, blend: 'over' }])
+    .jpeg({ quality: 92 })
+    .toBuffer();
+}
+
+async function getWatermarkConfig() {
+  const { rows } = await query("SELECT value FROM system_settings WHERE key = 'watermark'");
+  return rows[0]?.value ?? { text: '© PhotoManager', position: 'southeast', opacity: 0.65 };
+}
+
+async function addAssetToArchive(archive, asset, photosPath, wmCfg) {
+  const filePath = resolve(photosPath, asset.file_path);
+  if (!existsSync(filePath)) return;
+
+  if (wmCfg) {
+    const wmBuf = await buildWatermarkBuffer(filePath, wmCfg).catch(() => null);
+    const ext   = extname(asset.file_name).toLowerCase();
+    const name  = wmBuf
+      ? basename(asset.file_name, ext) + '.jpg'
+      : asset.file_name;
+    if (wmBuf) archive.append(wmBuf, { name });
+    else       archive.file(filePath, { name });
+  } else {
+    archive.file(filePath, { name: asset.file_name });
+  }
+
+  const xmp     = buildXmp(asset, asset.tags ?? [], asset.persons ?? []);
+  const xmpName = basename(asset.file_name, extname(asset.file_name)) + '.xmp';
+  archive.append(xmp, { name: xmpName });
+}
+
+const ASSET_SELECT = `
+  SELECT
+    a.id, a.file_name, a.file_path, a.taken_at, a.location_label,
+    ST_Y(a.location::geometry) AS latitude,
+    ST_X(a.location::geometry) AS longitude,
+    COALESCE(array_agg(DISTINCT t.name) FILTER (WHERE t.name IS NOT NULL), '{}') AS tags,
+    COALESCE(array_agg(DISTINCT p.name) FILTER (WHERE p.name IS NOT NULL), '{}') AS persons
+  FROM assets a
+  LEFT JOIN asset_tags at2 ON at2.asset_id = a.id
+  LEFT JOIN tags t ON t.id = at2.tag_id
+  LEFT JOIN faces f ON f.asset_id = a.id
+  LEFT JOIN persons p ON p.id = f.person_id`;
+
 export default async function exportRoutes(fastify) {
 
-  // POST /api/export/zip
-  // Body: { assetIds: [...] }  — max 500 bilder per export
+  // POST /api/export/zip — { assetIds, watermark? }
   fastify.post('/api/export/zip', {
     onRequest: [fastify.authenticate],
   }, async (request, reply) => {
-    const { assetIds } = request.body ?? {};
+    const { assetIds, watermark = false } = request.body ?? {};
     if (!Array.isArray(assetIds) || assetIds.length === 0) {
       return reply.status(400).send({ error: 'assetIds krävs' });
     }
@@ -51,26 +134,10 @@ export default async function exportRoutes(fastify) {
       return reply.status(400).send({ error: 'Max 500 bilder per export' });
     }
 
-    // Hämta assets med taggar och personer
     const placeholders = assetIds.map((_, i) => `$${i + 1}`).join(',');
     const { rows: assets } = await query(`
-      SELECT
-        a.id, a.file_name, a.file_path, a.taken_at, a.location_label,
-        ST_Y(a.location::geometry) AS latitude,
-        ST_X(a.location::geometry) AS longitude,
-        COALESCE(
-          array_agg(DISTINCT t.name) FILTER (WHERE t.name IS NOT NULL), '{}'
-        ) AS tags,
-        COALESCE(
-          array_agg(DISTINCT p.name) FILTER (WHERE p.name IS NOT NULL), '{}'
-        ) AS persons
-      FROM assets a
-      LEFT JOIN asset_tags at2 ON at2.asset_id = a.id
-      LEFT JOIN tags t ON t.id = at2.tag_id
-      LEFT JOIN faces f ON f.asset_id = a.id
-      LEFT JOIN persons p ON p.id = f.person_id
-      WHERE a.id = ANY(ARRAY[${placeholders}]::uuid[])
-        AND a.status = 'active'
+      ${ASSET_SELECT}
+      WHERE a.id = ANY(ARRAY[${placeholders}]::uuid[]) AND a.status = 'active'
       GROUP BY a.id
     `, assetIds);
 
@@ -78,36 +145,28 @@ export default async function exportRoutes(fastify) {
       return reply.status(404).send({ error: 'Inga assets hittades' });
     }
 
-    reply.raw.setHeader('Content-Type', 'application/zip');
-    reply.raw.setHeader(
-      'Content-Disposition',
-      `attachment; filename="photomanager-export-${Date.now()}.zip"`
-    );
+    const wmCfg = watermark ? await getWatermarkConfig() : null;
 
-    const archive = archiver('zip', { zlib: { level: 0 } }); // level 0 = ingen komprimering (bilder är redan komprimerade)
+    reply.raw.setHeader('Content-Type', 'application/zip');
+    reply.raw.setHeader('Content-Disposition',
+      `attachment; filename="photomanager-export-${Date.now()}.zip"`);
+
+    const archive = archiver('zip', { zlib: { level: 0 } });
     archive.pipe(reply.raw);
 
     for (const asset of assets) {
-      const filePath = resolve(config.media.photosPath,asset.file_path);
-      if (!existsSync(filePath)) continue;
-
-      // Originalfil
-      archive.file(filePath, { name: asset.file_name });
-
-      // XMP sidecar
-      const xmp = buildXmp(asset, asset.tags, asset.persons);
-      const xmpName = basename(asset.file_name, extname(asset.file_name)) + '.xmp';
-      archive.append(xmp, { name: xmpName });
+      await addAssetToArchive(archive, asset, config.media.photosPath, wmCfg);
     }
 
     await archive.finalize();
   });
 
-  // POST /api/export/album/:id — exportera alla bilder i ett album som ZIP
+  // POST /api/export/album/:id — { watermark? }
   fastify.post('/api/export/album/:id', {
     onRequest: [fastify.authenticate],
   }, async (request, reply) => {
     const { id } = request.params;
+    const { watermark = false } = request.body ?? {};
 
     const { rows: albumRows } = await query(
       'SELECT name FROM albums WHERE id = $1 AND owner_id = $2',
@@ -116,26 +175,18 @@ export default async function exportRoutes(fastify) {
     if (!albumRows[0]) return reply.status(404).send({ error: 'Album hittades inte' });
 
     const { rows: assets } = await query(`
-      SELECT
-        a.id, a.file_name, a.file_path, a.taken_at, a.location_label,
-        ST_Y(a.location::geometry) AS latitude,
-        ST_X(a.location::geometry) AS longitude,
-        COALESCE(array_agg(DISTINCT t.name) FILTER (WHERE t.name IS NOT NULL), '{}') AS tags,
-        COALESCE(array_agg(DISTINCT p.name) FILTER (WHERE p.name IS NOT NULL), '{}') AS persons
-      FROM album_assets aa
-      JOIN assets a ON a.id = aa.asset_id AND a.status = 'active'
-      LEFT JOIN asset_tags at2 ON at2.asset_id = a.id
-      LEFT JOIN tags t ON t.id = at2.tag_id
-      LEFT JOIN faces f ON f.asset_id = a.id
-      LEFT JOIN persons p ON p.id = f.person_id
-      WHERE aa.album_id = $1
+      ${ASSET_SELECT}
+      JOIN album_assets aa ON aa.asset_id = a.id AND aa.album_id = $1
+      WHERE a.status = 'active'
       GROUP BY a.id
       LIMIT 500
     `, [id]);
 
     if (!assets.length) return reply.status(404).send({ error: 'Albumet är tomt' });
 
+    const wmCfg    = watermark ? await getWatermarkConfig() : null;
     const safeName = albumRows[0].name.replace(/[^a-zA-Z0-9\-_åäöÅÄÖ ]/g, '').trim() || 'album';
+
     reply.raw.setHeader('Content-Type', 'application/zip');
     reply.raw.setHeader('Content-Disposition', `attachment; filename="${safeName}.zip"`);
 
@@ -143,15 +194,9 @@ export default async function exportRoutes(fastify) {
     archive.pipe(reply.raw);
 
     for (const asset of assets) {
-      const filePath = resolve(config.media.photosPath,asset.file_path);
-      if (!existsSync(filePath)) continue;
-      archive.file(filePath, { name: asset.file_name });
-      const xmp = buildXmp(asset, asset.tags, asset.persons);
-      const xmpName = basename(asset.file_name, extname(asset.file_name)) + '.xmp';
-      archive.append(xmp, { name: xmpName });
+      await addAssetToArchive(archive, asset, config.media.photosPath, wmCfg);
     }
 
     await archive.finalize();
   });
-
 }

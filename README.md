@@ -434,13 +434,12 @@ Funktioner som planeras implementeras, i prioritetsordning. Bockas av när de ä
 | 2C | Tangentbordsnavigering i gallery | ↑↓←→ i fotogrid, Enter öppnar lightbox, Space markerar, Ctrl+A markera alla |
 | 2B | Decennietal/årsvy | Ny "Tidslinje"-vy (#/timeline): dekad → år → månad, klick-filtrering till bilder |
 | 2D | Digital fotoram | Helskärms-slideshow på /frame.html, token-skyddad, konfig i Admin → Inställningar |
+| 4A | Vattenstämpel vid export | SVG-text compositas med Sharp vid ZIP-export, kryssruta i urvalstoolbar, konfig i admin |
+| 4B | Redigera EXIF (utökat) | Kameramodell-fält + GPS-karta (Leaflet CDN) + datum i modal, XMP-override + exiftool-writeback |
 
 ### Kvar att bygga 🔜
 | # | Funktion | Beskrivning |
 |---|----------|-------------|
-| 2D | Digital fotoram | Helskärm slideshow-sida (frame.html) utan inloggning, konfigurerbar källa och intervall |
-| 4A | Vattenstämpel vid export | Text/logga compositas med Sharp vid ZIP-export, toggle i exportdialog |
-| 4B | Redigera EXIF (utökat) | Ändra datum, GPS (karta), kameramodell — skrivs tillbaka via exiftool/XMP-sidecar |
 | 5A | rclone backup | Synka till Google Drive, OneDrive, S3/Backblaze via rclone — schema + logg i admin |
 | 5B | Import-rapport | Sessionsbaserad logg: importerade, dubbletter, fel per körning |
 | 6A | Kommentarer + reaktioner | Per-bild kommentarer och emoji-reaktioner (❤️ 😂 😮 👍) i lightboxen |

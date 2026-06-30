@@ -42,6 +42,7 @@ const MIGRATIONS = [
   '035_ai_tags.sql',
   '036_camera_stats.sql',
   '037_system_settings.sql',
+  '038_watermark_settings.sql',
 ];
 
 export async function runMigrations(client) {

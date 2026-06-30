@@ -41,6 +41,10 @@ export function createSelectionManager(getGrid, getAllAssets, customActions = []
         <button id="sel-add-album" class="flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 px-2 py-1 rounded hover:bg-slate-700 transition-colors">
           📁 Lägg till i album
         </button>
+        <label class="flex items-center gap-1 text-xs text-slate-400 hover:text-white cursor-pointer select-none">
+          <input type="checkbox" id="sel-wm" class="w-3.5 h-3.5 rounded accent-blue-500 cursor-pointer">
+          Vattenstämpel
+        </label>
         <button id="sel-export" class="flex items-center gap-1.5 text-xs text-green-400 hover:text-green-300 px-2 py-1 rounded hover:bg-slate-700 transition-colors">
           📦 Exportera ZIP
         </button>
@@ -136,10 +140,11 @@ export function createSelectionManager(getGrid, getAllAssets, customActions = []
     const ids = [...selected];
     if (!ids.length) return;
     if (ids.length > 500) { toast('Max 500 bilder per export', 'error'); return; }
+    const watermark = /** @type {HTMLInputElement|null} */ (toolbarEl?.querySelector('#sel-wm'))?.checked ?? false;
     const exportBtn = toolbarEl?.querySelector('#sel-export');
     if (exportBtn) exportBtn.textContent = '⏳ Förbereder…';
     try {
-      const blob = await api.exportZip(ids);
+      const blob = await api.exportZip(ids, { watermark });
       downloadBlob(blob, `export-${ids.length}-bilder.zip`);
       toast(`${ids.length} bilder exporterade`, 'success');
     } catch (e) {

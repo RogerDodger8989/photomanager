@@ -1,4 +1,4 @@
-const CACHE_NAME = 'photomanager-v1';
+const CACHE_NAME = 'photomanager-v2';
 const STATIC_ASSETS = [
   '/',
   '/app.js',
@@ -28,8 +28,8 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
 
-  // API-anrop — alltid nätverket, aldrig cache
-  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/share/')) {
+  // API-anrop och JS-moduler — alltid nätverket, aldrig cache
+  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/share/') || url.pathname.startsWith('/src/')) {
     return;
   }
 
@@ -39,12 +39,14 @@ self.addEventListener('fetch', (e) => {
     return;
   }
 
-  // Statiska filer — cache-first
+  // Statiska filer — cache-first med quota-skydd
   e.respondWith(
     caches.match(e.request).then((cached) =>
       cached ?? fetch(e.request).then((res) => {
-        const clone = res.clone();
-        caches.open(CACHE_NAME).then((c) => c.put(e.request, clone));
+        if (res.ok) {
+          const clone = res.clone();
+          caches.open(CACHE_NAME).then((c) => c.put(e.request, clone).catch(() => {}));
+        }
         return res;
       })
     )

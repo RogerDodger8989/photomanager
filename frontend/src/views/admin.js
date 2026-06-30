@@ -302,6 +302,100 @@ async function renderStorage(content) {
     </div>`;
 }
 
+async function loadWatermarkSection(section) {
+  const POSITIONS = [
+    ['southeast', 'Nere höger'],
+    ['southwest', 'Nere vänster'],
+    ['northeast', 'Uppe höger'],
+    ['northwest', 'Uppe vänster'],
+    ['center',    'Mitten'],
+  ];
+
+  let cfg;
+  try {
+    ({ data: cfg } = await api.watermarkConfig());
+  } catch (e) {
+    section.innerHTML = `<div class="text-sm font-medium text-white">💧 Vattenstämpel vid export</div>
+      <div class="text-red-400 text-xs">${e.message}</div>`;
+    return;
+  }
+
+  section.innerHTML = `
+    <div class="text-sm font-medium text-white">💧 Vattenstämpel vid export</div>
+    <p class="text-xs text-slate-400">Aktiveras per export via kryssrutan i urvalstoolbaren. Konfigureras här.</p>
+
+    <div>
+      <label class="text-xs text-slate-400 block mb-1">Text</label>
+      <input id="wm-text" type="text" value="${cfg.text ?? '© PhotoManager'}"
+        placeholder="© Ditt namn 2025"
+        class="w-full bg-slate-700 border border-slate-600 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500">
+    </div>
+
+    <div class="grid sm:grid-cols-2 gap-3">
+      <div>
+        <label class="text-xs text-slate-400 block mb-1">Position</label>
+        <select id="wm-position" class="w-full bg-slate-700 border border-slate-600 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500">
+          ${POSITIONS.map(([v, l]) => `<option value="${v}" ${cfg.position === v ? 'selected' : ''}>${l}</option>`).join('')}
+        </select>
+      </div>
+      <div>
+        <label class="text-xs text-slate-400 block mb-1">Opacitet: <span id="wm-opacity-label">${Math.round((cfg.opacity ?? 0.65) * 100)}%</span></label>
+        <input id="wm-opacity" type="range" min="10" max="100" step="5"
+          value="${Math.round((cfg.opacity ?? 0.65) * 100)}"
+          class="w-full accent-blue-500">
+      </div>
+    </div>
+
+    <div class="bg-slate-900 rounded-lg p-3">
+      <div class="text-xs text-slate-400 mb-1">Förhandsgranskning</div>
+      <div id="wm-preview" class="relative bg-slate-700 rounded overflow-hidden h-20 flex items-end justify-end">
+        <span id="wm-preview-text" class="text-white text-sm font-sans px-2 pb-1.5" style="text-shadow: 0 0 4px rgba(0,0,0,0.8); opacity: ${cfg.opacity ?? 0.65}">${cfg.text ?? '© PhotoManager'}</span>
+      </div>
+    </div>
+
+    <button id="wm-save" class="px-4 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors font-medium">Spara</button>`;
+
+  const textInput    = section.querySelector('#wm-text');
+  const opacityInput = section.querySelector('#wm-opacity');
+  const opacityLabel = section.querySelector('#wm-opacity-label');
+  const previewText  = section.querySelector('#wm-preview-text');
+  const previewEl    = section.querySelector('#wm-preview');
+  const posSelect    = section.querySelector('#wm-position');
+
+  function updatePreview() {
+    const text    = textInput.value || '© PhotoManager';
+    const opacity = parseInt(opacityInput.value, 10) / 100;
+    const pos     = posSelect.value;
+    previewText.textContent = text;
+    previewText.style.opacity = opacity;
+
+    const flex = {
+      southeast: 'items-end justify-end', southwest: 'items-end justify-start',
+      northeast: 'items-start justify-end', northwest: 'items-start justify-start',
+      center: 'items-center justify-center',
+    }[pos] ?? 'items-end justify-end';
+    previewEl.className = `relative bg-slate-700 rounded overflow-hidden h-20 flex ${flex}`;
+  }
+
+  textInput.addEventListener('input', updatePreview);
+  opacityInput.addEventListener('input', () => {
+    opacityLabel.textContent = `${opacityInput.value}%`;
+    updatePreview();
+  });
+  posSelect.addEventListener('change', updatePreview);
+
+  section.querySelector('#wm-save')?.addEventListener('click', async () => {
+    try {
+      await api.watermarkConfigPatch({
+        text:     textInput.value.trim() || '© PhotoManager',
+        position: posSelect.value,
+        opacity:  parseInt(opacityInput.value, 10) / 100,
+      });
+      toast('Vattenstämpel sparad', 'success');
+    } catch (e) { toast(e.message, 'error'); }
+  });
+}
+
 async function renderUsers(content) {
   const { data } = await api.adminUsers();
   const ALL_PERMS = ['nav.map','nav.faces','nav.sharing','nav.explore','write.metadata','write.delete'];
@@ -1604,6 +1698,12 @@ async function renderUserSettings(content) {
         <div class="text-sm font-medium text-white">🖼️ Digital fotoram</div>
         <div class="text-slate-400 text-sm animate-pulse">Laddar…</div>
       </div>
+
+      <!-- Vattenstämpel -->
+      <div id="wm-section" class="bg-slate-800 border border-slate-700 rounded-xl p-4 space-y-4">
+        <div class="text-sm font-medium text-white">💧 Vattenstämpel vid export</div>
+        <div class="text-slate-400 text-sm animate-pulse">Laddar…</div>
+      </div>
     </div>`;
 
   let enabled = settings.face_detection_enabled;
@@ -1671,6 +1771,9 @@ async function renderUserSettings(content) {
   // Digital fotoram
   const frameSection = content.querySelector('#frame-section');
   if (frameSection) loadFrameSection(frameSection).catch(console.error);
+
+  const wmSection = content.querySelector('#wm-section');
+  if (wmSection) loadWatermarkSection(wmSection).catch(console.error);
 }
 
 async function loadFrameSection(section) {

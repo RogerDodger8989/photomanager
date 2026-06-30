@@ -201,27 +201,30 @@ export const api = {
   aiReindex:      (assetId)     => request('POST', `/api/ai/reindex/${assetId}`, {}),
 
   // Export — returnerar Blob direkt (inte JSON)
-  exportZip: async (assetIds) => {
+  exportZip: async (assetIds, { watermark = false } = {}) => {
     const headers = { 'Content-Type': 'application/json' };
     const w = /** @type {any} */ (window);
     if (w.__pmToken) headers['Authorization'] = `Bearer ${w.__pmToken}`;
     const res = await fetch('/api/export/zip', {
       method: 'POST', headers, credentials: 'include',
-      body: JSON.stringify({ assetIds }),
+      body: JSON.stringify({ assetIds, watermark }),
     });
     if (!res.ok) { const e = await res.json().catch(() => ({ error: res.statusText })); throw new Error(e.error ?? `HTTP ${res.status}`); }
     return res.blob();
   },
-  exportAlbumZip: async (albumId) => {
+  exportAlbumZip: async (albumId, { watermark = false } = {}) => {
     const headers = { 'Content-Type': 'application/json' };
     const w = /** @type {any} */ (window);
     if (w.__pmToken) headers['Authorization'] = `Bearer ${w.__pmToken}`;
     const res = await fetch(`/api/export/album/${albumId}`, {
-      method: 'POST', headers, credentials: 'include', body: '{}',
+      method: 'POST', headers, credentials: 'include',
+      body: JSON.stringify({ watermark }),
     });
     if (!res.ok) { const e = await res.json().catch(() => ({ error: res.statusText })); throw new Error(e.error ?? `HTTP ${res.status}`); }
     return res.blob();
   },
+  watermarkConfig:      ()  => request('GET',   '/api/admin/watermark'),
+  watermarkConfigPatch: (b) => request('PATCH', '/api/admin/watermark', b),
   auditLogCsv:  ()              => '/api/admin/audit-log/csv', // returnerar URL, fetch direkt
 
   // Push
@@ -252,6 +255,7 @@ export const api = {
   geocode:      (q)             => request('GET', `/api/assets/geocode?q=${encodeURIComponent(q)}`),
   setDatetime:  (id, takenAt)   => request('PATCH', `/api/assets/${id}/datetime`, { takenAt }),
   setLocation:  (id, lat, lon, label) => request('PATCH', `/api/assets/${id}/location`, { lat, lon, label }),
+  setCameraModel: (id, model)   => request('PATCH', `/api/assets/${id}/camera-model`, { model }),
   duplicates:   ()              => request('GET', '/api/assets/duplicates'),
   adminDuplicates: ()           => request('GET', '/api/admin/duplicates'),
   perceptualDuplicates: (threshold = 10) => request('GET', `/api/admin/perceptual-duplicates?threshold=${threshold}`),

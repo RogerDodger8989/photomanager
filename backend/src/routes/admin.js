@@ -12,6 +12,42 @@ export default async function adminRoutes(fastify) {
   // Alla admin-routes kräver admin-roll
   fastify.addHook('onRequest', fastify.requireAdmin);
 
+  // GET /api/admin/watermark — hämta vattenstämpel-inställningar
+  fastify.get('/api/admin/watermark', async (_request, reply) => {
+    const { rows } = await query("SELECT value FROM system_settings WHERE key = 'watermark'");
+    return reply.send({ data: rows[0]?.value ?? { text: '© PhotoManager', position: 'southeast', opacity: 0.65 } });
+  });
+
+  // PATCH /api/admin/watermark — uppdatera vattenstämpel-inställningar
+  fastify.patch('/api/admin/watermark', {
+    schema: {
+      body: {
+        type: 'object',
+        properties: {
+          text:     { type: 'string', maxLength: 100 },
+          position: { type: 'string', enum: ['southeast', 'southwest', 'northeast', 'northwest', 'center'] },
+          opacity:  { type: 'number', minimum: 0.1, maximum: 1.0 },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const patch = {};
+    const b = request.body ?? {};
+    if (typeof b.text     === 'string') patch.text     = b.text.trim() || '© PhotoManager';
+    if (typeof b.position === 'string') patch.position = b.position;
+    if (typeof b.opacity  === 'number') patch.opacity  = Math.round(b.opacity * 100) / 100;
+
+    await query(`
+      INSERT INTO system_settings (key, value)
+      VALUES ('watermark', $1::jsonb)
+      ON CONFLICT (key) DO UPDATE
+        SET value = system_settings.value || $1::jsonb, updated_at = NOW()
+    `, [JSON.stringify(patch)]);
+
+    const { rows } = await query("SELECT value FROM system_settings WHERE key = 'watermark'");
+    return reply.send({ data: rows[0]?.value });
+  });
+
   // GET /api/admin/stats/storage — lagringsanalys per år/album/person
   fastify.get('/api/admin/stats/storage', async (_request, reply) => {
     const [yearRows, albumRows, personRows] = await Promise.all([

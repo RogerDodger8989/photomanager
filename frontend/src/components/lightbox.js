@@ -251,6 +251,10 @@ document.getElementById('lb-meta-close')?.addEventListener('click', () => {
 });
 
 async function loadInfoDrawer(assetId) {
+  if (!assetId || assetId === 'undefined') {
+    lbMetaCont.innerHTML = `<p class="text-xs text-slate-500 px-4 py-8 text-center">Ingen bild vald</p>`;
+    return;
+  }
   lbMetaCont.innerHTML = `
     <div class="flex items-center justify-center h-32 text-slate-500 text-sm">
       <svg class="w-5 h-5 animate-spin mr-2" fill="none" viewBox="0 0 24 24">
@@ -962,22 +966,23 @@ function initDrawerInteractions(container, assetId, m) {
     });
   }
 
-  // ── Redigera tid & plats ─────────────────────────────────────────────────────
+  // ── Redigera metadata ────────────────────────────────────────────────────────
   container.querySelector('.edit-meta-btn')?.addEventListener('click', async () => {
-    const result = await openEditMetaModal(
-      assetId,
-      m.temporalSpatial?.capturedAt ?? null,
-      m.temporalSpatial?.location?.city ?? null
-    );
+    const gps = m.temporalSpatial?.gps;
+    const result = await openEditMetaModal(assetId, {
+      takenAt:       m.temporalSpatial?.capturedAt ?? null,
+      locationLabel: m.temporalSpatial?.location?.city ?? null,
+      gpsLat:        gps?.latitude  ?? null,
+      gpsLon:        gps?.longitude ?? null,
+      cameraModel:   m.camera?.model ?? null,
+    });
     if (result) {
-      // Uppdatera lightbox-items och ladda om drawer
       const idx = items.findIndex(a => a.id === assetId);
       if (idx !== -1) {
         if (result.takenAt)       items[idx].taken_at       = result.takenAt;
         if (result.locationLabel) items[idx].location_label = result.locationLabel;
       }
       loadInfoDrawer(assetId);
-      // Uppdatera datum/plats-raden i lightboxens överkant
       const asset = items[currentIndex];
       if (asset) {
         const dateStr = asset.taken_at ? formatDate(asset.taken_at) : '';

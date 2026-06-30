@@ -10,6 +10,7 @@ import sharp from 'sharp';
 import { generateThumbnails } from '../workers/thumbnailer.js';
 import { extractMetadata } from '../services/metadataService.js';
 import { upsertAssetLocation, reverseGeocode, forwardGeocode } from '../services/geoService.js';
+import { writeExif } from '../services/exiftoolService.js';
 
 // Transforms display-space crop fractions (lp/tp/wp/hp) into raw-image pixel extract coords,
 // accounting for EXIF orientation. Returns { left, top, width, height, rotateDeg } where
@@ -334,11 +335,18 @@ export default async function assetsRoutes(fastify) {
     if (isNaN(dt.getTime())) return reply.status(400).send({ error: 'Ogiltigt datum' });
 
     const { rows } = await query(
-      `UPDATE assets SET taken_at = $1 WHERE id = $2 AND status IN ('active','trashed') RETURNING id, taken_at`,
+      `UPDATE assets SET taken_at = $1 WHERE id = $2 AND status IN ('active','trashed') RETURNING id, taken_at, file_path`,
       [dt.toISOString(), id]
     );
     if (!rows[0]) return reply.status(404).send({ error: 'Hittades inte' });
-    return reply.send({ data: rows[0] });
+
+    // Exiftool writeback (graceful — misslyckas tyst om exiftool saknas)
+    if (rows[0].file_path) {
+      const absPath = resolve(config.media.photosPath, rows[0].file_path);
+      writeExif(absPath, { dateTimeOriginal: dt.toISOString() }).catch(() => {});
+    }
+
+    return reply.send({ data: { id: rows[0].id, taken_at: rows[0].taken_at } });
   });
 
   // PATCH /api/assets/:id/location — sätt eller rensa plats manuellt
@@ -348,8 +356,9 @@ export default async function assetsRoutes(fastify) {
     const { id } = request.params;
     const { lat, lon, label } = request.body ?? {};
 
+    const { rows: ar } = await query(`SELECT file_path FROM assets WHERE id = $1`, [id]);
+
     if (lat == null || lon == null) {
-      // Rensa plats
       await query(
         `UPDATE assets SET location = NULL, location_label = NULL WHERE id = $1`,
         [id]
@@ -359,7 +368,54 @@ export default async function assetsRoutes(fastify) {
 
     await upsertAssetLocation(id, lat, lon);
     await query(`UPDATE assets SET location_label = $1 WHERE id = $2`, [label ?? null, id]);
+
+    // Exiftool writeback
+    if (ar[0]?.file_path) {
+      const absPath = resolve(config.media.photosPath, ar[0].file_path);
+      writeExif(absPath, { gpsLat: lat, gpsLon: lon }).catch(() => {});
+    }
+
     return reply.send({ data: { lat, lon, label } });
+  });
+
+  // PATCH /api/assets/:id/camera-model — ändra kameramodell manuellt
+  fastify.patch('/api/assets/:id/camera-model', {
+    onRequest: [fastify.authenticate],
+  }, async (request, reply) => {
+    const { id } = request.params;
+    const { model } = request.body ?? {};
+    if (model === undefined) return reply.status(400).send({ error: 'model krävs' });
+
+    const { rows } = await query(
+      `SELECT file_path, owner_id FROM assets WHERE id = $1 AND status = 'active'`, [id]
+    );
+    if (!rows[0]) return reply.status(404).send({ error: 'Hittades inte' });
+    if (rows[0].owner_id !== request.user.id && request.user.role !== 'admin') {
+      return reply.status(403).send({ error: 'Ej tillåtet' });
+    }
+
+    if (model) {
+      // Upsert XMP-override för kameramodell (tag 272 = Model)
+      await query(
+        `INSERT INTO asset_metadata (asset_id, source, key, value)
+         VALUES ($1, 'xmp', '272', $2)
+         ON CONFLICT (asset_id, source, key) DO UPDATE SET value = EXCLUDED.value`,
+        [id, model],
+      );
+    } else {
+      await query(
+        `DELETE FROM asset_metadata WHERE asset_id = $1 AND source = 'xmp' AND key = '272'`,
+        [id],
+      );
+    }
+
+    // Exiftool writeback (skriver till filen om exiftool är installerat)
+    if (rows[0].file_path) {
+      const absPath = resolve(config.media.photosPath, rows[0].file_path);
+      writeExif(absPath, { model: model || '' }).catch(() => {});
+    }
+
+    return reply.send({ data: { model } });
   });
 
   // GET /api/assets/:id — enskild asset
@@ -555,11 +611,15 @@ export default async function assetsRoutes(fastify) {
     if (!rows[0]) return reply.status(404).send({ error: 'Hittades inte' });
     const a = rows[0];
 
-    // Hämta EXIF-data (numeriska TIFF-tag-nycklar)
+    // Hämta EXIF + XMP-data (XMP-overrides har högre prioritet — t.ex. manuellt redigerad kameramodell)
     const { rows: metaRows } = await query(
-      `SELECT key, value FROM asset_metadata WHERE asset_id = $1 AND source = 'exif'`, [id]
+      `SELECT source, key, value FROM asset_metadata WHERE asset_id = $1 AND source IN ('exif', 'xmp')`, [id]
     );
-    const exif = Object.fromEntries(metaRows.map(r => [r.key, r.value]));
+    const exif = {};
+    for (const r of metaRows) {
+      if (r.source === 'exif' && exif[r.key] === undefined) exif[r.key] = r.value;
+      if (r.source === 'xmp') exif[r.key] = r.value; // XMP override
+    }
 
     const exifStr = (k) => exif[k] != null ? String(exif[k]).replace(/^"|"$/g, '') : null;
     const exifNum = (k) => exif[k] != null ? parseFloat(exif[k]) : null;
