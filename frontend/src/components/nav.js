@@ -5,6 +5,7 @@ const NAV_ITEMS = [
   ['photos',    'Bilder',    '🖼️',  '#/photos'],
   ['timeline',  'Tidslinje', '🗓️',  '#/timeline'],
   ['explore',   'Utforska',  '✨',  '#/explore'],
+  ['activity',  'Aktivitet', '🔔',  '#/activity'],
   ['map',      'Karta',     '🗺️',  '#/map'],
   ['sharing',  'Delning',   '🔗',  '#/sharing'],
   ['favorites','Favoriter', '❤️',  '#/favorites'],

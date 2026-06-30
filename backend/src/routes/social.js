@@ -2,7 +2,48 @@ import { query } from '../db/pool.js';
 
 const ALLOWED_EMOJIS = ['❤️', '😂', '😮', '👍', '😢', '🔥'];
 
+// Åtgärder som visas i aktivitetsflödet (view/login_failed filtreras bort)
+const ACTIVITY_ACTIONS = new Set([
+  'upload', 'edit_metadata', 'edit_replace', 'edit_copy',
+  'trash', 'restore', 'permanent_delete', 'share',
+  'login', 'comment', 'reaction',
+]);
+
 export default async function socialRoutes(fastify) {
+
+  // GET /api/activity — aktivitetsflöde för alla inloggade användare
+  fastify.get('/api/activity', {
+    onRequest: [fastify.authenticate],
+    schema: {
+      querystring: {
+        type: 'object',
+        properties: {
+          limit:  { type: 'integer', default: 60, maximum: 200 },
+          offset: { type: 'integer', default: 0 },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { limit = 60, offset = 0 } = request.query;
+    const actionList = [...ACTIVITY_ACTIONS].map((_, i) => `$${i + 1}`).join(',');
+    const actionValues = [...ACTIVITY_ACTIONS];
+
+    const { rows } = await query(
+      `SELECT al.id, al.action, al.target_id, al.target_type, al.meta, al.created_at,
+              u.username, u.id AS user_id,
+              a.file_name, a.taken_at, a.thumb_small_path
+       FROM audit_log al
+       LEFT JOIN users u ON u.id = al.user_id
+       LEFT JOIN assets a ON a.id = al.target_id AND al.target_type = 'asset'
+       WHERE al.action IN (${actionList})
+       ORDER BY al.created_at DESC
+       LIMIT $${actionValues.length + 1}
+       OFFSET $${actionValues.length + 2}`,
+      [...actionValues, limit, offset]
+    );
+
+    return reply.send({ data: rows });
+  });
 
   // GET /api/assets/:id/social — kommentarer + reaktioner för en bild
   fastify.get('/api/assets/:id/social', {

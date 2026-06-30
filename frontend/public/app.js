@@ -15,6 +15,7 @@ import { renderTimelineOverview } from '/src/views/timelineOverview.js';
 import { renderDuplicates }         from '/src/views/duplicates.js';
 import { renderTags, getNavState as tagGetNavState }   from '/src/views/tags.js';
 import { renderSearch, getNavState as srGetNavState }  from '/src/views/search.js';
+import { renderActivity }                              from '/src/views/activity.js';
 import { initNavState, saveViewState, getViewState }   from '/src/navState.js';
 
 const _NAV_STATE_GETTERS = {
@@ -140,6 +141,7 @@ function navigate(hash) {
   else if (route === 'tags')        renderTags(container, getViewState('tags'));
   else if (route === 'search')      renderSearch(container, getViewState('search'))
   else if (route === 'timeline')    renderTimelineOverview(container);
+  else if (route === 'activity')  renderActivity(container);
   else if (route === 'admin')     renderAdmin(container, rest[0] ?? 'stats');
   else if (route === 'share')     renderSharePage(container, rest[0]);
   else                            renderTimeline(container, getViewState('photos') ?? {});

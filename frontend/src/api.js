@@ -265,6 +265,9 @@ export const api = {
   objectDetectionBackfill: ()   => request('POST', '/api/admin/object-detection/backfill', {}),
   importSessions: (limit = 100) => request('GET', `/api/admin/import-sessions?limit=${limit}`),
 
+  // Aktivitetsflöde
+  activity: (p = {}) => request('GET', `/api/activity?${qs(p)}`),
+
   // Social
   social:          (assetId)        => request('GET',    `/api/assets/${assetId}/social`),
   addComment:      (assetId, text)  => request('POST',   `/api/assets/${assetId}/comments`, { content: text }),

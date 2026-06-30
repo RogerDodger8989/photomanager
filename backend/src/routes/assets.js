@@ -562,7 +562,11 @@ export default async function assetsRoutes(fastify) {
       }
     }
 
-    await logAudit(request.user.id, 'edit_metadata', id, 'asset', null, request.ip);
+    const changed = Object.fromEntries(
+      Object.entries({ takenAt, locationLabel, rating, flag, colorLabel, title, description, visibility, tags: tags?.length })
+        .filter(([, v]) => v !== undefined)
+    );
+    await logAudit(request.user.id, 'edit_metadata', id, 'asset', changed, request.ip);
     return reply.send({ data: { ok: true } });
   });
 
