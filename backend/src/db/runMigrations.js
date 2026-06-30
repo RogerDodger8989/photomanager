@@ -38,6 +38,9 @@ const MIGRATIONS = [
   '031_person_custom_id.sql',
   '032_tag_custom_id.sql',
   '033_fix_stack_duplicates.sql',
+  '034_phash.sql',
+  '035_ai_tags.sql',
+  '036_camera_stats.sql',
 ];
 
 export async function runMigrations(client) {

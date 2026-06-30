@@ -2,6 +2,7 @@ import { join, resolve } from 'path';
 import { query } from '../db/pool.js';
 import { getJobStats } from '../services/jobService.js';
 import { backfillMotionPhotos } from '../workers/motionPhotoBackfill.js';
+import { getModelStatus, downloadModel } from '../services/objectDetectionService.js';
 import { config } from '../config.js';
 import bcrypt from 'bcrypt';
 import { v4 as uuidv4 } from 'uuid';
@@ -10,6 +11,70 @@ export default async function adminRoutes(fastify) {
 
   // Alla admin-routes kräver admin-roll
   fastify.addHook('onRequest', fastify.requireAdmin);
+
+  // GET /api/admin/stats/camera — kamerastatistik för histogram-vyn
+  fastify.get('/api/admin/stats/camera', async (_request, reply) => {
+    const [isoRows, apertureRows, shutterRows, focalRows, lensRows] = await Promise.all([
+      // ISO: sortera numeriskt, gruppera exakta värden, max 20 buckets
+      query(`
+        SELECT iso AS label, COUNT(*)::int AS count
+        FROM assets
+        WHERE iso IS NOT NULL AND status = 'active'
+        GROUP BY iso
+        ORDER BY iso
+        LIMIT 20
+      `),
+      // Bländare: sortera numeriskt
+      query(`
+        SELECT aperture::TEXT AS label, COUNT(*)::int AS count
+        FROM assets
+        WHERE aperture IS NOT NULL AND status = 'active'
+        GROUP BY aperture
+        ORDER BY aperture
+        LIMIT 20
+      `),
+      // Slutartid: sortera efter numeriskt värde (1/4000 < 1/250 < 1s < 2s)
+      query(`
+        SELECT shutter_speed AS label, COUNT(*)::int AS count,
+               CASE
+                 WHEN shutter_speed LIKE '1/%' THEN 1.0 / NULLIF(SPLIT_PART(shutter_speed, '/', 2)::NUMERIC, 0)
+                 WHEN shutter_speed LIKE '%s'  THEN REPLACE(shutter_speed, 's', '')::NUMERIC
+                 ELSE 0
+               END AS sort_val
+        FROM assets
+        WHERE shutter_speed IS NOT NULL AND status = 'active'
+        GROUP BY shutter_speed
+        ORDER BY sort_val
+        LIMIT 20
+      `),
+      // Brännvidd: sortera numeriskt
+      query(`
+        SELECT focal_length_mm::TEXT AS label, COUNT(*)::int AS count
+        FROM assets
+        WHERE focal_length_mm IS NOT NULL AND status = 'active'
+        GROUP BY focal_length_mm
+        ORDER BY focal_length_mm
+        LIMIT 20
+      `),
+      // Objektiv: topp 10 efter antal bilder
+      query(`
+        SELECT lens_model AS label, COUNT(*)::int AS count
+        FROM assets
+        WHERE lens_model IS NOT NULL AND status = 'active'
+        GROUP BY lens_model
+        ORDER BY count DESC
+        LIMIT 10
+      `),
+    ]);
+
+    return reply.send({ data: {
+      iso:          isoRows.rows,
+      aperture:     apertureRows.rows,
+      shutterSpeed: shutterRows.rows,
+      focalLength:  focalRows.rows,
+      lenses:       lensRows.rows,
+    }});
+  });
 
   // GET /api/admin/jobs — jobbkö-status
   fastify.get('/api/admin/jobs', async (request, reply) => {
@@ -73,8 +138,8 @@ export default async function adminRoutes(fastify) {
           const absPath = resolve(config.media.photosPath, row.file_path);
           const meta = await extractMetadata(absPath);
 
-          // Ta bort gamla taggar för denna fil och bygg om från metadata
-          await query('DELETE FROM asset_tags WHERE asset_id = $1', [row.id]);
+          // Ta bort manuella/XMP-taggar — behåll AI-genererade (source='ai')
+          await query("DELETE FROM asset_tags WHERE asset_id = $1 AND source != 'ai'", [row.id]);
 
           const hierPaths = meta.hierarchicalTags ?? [];
           const flatTags  = meta.tags ?? [];
@@ -162,6 +227,118 @@ export default async function adminRoutes(fastify) {
       );
     }
     return reply.send({ data: { queued: rows.length } });
+  });
+
+  // POST /api/admin/phash-backfill — köa pHash-beräkning för alla bilder utan phash
+  fastify.post('/api/admin/phash-backfill', async (request, reply) => {
+    const { rows } = await query(
+      `SELECT id FROM assets
+       WHERE phash IS NULL AND status IN ('active', 'duplicate')
+         AND mime_type LIKE 'image/%'
+         AND thumb_small_path IS NOT NULL`
+    );
+    for (const row of rows) {
+      await query(
+        `INSERT INTO jobs (job_type, asset_id) VALUES ('phash', $1)`,
+        [row.id]
+      );
+    }
+    return reply.send({ data: { queued: rows.length } });
+  });
+
+  // GET /api/admin/object-detection/model-status — kontrollera om YOLOv8n-modellen finns
+  fastify.get('/api/admin/object-detection/model-status', async (_request, reply) => {
+    const status = await getModelStatus();
+    return reply.send({ data: status });
+  });
+
+  // POST /api/admin/object-detection/download-model — ladda ner YOLOv8n.onnx till servern
+  fastify.post('/api/admin/object-detection/download-model', async (_request, reply) => {
+    try {
+      const result = await downloadModel();
+      return reply.send({ data: result });
+    } catch (err) {
+      return reply.code(500).send({ error: `Nedladdning misslyckades: ${err.message}` });
+    }
+  });
+
+  // POST /api/admin/object-detection/backfill — köa objektdetektion för alla bilder utan AI-taggar
+  fastify.post('/api/admin/object-detection/backfill', async (request, reply) => {
+    const status = await getModelStatus();
+    if (!status.ready) {
+      return reply.code(400).send({ error: 'Modellen saknas — ladda ner den först' });
+    }
+    // Bilder som ännu inte har AI-taggar (d.v.s. saknar asset_tags med source='ai')
+    const { rows } = await query(
+      `SELECT DISTINCT a.id FROM assets a
+       WHERE a.status IN ('active', 'duplicate')
+         AND a.mime_type LIKE 'image/%'
+         AND a.thumb_small_path IS NOT NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM asset_tags at2 WHERE at2.asset_id = a.id AND at2.source = 'ai'
+         )`
+    );
+    for (const row of rows) {
+      await query(
+        `INSERT INTO jobs (job_type, asset_id) VALUES ('object_detection', $1)`,
+        [row.id]
+      );
+    }
+    return reply.send({ data: { queued: rows.length } });
+  });
+
+  // GET /api/admin/perceptual-duplicates — nästan-identiska bilder via pHash Hamming-distans
+  fastify.get('/api/admin/perceptual-duplicates', async (request, reply) => {
+    const threshold = Math.min(parseInt(request.query.threshold ?? '10', 10), 20);
+
+    // Hämta alla bilder med phash
+    const { rows: assets } = await query(
+      `SELECT id, file_path, file_name, file_size, width, height,
+              taken_at, indexed_at, thumb_small_path, status, phash
+       FROM assets
+       WHERE phash IS NOT NULL AND status IN ('active', 'duplicate')
+       ORDER BY indexed_at ASC`
+    );
+
+    if (assets.length === 0) return reply.send({ data: [] });
+
+    // Beräkna nästan-duplikat med union-find i JS (undviker O(n²) SQL för stora bibliotek)
+    const parent = new Map(assets.map((a) => [a.id, a.id]));
+    function find(x) {
+      if (parent.get(x) !== x) parent.set(x, find(parent.get(x)));
+      return parent.get(x);
+    }
+    function union(x, y) {
+      parent.set(find(x), find(y));
+    }
+
+    // Beräkna Hamming-distans mellan alla par (Brian Kernighan popcount)
+    for (let i = 0; i < assets.length; i++) {
+      const ha = BigInt(assets[i].phash);
+      for (let j = i + 1; j < assets.length; j++) {
+        const hb = BigInt(assets[j].phash);
+        // asUintN(64) konverterar signed int64 → unsigned för korrekt biträkning
+        let tmp = BigInt.asUintN(64, ha ^ hb);
+        if (tmp === 0n) { union(assets[i].id, assets[j].id); continue; }
+        let bits = 0;
+        while (tmp !== 0n) { tmp &= tmp - 1n; bits++; if (bits > threshold) break; }
+        if (bits <= threshold) union(assets[i].id, assets[j].id);
+      }
+    }
+
+    // Gruppera
+    const groups = new Map();
+    for (const a of assets) {
+      const root = find(a.id);
+      if (!groups.has(root)) groups.set(root, []);
+      groups.get(root).push(a);
+    }
+
+    const result = [...groups.values()]
+      .filter((g) => g.length > 1)
+      .sort((a, b) => b.length - a.length);
+
+    return reply.send({ data: result });
   });
 
   // GET /api/admin/duplicates — lista duplikat (active + duplicate-status)

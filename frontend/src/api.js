@@ -231,6 +231,7 @@ export const api = {
 
   // Admin
   adminStats:         ()        => request('GET', '/api/admin/stats'),
+  cameraStats:        ()        => request('GET', '/api/admin/stats/camera'),
   adminJobs:          ()        => request('GET', '/api/admin/jobs'),
   retryJob:           (id)      => request('POST', `/api/admin/jobs/${id}/retry`),
   requeueThumbnails:  ()        => request('POST', '/api/admin/requeue-thumbnails', {}),
@@ -248,6 +249,11 @@ export const api = {
   setLocation:  (id, lat, lon, label) => request('PATCH', `/api/assets/${id}/location`, { lat, lon, label }),
   duplicates:   ()              => request('GET', '/api/assets/duplicates'),
   adminDuplicates: ()           => request('GET', '/api/admin/duplicates'),
+  perceptualDuplicates: (threshold = 10) => request('GET', `/api/admin/perceptual-duplicates?threshold=${threshold}`),
+  phashBackfill: ()             => request('POST', '/api/admin/phash-backfill', {}),
+  objectDetectionModelStatus: () => request('GET', '/api/admin/object-detection/model-status'),
+  objectDetectionDownloadModel: () => request('POST', '/api/admin/object-detection/download-model', {}),
+  objectDetectionBackfill: ()   => request('POST', '/api/admin/object-detection/backfill', {}),
 
   // Tags
   tagTree:          ()              => request('GET', '/api/tags/tree'),

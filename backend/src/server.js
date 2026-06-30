@@ -40,6 +40,7 @@ import { startJobRunner }        from './workers/jobRunner.js';
 import { buildEvents }           from './services/exploreService.js';
 import { initAiWorker, shutdownAiWorker } from './services/aiService.js';
 import { backfillMotionPhotos }  from './workers/motionPhotoBackfill.js';
+import { startDailyPushJob }     from './workers/dailyPushJob.js';
 
 const fastify = Fastify({
   logger: {
@@ -122,6 +123,8 @@ const start = async () => {
     buildEvents().catch(console.error);
     // Identifiera Motion Photos bland befintliga bilder (körs i bakgrunden)
     backfillMotionPhotos().catch(console.error);
+    // Skicka dagliga minnespush-notiser kl 08:00
+    startDailyPushJob();
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);

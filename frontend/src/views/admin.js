@@ -129,7 +129,12 @@ function buildAiStatsSection(ai) {
 }
 
 async function renderStats(content) {
-  const { data } = await api.adminStats();
+  const [{ data }, camResult] = await Promise.all([
+    api.adminStats(),
+    api.cameraStats().catch(() => ({ data: null })),
+  ]);
+  const cam = camResult.data;
+
   content.innerHTML = `
     <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
       ${[
@@ -175,7 +180,54 @@ async function renderStats(content) {
     </div>
     ${buildUploadsChart(data.uploadsPerDay ?? [])}
     ${buildStorageChart(data.storagePerMonth ?? [])}
-    ${buildAiStatsSection(data.aiStats ?? {})}`;
+    ${buildAiStatsSection(data.aiStats ?? {})}
+    ${cam ? buildCameraStatsSection(cam) : ''}`;
+}
+
+function buildCameraBarChart(rows, colorClass) {
+  if (!rows?.length) return '<p class="text-xs text-slate-500 italic">Ingen data</p>';
+  const max = Math.max(...rows.map((r) => r.count));
+  return `<div class="space-y-1">
+    ${rows.map((r) => {
+      const pct = max > 0 ? Math.round((r.count / max) * 100) : 0;
+      return `<div class="flex items-center gap-2 text-xs">
+        <span class="text-slate-400 truncate" style="min-width:3.5rem;max-width:8rem" title="${r.label}">${r.label}</span>
+        <div class="flex-1 bg-slate-700 rounded-full h-1.5">
+          <div class="${colorClass} h-1.5 rounded-full transition-all" style="width:${pct}%"></div>
+        </div>
+        <span class="text-slate-400 w-8 text-right">${r.count}</span>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
+function buildCameraStatsSection(cam) {
+  return `
+    <div class="mt-6">
+      <h2 class="text-base font-semibold text-white mb-4">📷 Kamerastatistik</h2>
+      <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div class="bg-slate-800 rounded-xl p-4">
+          <h3 class="text-xs font-medium text-slate-400 uppercase tracking-wide mb-3">ISO</h3>
+          ${buildCameraBarChart(cam.iso, 'bg-yellow-500')}
+        </div>
+        <div class="bg-slate-800 rounded-xl p-4">
+          <h3 class="text-xs font-medium text-slate-400 uppercase tracking-wide mb-3">Bländare (f/)</h3>
+          ${buildCameraBarChart(cam.aperture?.map((r) => ({ ...r, label: `f/${r.label}` })), 'bg-emerald-500')}
+        </div>
+        <div class="bg-slate-800 rounded-xl p-4">
+          <h3 class="text-xs font-medium text-slate-400 uppercase tracking-wide mb-3">Slutartid</h3>
+          ${buildCameraBarChart(cam.shutterSpeed, 'bg-blue-500')}
+        </div>
+        <div class="bg-slate-800 rounded-xl p-4">
+          <h3 class="text-xs font-medium text-slate-400 uppercase tracking-wide mb-3">Brännvidd (mm)</h3>
+          ${buildCameraBarChart(cam.focalLength?.map((r) => ({ ...r, label: `${r.label}mm` })), 'bg-violet-500')}
+        </div>
+        <div class="bg-slate-800 rounded-xl p-4 sm:col-span-2 lg:col-span-2">
+          <h3 class="text-xs font-medium text-slate-400 uppercase tracking-wide mb-3">Objektiv</h3>
+          ${buildCameraBarChart(cam.lenses, 'bg-orange-500')}
+        </div>
+      </div>
+    </div>`;
 }
 
 async function renderUsers(content) {
@@ -405,6 +457,30 @@ async function renderJobs(content) {
         class="px-4 py-2 bg-teal-700 hover:bg-teal-600 text-white text-xs font-medium rounded-lg transition-colors">
         🎬 Skanna Motion Photos
       </button>
+      <button id="phash-backfill-btn"
+        class="px-4 py-2 bg-indigo-700 hover:bg-indigo-600 text-white text-xs font-medium rounded-lg transition-colors">
+        #️⃣ Beräkna bildfingeravtryck (pHash)
+      </button>
+    </div>
+
+    <div class="mt-4 bg-slate-800 rounded-xl p-4">
+      <h3 class="text-sm font-semibold text-white mb-2">⚡ AI-motivigenkänning (YOLOv8-nano)</h3>
+      <p class="text-xs text-slate-400 mb-3">
+        Identifierar motiv automatiskt (hund, bil, strand…) och skapar taggar med konfidenspoäng.
+        Kräver ~6 MB ONNX-modell på servern.
+        CPU-optimerad, ~0.5–2 sek/bild.
+      </p>
+      <div id="od-model-status" class="text-xs text-slate-500 mb-3">Kontrollerar modellstatus…</div>
+      <div class="flex gap-2 flex-wrap">
+        <button id="od-download-btn"
+          class="px-4 py-2 bg-violet-700 hover:bg-violet-600 text-white text-xs font-medium rounded-lg transition-colors">
+          ⬇️ Ladda ner YOLOv8n-modell
+        </button>
+        <button id="od-backfill-btn"
+          class="px-4 py-2 bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-medium rounded-lg transition-colors">
+          ⚡ Analysera alla bilder (backfill)
+        </button>
+      </div>
     </div>
     <div class="space-y-1.5">
       ${recent.map((j) => `
@@ -510,7 +586,72 @@ async function renderJobs(content) {
       btn.textContent = '🎬 Skanna Motion Photos';
     }
   });
+
+  content.querySelector('#phash-backfill-btn')?.addEventListener('click', async (e) => {
+    const btn = /** @type {HTMLButtonElement} */ (e.currentTarget);
+    btn.disabled = true;
+    btn.textContent = '⏳ Köar jobb…';
+    try {
+      const { data } = await api.phashBackfill();
+      toast(`${data.queued} bilder köade för bildfingeravtryck`, data.queued > 0 ? 'success' : 'info', 4000);
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '#️⃣ Beräkna bildfingeravtryck (pHash)';
+    }
+  });
+
+  // Kontrollera YOLOv8-modellstatus vid inladdning
+  const odStatus = content.querySelector('#od-model-status');
+  api.objectDetectionModelStatus().then(({ data }) => {
+    if (!odStatus) return;
+    if (data.ready) {
+      const mb = (data.sizeBytes / 1_048_576).toFixed(1);
+      odStatus.innerHTML = `<span class="text-green-400">✅ Modell klar (${mb} MB) — ${MODEL_PATH_HINT}</span>`;
+      content.querySelector('#od-download-btn')?.classList.add('hidden');
+    } else {
+      odStatus.innerHTML = `<span class="text-yellow-400">⚠️ Modell saknas — ladda ner den nedan eller placera yolov8n.onnx i <code class="font-mono">./models/</code> på servern.</span>`;
+    }
+  }).catch(() => {
+    if (odStatus) odStatus.textContent = 'Kunde inte kontrollera modellstatus.';
+  });
+
+  content.querySelector('#od-download-btn')?.addEventListener('click', async (e) => {
+    const btn = /** @type {HTMLButtonElement} */ (e.currentTarget);
+    btn.disabled = true;
+    btn.textContent = '⏳ Laddar ner (~6 MB)…';
+    try {
+      const { data } = await api.objectDetectionDownloadModel();
+      const mb = (data.sizeBytes / 1_048_576).toFixed(1);
+      toast(`YOLOv8n-modell nedladdad (${mb} MB)`, 'success', 5000);
+      if (odStatus) odStatus.innerHTML = `<span class="text-green-400">✅ Modell klar (${mb} MB)</span>`;
+      btn.classList.add('hidden');
+    } catch (err) {
+      toast(`Nedladdning misslyckades: ${err.message}`, 'error', 8000);
+      btn.disabled = false;
+      btn.textContent = '⬇️ Ladda ner YOLOv8n-modell';
+    }
+  });
+
+  content.querySelector('#od-backfill-btn')?.addEventListener('click', async (e) => {
+    const btn = /** @type {HTMLButtonElement} */ (e.currentTarget);
+    btn.disabled = true;
+    btn.textContent = '⏳ Köar jobb…';
+    try {
+      const { data } = await api.objectDetectionBackfill();
+      toast(`${data.queued} bilder köade för AI-motivigenkänning`, data.queued > 0 ? 'success' : 'info', 5000);
+      renderJobs(content);
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '⚡ Analysera alla bilder (backfill)';
+    }
+  });
 }
+
+const MODEL_PATH_HINT = '<code class="font-mono">./models/yolov8n.onnx</code>';
 
 // ── AI-förslag: state ────────────────────────────────────────────────────────
 const _aiState = {

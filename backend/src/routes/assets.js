@@ -463,9 +463,12 @@ export default async function assetsRoutes(fastify) {
          )), '[]'::json)
          FROM faces f LEFT JOIN persons p ON p.id = f.person_id
          WHERE f.asset_id = a.id) AS faces,
-        (SELECT COALESCE(json_agg(t.name), '[]'::json)
+        (SELECT COALESCE(json_agg(t.name ORDER BY t.name), '[]'::json)
          FROM asset_tags at2 JOIN tags t ON t.id = at2.tag_id
          WHERE at2.asset_id = a.id) AS tags,
+        (SELECT COALESCE(json_agg(t.name ORDER BY t.name), '[]'::json)
+         FROM asset_tags at2 JOIN tags t ON t.id = at2.tag_id
+         WHERE at2.asset_id = a.id AND at2.source = 'ai') AS ai_tags,
         (SELECT COALESCE(json_agg(json_build_object(
            'shareType', s.share_type, 'sharedWith', su.username, 'expiresAt', s.expires_at
          )), '[]'::json)
@@ -523,6 +526,7 @@ export default async function assetsRoutes(fastify) {
         rating:      a.rating ?? null,
         label:       null,
         keywords:    a.tags ?? [],
+        aiKeywords:  a.ai_tags ?? [],
       },
       faces: (a.faces ?? []).map(f => ({
         faceId:      f.faceId,

@@ -1,0 +1,3 @@
+ALTER TABLE assets ADD COLUMN IF NOT EXISTS phash BIGINT;
+CREATE INDEX IF NOT EXISTS idx_assets_phash ON assets (phash) WHERE phash IS NOT NULL;
+ALTER TYPE job_type ADD VALUE IF NOT EXISTS 'phash';

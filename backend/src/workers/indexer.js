@@ -9,6 +9,7 @@ import { generateThumbnails } from './thumbnailer.js';
 import { createJob } from '../services/jobService.js';
 import { broadcast } from '../services/sseService.js';
 import { processAssetFaces, isAiAvailable } from '../services/aiService.js';
+import { computeAndStorePHash } from '../services/pHashService.js';
 
 // Hämtar om ansiktsigenkänning är aktiverad för ägaren av given bevakad mapp
 async function getFaceSettings(sourceFolderPath) {
@@ -157,8 +158,9 @@ export async function indexFile(absolutePath, sourceFolderPath = null) {
     `INSERT INTO assets
        (id, file_path, file_name, file_hash, mime_type, file_size,
         width, height, taken_at, file_created_at,
-        transcode_status, rating, title, description, source_folder, is_motion_photo, status)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
+        transcode_status, rating, title, description, source_folder, is_motion_photo, status,
+        iso, aperture, shutter_speed, focal_length_mm, lens_model)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)`,
     [
       assetId,
       relPath,
@@ -177,6 +179,11 @@ export async function indexFile(absolutePath, sourceFolderPath = null) {
       sourceFolderPath,
       meta.isMotionPhoto ?? false,
       initialStatus,
+      meta.iso ?? null,
+      meta.aperture ?? null,
+      meta.shutterSpeed ?? null,
+      meta.focalLengthMm ?? null,
+      meta.lensModel ?? null,
     ]
   );
 
@@ -307,6 +314,10 @@ export async function indexFile(absolutePath, sourceFolderPath = null) {
   if (isImage(mimeType)) {
     try {
       await generateThumbnails(assetId, absolutePath, mimeType);
+      // Beräkna perceptuellt hash asynkront (blockerar inte indexeringen)
+      computeAndStorePHash(assetId, absolutePath).catch(console.warn);
+      // Köa objektdetektion-jobb (körs av jobRunner i bakgrunden)
+      createJob('object_detection', assetId).catch(console.warn);
     } catch (err) {
       console.warn(`Thumbnail misslyckades för ${relPath}:`, err.message);
       await createJob('thumbnail', assetId);  // Köa för retry

@@ -427,16 +427,20 @@ function row(label, value) {
 
 function buildOrgSection(org) {
   const keywords = org.keywords ?? [];
+  const aiSet = new Set(org.aiKeywords ?? []);
 
-  // Klickbara taggar med × för borttagning och länk till TagManager
-  const chips = keywords.map(k =>
-    `<span class="inline-flex items-center gap-1 bg-slate-700 text-slate-300 text-xs px-2 py-0.5 rounded-full group">
+  // Klickbara taggar med × för borttagning; AI-taggar visas med ⚡-prefix
+  const chips = keywords.map(k => {
+    const isAi = aiSet.has(k);
+    const label = isAi ? `⚡ ${k}` : k;
+    const title = isAi ? `AI-detekterad tagg: ${k}` : k;
+    return `<span class="inline-flex items-center gap-1 ${isAi ? 'bg-violet-900/60 text-violet-300' : 'bg-slate-700 text-slate-300'} text-xs px-2 py-0.5 rounded-full group" title="${title}">
       <a href="#/tags" class="tag-chip-link hover:text-blue-300 transition-colors"
-         data-tag="${k.replace(/"/g, '&quot;')}">${k}</a>
+         data-tag="${k.replace(/"/g, '&quot;')}">${label}</a>
       <button class="tag-chip-remove text-slate-500 hover:text-red-400 transition-colors leading-none"
               data-tag="${k.replace(/"/g, '&quot;')}">×</button>
-    </span>`
-  ).join(' ');
+    </span>`;
+  }).join(' ');
 
   return `
     <div class="px-4 space-y-2.5 pb-2">
@@ -732,16 +736,19 @@ function initDrawerInteractions(container, assetId, m) {
   // ── Taggar: klickbara chips + inline-edit ────────────────────────────────────
   /** @type {string[]} */
   let currentTags = [...(m.organization.keywords ?? [])];
+  const aiTagSet = new Set(m.organization.aiKeywords ?? []);
 
   const rebuildTagChips = () => {
     const chipsEl = container.querySelector('#lb-tag-chips');
     if (!chipsEl) return;
-    chipsEl.innerHTML = currentTags.map(k =>
-      `<span class="inline-flex items-center gap-1 bg-slate-700 text-slate-300 text-xs px-2 py-0.5 rounded-full">
-        <a href="#/tags" class="tag-chip-link hover:text-blue-300 transition-colors" data-tag="${k}">${k}</a>
+    chipsEl.innerHTML = currentTags.map(k => {
+      const isAi = aiTagSet.has(k);
+      const label = isAi ? `⚡ ${k}` : k;
+      return `<span class="inline-flex items-center gap-1 ${isAi ? 'bg-violet-900/60 text-violet-300' : 'bg-slate-700 text-slate-300'} text-xs px-2 py-0.5 rounded-full" title="${isAi ? 'AI-detekterad tagg' : k}">
+        <a href="#/tags" class="tag-chip-link hover:text-blue-300 transition-colors" data-tag="${k}">${label}</a>
         <button class="tag-chip-remove text-slate-500 hover:text-red-400 leading-none" data-tag="${k}">×</button>
-      </span>`
-    ).join(' ');
+      </span>`;
+    }).join(' ');
     bindTagChipEvents();
   };
 
@@ -1457,3 +1464,87 @@ async function trashCurrentInLightbox() {
 
 lb?.addEventListener('click', (e) => { if (e.target === lb) closeLightbox(); });
 document.getElementById('lb-close')?.addEventListener('click', closeLightbox);
+
+// ── Touch-gester: swipe-navigation + pinch-zoom + touch-pan ──────────────────
+if (lbMediaArea) {
+  let touchStartX   = 0;
+  let touchStartY   = 0;
+  let touchPinchDist = 0;   // Fingeravstånd vid pinch-start
+  let zoomAtPinchStart = 1; // Zoom-nivå vid pinch-start
+  let panAtTouchStartX = 0;
+  let panAtTouchStartY = 0;
+  let isPanning   = false;
+  let wasPinching = false;
+
+  function fingerDist(touches) {
+    const dx = touches[0].clientX - touches[1].clientX;
+    const dy = touches[0].clientY - touches[1].clientY;
+    return Math.hypot(dx, dy);
+  }
+
+  lbMediaArea.addEventListener('touchstart', (e) => {
+    if (!lb.classList.contains('open')) return;
+    if (e.touches.length === 1) {
+      wasPinching      = false;
+      isPanning        = zoomLevel > 1;
+      touchStartX      = e.touches[0].clientX;
+      touchStartY      = e.touches[0].clientY;
+      panAtTouchStartX = panX;
+      panAtTouchStartY = panY;
+    } else if (e.touches.length === 2) {
+      wasPinching        = true;
+      isPanning          = false;
+      touchPinchDist     = fingerDist(e.touches);
+      zoomAtPinchStart   = zoomLevel;
+    }
+  }, { passive: true });
+
+  lbMediaArea.addEventListener('touchmove', (e) => {
+    if (!lb.classList.contains('open')) return;
+
+    if (e.touches.length === 2) {
+      // Pinch-zoom mot mittpunkten av de två fingrarna
+      e.preventDefault();
+      const newDist    = fingerDist(e.touches);
+      const scaleDelta = newDist / touchPinchDist;
+      const targetZoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, zoomAtPinchStart * scaleDelta));
+
+      const container  = document.getElementById('lb-media-container');
+      const rect       = container?.getBoundingClientRect();
+      const midVpX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+      const midVpY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+      const midX   = midVpX - (rect?.left ?? 0);
+      const midY   = midVpY - (rect?.top  ?? 0);
+
+      // Inkrementell pan-justering så att mittpunkten förblir stationär
+      const relChange = targetZoom / zoomLevel;
+      panX = midX - relChange * (midX - panX);
+      panY = midY - relChange * (midY - panY);
+      zoomLevel = targetZoom;
+      if (zoomLevel <= 1) { panX = 0; panY = 0; }
+      applyZoom();
+
+    } else if (e.touches.length === 1 && isPanning) {
+      // 1-fingersdrag när inzoomad → flytta bilden
+      e.preventDefault();
+      panX = panAtTouchStartX + (e.touches[0].clientX - touchStartX);
+      panY = panAtTouchStartY + (e.touches[0].clientY - touchStartY);
+      applyZoom();
+    }
+  }, { passive: false });
+
+  lbMediaArea.addEventListener('touchend', (e) => {
+    if (!lb.classList.contains('open')) return;
+    isPanning = false;
+    // Vänta tills alla fingrar lyfts; ignorera om det var en pinch-gest
+    if (e.touches.length > 0 || wasPinching || zoomLevel > 1) return;
+
+    const dx = e.changedTouches[0].clientX - touchStartX;
+    const dy = e.changedTouches[0].clientY - touchStartY;
+    // Horisontell swipe ≥ 50 px med vertikalt spill < 60 px → navigera
+    if (Math.abs(dx) >= 50 && Math.abs(dy) < 60) {
+      if (dx < 0 && currentIndex < items.length - 1) showItem(currentIndex + 1);
+      if (dx > 0 && currentIndex > 0)               showItem(currentIndex - 1);
+    }
+  }, { passive: true });
+}

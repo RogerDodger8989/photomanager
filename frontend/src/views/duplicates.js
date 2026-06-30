@@ -95,23 +95,60 @@ function renderGroup(group, index) {
     </div>`;
 }
 
+// ── Perceptuell dublikatvy ────────────────────────────────────────────────────
+
+function renderPercGroup(group, index) {
+  return `
+    <div class="perc-group bg-slate-900 rounded-2xl p-4 mb-4" data-index="${index}">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-white text-sm font-semibold">${group.length} nästan-identiska bilder</h3>
+      </div>
+      <div class="flex gap-3 overflow-x-auto pb-2">
+        ${group.map((a, i) => renderCard(a, i === 0)).join('')}
+      </div>
+    </div>`;
+}
+
+// ── Huvud-export ─────────────────────────────────────────────────────────────
+
 export async function renderDuplicates(container) {
   container.innerHTML = `
     <div class="p-4 max-w-5xl mx-auto">
-      <div class="flex items-center justify-between mb-6">
-        <div>
-          <h1 class="text-xl font-semibold text-white">🔁 Dublikat</h1>
-          <p id="dup-subtitle" class="text-sm text-slate-400 mt-0.5">Laddar…</p>
-        </div>
+      <div class="flex items-center justify-between mb-4">
+        <h1 class="text-xl font-semibold text-white">🔁 Dublikat</h1>
         <button id="dup-clean-all-btn"
           class="hidden py-2 px-4 bg-red-900/60 hover:bg-red-800 text-red-300 text-sm rounded-xl transition-colors border border-red-800">
           Radera alla kopior (behåll original)
         </button>
       </div>
+
+      <div class="flex gap-2 mb-4">
+        <button id="tab-exact"
+          class="dup-tab py-1.5 px-4 rounded-lg text-sm font-medium bg-blue-600 text-white">
+          Exakta kopior
+        </button>
+        <button id="tab-similar"
+          class="dup-tab py-1.5 px-4 rounded-lg text-sm font-medium bg-slate-700 text-slate-300 hover:bg-slate-600">
+          Nästan identiska
+        </button>
+      </div>
+
+      <p id="dup-subtitle" class="text-sm text-slate-400 mb-4">Laddar…</p>
       <div id="dup-list"></div>
     </div>`;
 
   let groups = [];
+  let percGroups = [];
+  let activeTab = 'exact';
+
+  function switchTab(tab) {
+    activeTab = tab;
+    container.querySelector('#tab-exact').className =
+      `dup-tab py-1.5 px-4 rounded-lg text-sm font-medium ${tab === 'exact' ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`;
+    container.querySelector('#tab-similar').className =
+      `dup-tab py-1.5 px-4 rounded-lg text-sm font-medium ${tab === 'similar' ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`;
+    render();
+  }
 
   async function load() {
     try {
@@ -119,6 +156,18 @@ export async function renderDuplicates(container) {
       groups = data ?? [];
     } catch {
       container.querySelector('#dup-subtitle').textContent = 'Kunde inte ladda dublikater.';
+    }
+    render();
+  }
+
+  async function loadPerceptual() {
+    const subtitle = container.querySelector('#dup-subtitle');
+    subtitle.textContent = 'Analyserar nästan-identiska bilder…';
+    try {
+      const { data } = await api.perceptualDuplicates(10);
+      percGroups = data ?? [];
+    } catch {
+      subtitle.textContent = 'Kunde inte analysera.';
       return;
     }
     render();
@@ -129,32 +178,51 @@ export async function renderDuplicates(container) {
     const subtitle = container.querySelector('#dup-subtitle');
     const cleanBtn = container.querySelector('#dup-clean-all-btn');
 
-    if (groups.length === 0) {
-      subtitle.textContent = 'Inga dublikater hittades.';
-      list.innerHTML = `
-        <div class="text-center text-slate-500 py-16 text-4xl">✅</div>
-        <p class="text-center text-slate-400 text-sm">Alla filer är unika.</p>`;
+    if (activeTab === 'exact') {
+      cleanBtn.classList.toggle('hidden', groups.length === 0);
+      if (groups.length === 0) {
+        subtitle.textContent = 'Inga exakta dublikater hittades.';
+        list.innerHTML = `<div class="text-center text-slate-500 py-16 text-4xl">✅</div>
+          <p class="text-center text-slate-400 text-sm">Alla filer är unika.</p>`;
+        return;
+      }
+      subtitle.textContent = `${groups.length} grupp${groups.length !== 1 ? 'er' : ''} med exakta kopior`;
+      list.innerHTML = groups.map(renderGroup).join('');
+    } else {
       cleanBtn.classList.add('hidden');
+      if (percGroups.length === 0) {
+        subtitle.textContent = 'Inga nästan-identiska bilder hittades (threshold 10 bitar).';
+        list.innerHTML = `<div class="text-center text-slate-500 py-16 text-4xl">✅</div>
+          <p class="text-center text-slate-400 text-sm">Inga nästan-identiska bilder.</p>`;
+        return;
+      }
+      subtitle.textContent = `${percGroups.length} grupp${percGroups.length !== 1 ? 'er' : ''} med nästan-identiska bilder`;
+      list.innerHTML = percGroups.map((g, i) => renderPercGroup(g, i)).join('');
+    }
+  }
+
+  // Tab-switch
+  container.addEventListener('click', async (e) => {
+    const tabBtn = e.target.closest('.dup-tab');
+    if (tabBtn) {
+      const newTab = tabBtn.id === 'tab-exact' ? 'exact' : 'similar';
+      if (newTab === activeTab) return;
+      switchTab(newTab);
+      if (newTab === 'similar' && percGroups.length === 0) await loadPerceptual();
       return;
     }
 
-    subtitle.textContent = `${groups.length} grupp${groups.length !== 1 ? 'er' : ''} med dublikater`;
-    cleanBtn.classList.remove('hidden');
-    list.innerHTML = groups.map(renderGroup).join('');
-  }
-
-  // Händelsehantering
-  container.addEventListener('click', async (e) => {
     // Visa bild i lightbox
     const viewBtn = e.target.closest('.dup-view-btn');
     if (viewBtn) {
       const card = viewBtn.closest('.dup-card');
       const id = card?.dataset.id;
       if (!id) return;
-      // Hitta asset-objektet från aktuell grupp
-      for (const group of groups) {
-        const asset = group.assets.find(a => a.id === id);
-        if (asset) { openLightbox(group.assets, group.assets.indexOf(asset)); break; }
+      const allGroups = activeTab === 'exact' ? groups.map(g => g.assets) : percGroups;
+      for (const group of allGroups) {
+        const assetList = group.assets ?? group;
+        const asset = assetList.find(a => a.id === id);
+        if (asset) { openLightbox(assetList, assetList.indexOf(asset)); break; }
       }
       return;
     }
@@ -163,7 +231,7 @@ export async function renderDuplicates(container) {
     const trashBtn = e.target.closest('.dup-trash-btn');
     if (trashBtn) {
       const card = trashBtn.closest('.dup-card');
-      const group = trashBtn.closest('.dup-group');
+      const group = trashBtn.closest('.dup-group, .perc-group');
       if (!card || !group) return;
       const id = card.dataset.id;
       try {
@@ -171,12 +239,16 @@ export async function renderDuplicates(container) {
         card.remove();
         const remaining = group.querySelectorAll('.dup-card');
         if (remaining.length <= 1) {
-          const hash = group.dataset.hash;
-          groups = groups.filter(g => g.file_hash !== hash);
+          if (activeTab === 'exact') {
+            const hash = group.dataset.hash;
+            groups = groups.filter(g => g.file_hash !== hash);
+          } else {
+            const idx = parseInt(group.dataset.index);
+            percGroups.splice(idx, 1);
+          }
           group.remove();
           render();
-        } else {
-          // Re-tag original (første kvarvarande)
+        } else if (activeTab === 'exact') {
           remaining[0].querySelector('.absolute.top-1').outerHTML =
             `<div class="absolute top-1 left-1 bg-blue-600 text-white text-[10px] rounded px-1.5 py-0.5">⭐ Original</div>`;
           group.querySelector('h3').textContent = `${remaining.length} kopior av samma fil`;
@@ -200,10 +272,7 @@ export async function renderDuplicates(container) {
       keepBtn.textContent = 'Raderar…';
       let failed = 0;
       for (const card of copies) {
-        try {
-          await api.trash(card.dataset.id);
-          card.remove();
-        } catch { failed++; }
+        try { await api.trash(card.dataset.id); card.remove(); } catch { failed++; }
       }
       const hash = group.dataset.hash;
       groups = groups.filter(g => g.file_hash !== hash);
@@ -213,14 +282,13 @@ export async function renderDuplicates(container) {
       return;
     }
 
-    // Radera alla kopior globalt
+    // Radera alla kopior globalt (exakta)
     const cleanAllBtn = e.target.closest('#dup-clean-all-btn');
     if (cleanAllBtn) {
       if (!confirm(`Radera alla kopior i ${groups.length} grupper? Originalet (äldst indexerat) behålls.`)) return;
       cleanAllBtn.disabled = true;
       cleanAllBtn.textContent = 'Arbetar…';
-      let deleted = 0;
-      let failed = 0;
+      let deleted = 0, failed = 0;
       for (const group of groups) {
         const copies = group.assets.slice(1).filter(a => a.status !== 'trashed');
         for (const asset of copies) {
@@ -230,8 +298,8 @@ export async function renderDuplicates(container) {
       groups = [];
       render();
       toast(failed
-        ? `${deleted} kopio${deleted !== 1 ? 'r' : 'r'} raderade, ${failed} misslyckades`
-        : `${deleted} kopio${deleted !== 1 ? 'r' : ''} raderade`
+        ? `${deleted} raderade, ${failed} misslyckades`
+        : `${deleted} kopio${deleted !== 1 ? 'r' : 'a'} raderade`
       );
     }
   });

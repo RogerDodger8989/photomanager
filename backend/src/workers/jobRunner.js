@@ -2,6 +2,8 @@ import { query } from '../db/pool.js';
 import { startJob, completeJob, failJob, getPendingJobs } from '../services/jobService.js';
 import { transcodeVideo } from './transcoder.js';
 import { generateThumbnails } from './thumbnailer.js';
+import { computeAndStorePHash } from '../services/pHashService.js';
+import { detectAndTagAsset } from '../services/objectDetectionService.js';
 import { config } from '../config.js';
 import { join, resolve } from 'path';
 import { broadcast } from '../services/sseService.js';
@@ -26,6 +28,18 @@ async function processPendingJobs() {
     const thumbJobs = await getPendingJobs('thumbnail', 5);
     for (const job of thumbJobs) {
       await runThumbnailJob(job);
+    }
+
+    // Hämta phash-backfill-jobb
+    const phashJobs = await getPendingJobs('phash', 10);
+    for (const job of phashJobs) {
+      await runPhashJob(job);
+    }
+
+    // Hämta objektdetektion-jobb (2 åt gången — tyngre än phash)
+    const odJobs = await getPendingJobs('object_detection', 2);
+    for (const job of odJobs) {
+      await runObjectDetectionJob(job);
     }
   } finally {
     running = false;
@@ -94,6 +108,60 @@ async function runThumbnailJob(job) {
     const absPath = resolve(config.media.photosPath,rows[0].file_path);
     await generateThumbnails(job.asset_id, absPath, rows[0].mime_type);
     await completeJob(job.id);
+  } catch (err) {
+    if (job.attempts + 1 < MAX_ATTEMPTS) {
+      await query(
+        "UPDATE jobs SET status = 'pending', error_msg = $2 WHERE id = $1",
+        [job.id, err.message]
+      );
+    } else {
+      await failJob(job.id, err.message);
+    }
+  }
+}
+
+async function runPhashJob(job) {
+  if (job.attempts >= MAX_ATTEMPTS) {
+    await failJob(job.id, 'Max antal försök uppnått');
+    return;
+  }
+  await startJob(job.id);
+  try {
+    const { rows } = await query(
+      "SELECT file_path FROM assets WHERE id = $1 AND status != 'deleted'",
+      [job.asset_id]
+    );
+    if (!rows[0]) { await failJob(job.id, 'Asset hittades inte'); return; }
+    const absPath = resolve(config.media.photosPath, rows[0].file_path);
+    await computeAndStorePHash(job.asset_id, absPath);
+    await completeJob(job.id);
+  } catch (err) {
+    if (job.attempts + 1 < MAX_ATTEMPTS) {
+      await query(
+        "UPDATE jobs SET status = 'pending', error_msg = $2 WHERE id = $1",
+        [job.id, err.message]
+      );
+    } else {
+      await failJob(job.id, err.message);
+    }
+  }
+}
+
+async function runObjectDetectionJob(job) {
+  if (job.attempts >= MAX_ATTEMPTS) {
+    await failJob(job.id, 'Max antal försök uppnått');
+    return;
+  }
+  await startJob(job.id);
+  try {
+    const { rows } = await query(
+      "SELECT file_path FROM assets WHERE id = $1 AND status != 'deleted'",
+      [job.asset_id]
+    );
+    if (!rows[0]) { await failJob(job.id, 'Asset hittades inte'); return; }
+    const absPath = resolve(config.media.photosPath, rows[0].file_path);
+    const count = await detectAndTagAsset(job.asset_id, absPath);
+    await completeJob(job.id, count > 0 ? `${count} klasser detekterade` : 'Inga objekt');
   } catch (err) {
     if (job.attempts + 1 < MAX_ATTEMPTS) {
       await query(

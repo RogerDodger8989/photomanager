@@ -18,6 +18,7 @@
 - [Miljövariabler](#miljövariabler)
 - [API-översikt](#api-översikt)
 - [Projektstruktur](#projektstruktur)
+- [Roadmap](#roadmap)
 - [Licens](#licens)
 
 ---
@@ -26,9 +27,10 @@
 
 ### Bibliotek & indexering
 - Automatisk bevakning av mediamappar med **chokidar** — nya filer indexeras i realtid
-- Stöd för **JPEG, PNG, WebP, HEIC, GIF** och videofiler (MP4, MOV, MKV m.fl.)
+- Stöd för **JPEG, PNG, WebP, HEIC, GIF, RAW** (CR2, NEF, ARW, DNG m.fl.) och videofiler (MP4, MOV, MKV m.fl.)
 - Extraktion av all **EXIF/IPTC/XMP**-metadata: datum, GPS-koordinater, kamera, objektiv, taggar
-- **SHA-256**-hashning för automatisk dubblettdetektering
+- **SHA-256**-hashning för automatisk exakt dubblettdetektering
+- **Perceptuell hash (dHash)** — hittar nästan-identiska bilder med Hamming-distans ≤ 10 bitar
 - Stöd för **nätverksmappar (SMB/CIFS)** som bevakade källmappar
 - Administratörsgränssnitt för att lägga till och hantera bevakade mappar
 
@@ -40,7 +42,8 @@
 - **Flaggning** — Flaggad 🚩 / Avvisad ✗ / Ingen — via högerklick eller kortkommando
 - **Färgetiketter** — 5 färger (röd/gul/grön/blå/lila) visas som border runt thumbnail
 - **Konfigurerbar thumbnail-overlay** — välj fritt vad som visas: betyg, flagga, färgkant, filnamn, storlek, datum, dimensioner
-- Inställningarna synkroniseras mellan Bilder, Album och Favoriter-vyerna
+- **Staplar (Stacks)** — gruppera burst-bilder och varianter, en "cover"-bild visas i grid
+- **Motion Photos** (Google Pixel) — identifieras automatiskt vid indexering, kort videoklipp extraheras
 
 ### Video
 - **FFmpeg**-transkodning: HEVC/MOV → H.264 MP4 för sömlös webbuppspelning
@@ -49,15 +52,26 @@
 ### Sökning & filtrering
 - **Full-text + fuzzy-sökning** på filnamn, plats och taggar via PostgreSQL `pg_trgm`
 - Avancerade filter: datumintervall, plats, album, person, filtyp och favoriter
-- **Tagghantering** med normaliserade taggar och autocomplete
+- **Tagghantering** med normaliserade taggar, hierarkiska sökvägar och autocomplete
 
 ### Utforska
 - **Tidslinje** grupperad per dag, månad och år med cursor-paginering
-- **Händelser** — auto-grupperade resor och tillfällen utifrån datum och plats
-- **"Den här dagen"** — visar bilder från samma datum tidigare år
+- **Händelser** — auto-grupperade resor och tillfällen utifrån datum och plats (24h-fönster, 200 km)
+- **Minnesvy "Denna dag i historien"** — visar bilder från samma datum tidigare år, grupperade per år
+- **Daglig push-notis** kl 08:00 när det finns minnen för dagen
 - **Resor med GPS-spår** — automatisk ruttvisualisering från geo-taggade bilder (≥ 2 dagar)
 - **Platsklustring** — bilder grupperade per geografiskt område
 - **Smarta samlingar** baserade på innehåll och metadata
+
+### Lightbox & navigation
+- **Touch-swipe** — svep vänster/höger för nästa/föregående bild
+- **Pinch-zoom** — nyp med två fingrar för att zooma, panorera med ett finger när inzoomad
+- Tangentbordsnavigering: ←/→ navigerar bilder, Esc stänger, +/- zoomar
+
+### Kamera & statistik
+- **Kamerastatistik** i admindashboarden — histograms för ISO, bländare, slutartid, brännvidd och objektiv
+- Kolumnerna `iso`, `aperture`, `shutter_speed`, `focal_length_mm`, `lens_model` indexerade direkt på `assets`
+- Backfill-funktion som beräknar statistik från befintliga EXIF-metadata
 
 ### Karta
 - Interaktiv karta (**Leaflet.js**) med **PostGIS-baserad klustring** som anpassas efter zoomnivå
@@ -70,6 +84,10 @@
 - `ivfflat`-index skapas automatiskt när ~1 000 ansikten indexerats
 - **AI-förslag** på personnamn med accept/avvisa per ansikte eller i batch
 - Separat **Python Flask-tjänst** (InsightFace `buffalo_l`) som alternativ AI-backend
+- **YOLOv8-nano motivigenkänning** — taggar automatiskt 80 COCO-klasser (hund, katt, bil, mat …) på svenska
+  - Modellen (~6 MB) laddas ner via admingränssnittet
+  - AI-taggar märks med ⚡ och lila färg i lightboxen
+  - Backfill-knapp för att tagga befintliga foton
 - Manuell hantering: skapa, namnge, slå ihop och ta bort personer
 - Spara **födelseår och dödsår** på personer
 - **Personrelationer** — koppla ihop personer med varandra
@@ -78,6 +96,7 @@
 
 ### Album & delning
 - Manuella och smarta **album** med valfri sorteringsordning
+- **Regelbyggare** för smarta album med AND/OR-logik (tagg, person, datum, plats, betyg m.m.)
 - **Favoriter** — markera och filtrera dina bästa bilder
 - **Intern delning** med specifika användare
 - **Publika delningslänkar** med valfri giltighetstid och max antal visningar
@@ -92,15 +111,17 @@
 - **Användarhantering**: skapa, redigera, aktivera och inaktivera konton
 - **RBAC** med tre roller (`admin` / `user` / `guest`) och granulära rättigheter per användare
 - **Audit-log** med CSV-export — spårar login, borttagning, delning och nedladdning
-- **Jobbkö** via BullMQ + Redis — övervaka status och starta om misslyckade jobb
-- **Dubblettrapport** baserat på SHA-256
+- **Jobbkö** — övervaka status för thumbnail, transcode, phash, object_detection och zip-jobb
+- **Dubblettrapport** baserat på SHA-256 och perceptuell hash (nästan-identiska)
+- **Kamerastatistik**: histograms för ISO, bländare, slutartid, brännvidd och objektiv
+- **YOLOv8-sektionen** i admin: modellstatus, nedladdning och backfill
 - **Systemstatistik**: antal assets, lagringsutrymme och jobbstatus
 - Rate-limiting, httpOnly JWT-refresh-cookie och bcrypt-lösenordshashning
 
 ### PWA
 - **Installerbar** på mobil och desktop via webbläsaren
 - Service Worker för offline-stöd
-- **Web Push-notifikationer** vid ny indexering och andra händelser
+- **Web Push-notifikationer** — ny indexering, dagliga minnesnotiser kl 08:00
 
 ---
 
@@ -110,11 +131,11 @@
 |-------|--------|
 | **API-server** | Node.js 20 + Fastify 4.28 |
 | **Databas** | PostgreSQL 16 med pgvector, PostGIS och pg_trgm |
-| **Cache & köer** | Redis 7 + BullMQ 5.8 |
-| **AI (Node)** | ONNX Runtime 1.18 — ArcFace/SCRFD i worker_threads |
+| **Cache & köer** | Redis 7 |
+| **AI (Node)** | ONNX Runtime 1.18 — ArcFace/SCRFD/YOLOv8 i worker_threads |
 | **AI (Python)** | InsightFace 0.7.3 + Flask — separat Docker-tjänst |
 | **Frontend** | PWA — HTML5 + Tailwind CSS v4 + Vanilla JavaScript (ingen byggsteg i dev) |
-| **Bildhantering** | Sharp 0.33 (thumbnails, HEIC-konvertering) |
+| **Bildhantering** | Sharp 0.33 (thumbnails, HEIC-konvertering, phash, YOLO-preprocessning) |
 | **Videohantering** | FFmpeg (H.264-transkodning, range-requests) |
 | **Metadata** | exifr + exiftool (EXIF/IPTC/XMP) |
 | **Geo** | PostGIS (klustring, avstånd) + reverse geocoding |
@@ -127,12 +148,14 @@
 | Worker | Uppgift |
 |--------|---------|
 | `fileWatcher.js` | Bevakar mediamappar via chokidar, köar nya filer |
-| `indexer.js` | Extraherar metadata, reverse-geocodar GPS, detekterar dubbletter |
+| `indexer.js` | Extraherar metadata, reverse-geocodar GPS, detekterar dubbletter, köar jobb |
 | `thumbnailer.js` | Genererar 400 px + 1 200 px WebP-thumbnails |
 | `transcoder.js` | Transkoderar video till H.264 MP4 med FFmpeg |
 | `aiEmbedder.js` | Kör ansiktsdetektering och skapar 512-dim embeddings |
-| `trashCleaner.js` | Cron-jobb som permanent raderar filer efter N dagar i papperskorgen |
-| `jobRunner.js` | BullMQ-konsument som koordinerar alla asynkrona jobb |
+| `jobRunner.js` | Polling-baserad jobbkoordinator (phash, object_detection, transcode, thumbnail) |
+| `trashCleaner.js` | Cron kl 24h-intervall — permanent raderar filer efter N dagar i papperskorgen |
+| `dailyPushJob.js` | Cron kl 08:00 — skickar minnespush till alla prenumeranter med foton "denna dag" |
+| `motionPhotoBackfill.js` | Identifierar Motion Photos bland befintliga bilder vid uppstart |
 
 ### Autentisering & säkerhet
 
@@ -201,27 +224,30 @@ PostgreSQL 16 med följande extensions:
 | `vector` (pgvector) | 512-dim ansiktsembeddings och similaritetssökning |
 | `pg_trgm` | Trigram-baserad fuzzy-textsökning |
 
-### Tabeller (14 migrationer)
+### Tabeller (36 migrationer, 001–036)
 
 | Tabell | Beskrivning |
 |--------|-------------|
 | `users` | Konton med roller och inloggningshistorik |
 | `user_permissions` | Granulära rättigheter per användare |
 | `user_settings` | JSONB-inställningar (t.ex. face detection-tröskel) |
-| `assets` | Alla foton och videor — metadata, sökvägar, status, rating |
+| `assets` | Alla foton/videor — metadata, sökvägar, status, rating, iso, aperture, shutter_speed, focal_length_mm, lens_model, phash |
 | `asset_metadata` | Rådata från EXIF/IPTC/XMP per asset |
-| `asset_tags` | Koppling asset ↔ tag |
-| `tags` | Normaliserade taggar (lowercase) |
+| `asset_tags` | Koppling asset ↔ tag (med `source` och `confidence` för AI-taggar) |
+| `tags` | Normaliserade taggar med hierarkiska sökvägar (`source`: manual/ai) |
+| `stacks` | Grupper av burst-bilder och varianter |
+| `stack_assets` | Koppling stack ↔ asset med cover-flagga |
 | `faces` | Detekterade ansikten med ONNX-embedding (VECTOR 512) |
 | `persons` | Namngivna identiteter med födelseår, dödsår och relationer |
 | `ai_suggestions` | AI-förslag (face_id → person_id) med confidence-score |
 | `albums` | Manuella och smarta samlingar |
 | `album_assets` | Koppling album ↔ asset med sorteringsordning |
+| `smart_album_rules` | Regeluppsättningar för smarta album (AND/OR-logik) |
 | `favorites` | Användarens favoritmarkerade bilder |
 | `events` | Auto-grupperade händelser/resor |
 | `event_assets` | Koppling event ↔ asset |
 | `shares` | Intern och publik delning med token, giltighetstid och max-visningar |
-| `jobs` | Asynkrona jobb (thumbnail, transcode, index, ai_embed, zip_export) |
+| `jobs` | Asynkrona jobb (thumbnail, transcode, phash, object_detection, zip_export) |
 | `audit_log` | Komplett logg över alla användarhandlingar |
 | `watched_folders` | Bevakade mappar inkl. SMB/CIFS-konfiguration |
 | `push_subscriptions` | Web Push-prenumerationer per användare |
@@ -267,14 +293,24 @@ docker compose -f docker-compose.dev.yml up
 
 Kör backend med `--watch` för automatisk omstart vid filändringar. Startar även InsightFace som separat tjänst på port 5000.
 
-### AI-modeller (valfritt)
+### AI-modeller
 
+#### Ansiktsigenkänning (valfritt)
 Lägg ONNX-modellerna i mappen du konfigurerade under `AI_DETECTOR_PATH` och `AI_RECOGNIZER_PATH`:
 
 - Detektor: `SCRFD_500M_bnkps_shape640x640.onnx`
 - Igenkänning: `w600k_r50.onnx`
 
-Appen startar och fungerar fullt ut utan modellerna — AI-funktionen är helt inaktiverad tills modellerna finns på plats.
+#### Motivigenkänning YOLOv8 (valfritt)
+Ladda ner direkt från admingränssnittet (Admin → Jobb → YOLOv8 AI-taggning → Ladda ner modell), eller manuellt:
+
+```bash
+# Lägg modellen i MODELS_PATH (standard: ./models/)
+wget -O models/yolov8n.onnx \
+  https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.onnx
+```
+
+Appen startar och fungerar fullt ut utan modellerna — AI-funktionerna är inaktiverade tills modellerna finns på plats.
 
 ---
 
@@ -295,6 +331,9 @@ JWT_REFRESH_EXPIRES=30d
 MEDIA_PHOTOS_PATH=/media/photos
 MEDIA_THUMBS_PATH=/media/thumbs
 MEDIA_TRANSCODE_PATH=/media/transcode
+
+# Mapp för ONNX-modeller (YOLOv8 m.fl.)
+MODELS_PATH=./models
 
 VAPID_PUBLIC_KEY=<web-push-nyckel>
 VAPID_PRIVATE_KEY=<web-push-nyckel>
@@ -317,17 +356,20 @@ Alla endpoints under `/api/` kräver JWT i `Authorization: Bearer <token>`-heade
 | Autentisering | `/api/auth` | `POST /login`, `POST /refresh`, `GET /me` |
 | Assets | `/api/assets` | Lista, metadata, trash, restore, permanent delete |
 | Sökning | `/api/search` | Full-text + filter, tagg-autocomplete |
-| Utforska | `/api/explore` | Händelser, resor, "den här dagen", GPS-spår |
+| Utforska | `/api/explore` | Händelser, resor, "denna dag i historien", GPS-spår |
 | Karta | `/api/map` | Geo-kluster, kartutbredning, bilder i radius |
 | Persons | `/api/persons` | CRUD, dubbletter, ansiktsförslag |
 | AI | `/api/ai` | Status, förslag, accept/avvisa, träna om kluster |
-| Album | `/api/albums` | CRUD, lägg till/ta bort assets |
+| Album | `/api/albums` | CRUD, lägg till/ta bort assets, smarta album |
 | Delning | `/api/shares` | Inkommande, utgående, publika länkar |
 | Export | `/api/export` | Starta ZIP-export, ladda ner färdigt arkiv |
-| Admin | `/api/admin` | Användare, jobb, dubbletter, systemstatistik |
+| Admin | `/api/admin` | Användare, jobb, dubbletter, kamerastatistik, YOLOv8-modell, backfill |
 | Stream | `/api/stream` | Foton och videor med range-request-stöd |
-| Push | `/api/push` | Registrera Web Push-prenumeration |
+| Push | `/api/push` | Registrera/avregistrera Web Push-prenumeration |
 | Inställningar | `/api/settings` | Användarinställningar (JSONB) |
+| Taggar | `/api/tags` | Tagghantering och sökvägshierarki |
+| Staplar | `/api/stacks` | Skapa, hantera och expandera bildstaplar |
+| Mappar | `/api/folders` | Mappträd och fillistning |
 | Hälsa | `/api/health` | Healthcheck |
 
 ---
@@ -341,14 +383,15 @@ PhotoManager/
 │   │   ├── server.js                  # Fastify-applikation och startpunkt
 │   │   ├── config.js                  # Miljökonfiguration
 │   │   ├── db/
-│   │   │   ├── migrations/            # 14 SQL-migrationer (001–014)
-│   │   │   ├── migrate.js             # Migrationskörare
+│   │   │   ├── migrations/            # 36 SQL-migrationer (001–036)
+│   │   │   ├── runMigrations.js       # Migrationskörare
 │   │   │   └── pool.js                # PostgreSQL-anslutningspool
 │   │   ├── plugins/                   # Fastify-plugins (auth, cors, rate-limit, static)
-│   │   ├── routes/                    # 18 routfiler (assets, albums, persons, search …)
-│   │   ├── services/                  # Affärslogik (AI, geo, metadata, jobb, SSE, XMP)
+│   │   ├── routes/                    # 19 routfiler (assets, albums, persons, search …)
+│   │   ├── services/                  # Affärslogik (AI, geo, metadata, jobb, SSE, XMP,
+│   │   │                              #   objectDetection, pHash, faceRecognition, explore)
 │   │   └── workers/                   # Bakgrundsprocesser (se tabell ovan)
-│   ├── models/                        # ONNX-modellcache
+│   ├── models/                        # ONNX-modellcache (yolov8n.onnx m.fl.)
 │   ├── insightface_server.py          # Python Flask AI-backend
 │   ├── pm2.config.js                  # PM2 multi-process-konfiguration
 │   ├── Dockerfile                     # Produktionsbild (Node + Python + FFmpeg)
@@ -372,6 +415,39 @@ PhotoManager/
 ├── docker-compose.yml                 # Produktion
 └── docker-compose.dev.yml             # Utveckling (inkl. InsightFace-tjänst)
 ```
+
+---
+
+## Roadmap
+
+Funktioner som planeras implementeras, i prioritetsordning. Bockas av när de är klara.
+
+### Klar ✅
+| # | Funktion | Beskrivning |
+|---|----------|-------------|
+| 1A | Perceptuell hash | dHash — nästan-identiska bilder med Hamming ≤ 10 |
+| 1B | YOLOv8-nano auto-taggning | COCO-80 → svenska taggar, CPU-only, ⚡-ikon i UI |
+| 2A | Touch-gester i lightbox | Swipe-navigation + pinch-zoom + touch-panorering |
+| 3A | Kamerastatistik | ISO/bländare/slutartid/brännvidd/objektiv-histograms i admin |
+| 3B | Minnesvy + push-notis | "Denna dag i historien" + daglig push kl 08:00 |
+
+### Kvar att bygga 🔜
+| # | Funktion | Beskrivning |
+|---|----------|-------------|
+| 3C | Lagringsanalys | Diskutrymme per år/album/person — stapeldiagram i admin |
+| 2C | Tangentbordsnavigering i gallery | ↑↓←→ i fotogrid, Enter öppnar lightbox, Ctrl+A markera alla |
+| 2B | Decennietal/årsvy | Ny tidslinjegruppering: dekad → år → månad → dag vid klick |
+| 2D | Digital fotoram | Helskärm slideshow-sida (frame.html) utan inloggning, konfigurerbar källa och intervall |
+| 4A | Vattenstämpel vid export | Text/logga compositas med Sharp vid ZIP-export, toggle i exportdialog |
+| 4B | Redigera EXIF (utökat) | Ändra datum, GPS (karta), kameramodell — skrivs tillbaka via exiftool/XMP-sidecar |
+| 5A | rclone backup | Synka till Google Drive, OneDrive, S3/Backblaze via rclone — schema + logg i admin |
+| 5B | Import-rapport | Sessionsbaserad logg: importerade, dubbletter, fel per körning |
+| 6A | Kommentarer + reaktioner | Per-bild kommentarer och emoji-reaktioner (❤️ 😂 😮 👍) i lightboxen |
+| 6B | Aktivitetsflöde | Human-läsbar vy av audit_log — "Mamma lade till 47 foton i Julafton 2025" |
+| 6C | Åtkomstlogg UI | Frontend-vy för att se vem som tittade på delade album |
+| 7A | Ortstaggar automatiska | Skapa hierarkiska platstaggar (Platser/Sverige/Västra Götaland/Göteborg) vid import |
+| 7B | Live Photo hover-video | Visa tillhörande .mov som autoplay-video on hover i galleriet |
+| 7C | Projektmappar | Album-subtyp med kapitel, rubrik + text + cover per sektion, manuell ordning |
 
 ---
 

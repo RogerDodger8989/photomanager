@@ -32,4 +32,8 @@ export const config = {
   trash: {
     autoCleanDays: parseInt(process.env.TRASH_AUTO_CLEAN_DAYS ?? '30'),
   },
+
+  models: {
+    path: process.env.MODELS_PATH ?? './models',
+  },
 };

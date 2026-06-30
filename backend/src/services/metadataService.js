@@ -144,6 +144,12 @@ export async function extractMetadata(filePath) {
     title: null,       // XMP:Title / IPTC:ObjectName
     description: null, // XMP:Description / IPTC:Caption-Abstract
     isMotionPhoto: false, // Samsung/Google Motion Photo
+    // Kamerafält (sparas som egna kolumner på assets)
+    iso: null,             // ISO-tal, t.ex. 400
+    aperture: null,        // f-bländare, t.ex. 2.8
+    shutterSpeed: null,    // "1/250", "2s" etc.
+    focalLengthMm: null,   // brännvidd i mm, t.ex. 50
+    lensModel: null,       // t.ex. "Canon EF 50mm f/1.8 STM"
   };
 
   if (!isImage(mimeType)) return result;
@@ -259,6 +265,34 @@ export async function extractMetadata(filePath) {
           .map((s) => s.split('|').map((p) => p.trim()).filter(Boolean))
           .filter((parts) => parts.length > 0);
       }
+    }
+
+    // === KAMERAFÄLT ===
+    // exifr med translateKeys:false returnerar numeriska TIFF-tag-ID som nycklar för EXIF-fält.
+    // Pröva både numeriska och namngivna nycklar för bättre kompatibilitet.
+    const safeNum = (v) => { const n = parseFloat(v); return isFinite(n) ? n : null; };
+
+    const isoRaw = raw[34855] ?? raw['ISOSpeedRatings'] ?? null;
+    result.iso = isoRaw != null ? Math.round(safeNum(isoRaw) ?? NaN) || null : null;
+
+    const apRaw = raw[33437] ?? raw['FNumber'] ?? null;
+    result.aperture = apRaw != null ? Math.round((safeNum(apRaw) ?? NaN) * 10) / 10 || null : null;
+
+    const expRaw = raw[33434] ?? raw['ExposureTime'] ?? null;
+    const expSec  = expRaw != null ? safeNum(expRaw) : null;
+    if (expSec != null && expSec > 0) {
+      result.shutterSpeed = expSec >= 1
+        ? `${Math.round(expSec)}s`
+        : `1/${Math.round(1 / expSec)}`;
+    }
+
+    const flRaw = raw[37386] ?? raw['FocalLength'] ?? null;
+    result.focalLengthMm = flRaw != null ? Math.round(safeNum(flRaw) ?? NaN) || null : null;
+
+    const lensRaw = raw[42036] ?? raw['LensModel'] ?? null;
+    if (lensRaw != null) {
+      const s = String(lensRaw).replace(/^"|"$/g, '').trim();
+      result.lensModel = s || null;
     }
 
     // === MOTION PHOTO (Samsung/Google/OnePlus) ===
