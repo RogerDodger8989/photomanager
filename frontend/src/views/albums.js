@@ -26,6 +26,9 @@ async function renderAlbumList(container) {
           <button id="new-smart-album-btn" class="bg-violet-600 hover:bg-violet-500 text-white text-sm px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5">
             ✨ Smart album
           </button>
+          <button id="new-project-album-btn" class="bg-amber-600 hover:bg-amber-500 text-white text-sm px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5">
+            📚 Projektalbum
+          </button>
           <button id="new-album-btn" class="bg-blue-600 hover:bg-blue-500 text-white text-sm px-3 py-1.5 rounded-lg transition-colors">
             + Nytt album
           </button>
@@ -38,6 +41,7 @@ async function renderAlbumList(container) {
 
   document.getElementById('new-album-btn')?.addEventListener('click', () => showNewAlbumModal(container));
   document.getElementById('new-smart-album-btn')?.addEventListener('click', () => showNewSmartAlbumModal(container));
+  document.getElementById('new-project-album-btn')?.addEventListener('click', () => showNewProjectAlbumModal(container));
 
   await loadAlbumList(container);
 }
@@ -62,8 +66,9 @@ async function loadAlbumList(container) {
         <div class="aspect-square overflow-hidden relative">
           ${al.cover_thumb
             ? `<img src="/thumbs/${al.cover_thumb}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300">`
-            : `<div class="w-full h-full bg-slate-700 flex items-center justify-center text-5xl">${al.is_smart ? '✨' : '📁'}</div>`}
+            : `<div class="w-full h-full bg-slate-700 flex items-center justify-center text-5xl">${al.is_smart ? '✨' : al.album_type === 'project' ? '📚' : '📁'}</div>`}
           ${al.is_smart ? `<span class="absolute top-2 left-2 bg-violet-600/90 text-white text-[10px] font-semibold px-1.5 py-0.5 rounded-full">SMART</span>` : ''}
+          ${al.album_type === 'project' && !al.is_smart ? `<span class="absolute top-2 left-2 bg-amber-600/90 text-white text-[10px] font-semibold px-1.5 py-0.5 rounded-full">PROJEKT</span>` : ''}
         </div>
         <div class="p-3">
           <div class="font-medium text-sm text-white truncate pr-6">${al.name}</div>
@@ -219,35 +224,48 @@ function showNewAlbumModal(container) {
 // ── Album-detalj ───────────────────────────────────────────────────────────────
 
 async function renderAlbumDetail(container, albumId) {
-  container.innerHTML = `
-    <div class="p-4 flex flex-col h-full">
-      <button onclick="location.hash='#/albums'" class="text-slate-400 hover:text-white text-sm mb-4 flex items-center gap-1 w-fit">
-        ← Alla album
-      </button>
-      <div id="album-header" class="mb-3">
-        <div id="album-title-row" class="flex items-center gap-2 flex-wrap"></div>
-        <div id="album-desc-row" class="mt-1"></div>
-      </div>
-      <div id="album-controls" class="flex items-center gap-2 flex-wrap mb-2 min-h-[2rem]">
-        <div id="album-sel-toolbar" class="flex items-center gap-2 flex-wrap flex-1"></div>
-        <div class="flex items-center gap-1.5 flex-shrink-0">
-          <label class="text-xs text-slate-500">Sortera:</label>
-          <select id="album-sort" class="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500">
-            <option value="date_desc">Datum (nyast)</option>
-            <option value="date_asc">Datum (äldst)</option>
-            <option value="name_asc">Filnamn A→Z</option>
-            <option value="name_desc">Filnamn Z→A</option>
-            <option value="rating_desc">Betyg (högt)</option>
-            <option value="custom">Albumordning</option>
-          </select>
-        </div>
-      </div>
-      <div id="album-grid" class="grid gap-0.5 flex-1" style="grid-template-columns: repeat(auto-fill, minmax(160px, 1fr))">
-        <div class="col-span-full text-slate-400 text-sm p-2">Laddar…</div>
-      </div>
-    </div>`;
+  // Ladda albuminfo för att avgöra typ
+  let albumMeta;
+  try {
+    const r = await api.album(albumId, { limit: 1, offset: 0 });
+    albumMeta = r.data.album;
+  } catch (e) {
+    container.innerHTML = `<div class="p-8 text-red-400">${escHtml(e.message)}</div>`;
+    return;
+  }
 
-  await loadAlbumDetail(container, albumId);
+  if (albumMeta.album_type === 'project') {
+    await renderProjectAlbumDetail(container, albumId, albumMeta);
+  } else {
+    container.innerHTML = `
+      <div class="p-4 flex flex-col h-full">
+        <button onclick="location.hash='#/albums'" class="text-slate-400 hover:text-white text-sm mb-4 flex items-center gap-1 w-fit">
+          ← Alla album
+        </button>
+        <div id="album-header" class="mb-3">
+          <div id="album-title-row" class="flex items-center gap-2 flex-wrap"></div>
+          <div id="album-desc-row" class="mt-1"></div>
+        </div>
+        <div id="album-controls" class="flex items-center gap-2 flex-wrap mb-2 min-h-[2rem]">
+          <div id="album-sel-toolbar" class="flex items-center gap-2 flex-wrap flex-1"></div>
+          <div class="flex items-center gap-1.5 flex-shrink-0">
+            <label class="text-xs text-slate-500">Sortera:</label>
+            <select id="album-sort" class="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500">
+              <option value="date_desc">Datum (nyast)</option>
+              <option value="date_asc">Datum (äldst)</option>
+              <option value="name_asc">Filnamn A→Z</option>
+              <option value="name_desc">Filnamn Z→A</option>
+              <option value="rating_desc">Betyg (högt)</option>
+              <option value="custom">Albumordning</option>
+            </select>
+          </div>
+        </div>
+        <div id="album-grid" class="grid gap-0.5 flex-1" style="grid-template-columns: repeat(auto-fill, minmax(160px, 1fr))">
+          <div class="col-span-full text-slate-400 text-sm p-2">Laddar…</div>
+        </div>
+      </div>`;
+    await loadAlbumDetail(container, albumId);
+  }
 }
 
 async function loadAlbumDetail(container, albumId) {
@@ -441,6 +459,330 @@ async function loadAlbumDetail(container, albumId) {
   } catch (e) {
     toast(e.message, 'error');
   }
+}
+
+// ── Projektalbum-detalj ───────────────────────────────────────────────────────
+
+async function renderProjectAlbumDetail(container, albumId, album) {
+  container.innerHTML = `
+    <div class="flex flex-col h-full">
+      <div class="flex items-center gap-3 px-4 py-3 border-b border-slate-700 flex-shrink-0">
+        <button onclick="location.hash='#/albums'" class="text-slate-400 hover:text-white text-sm flex items-center gap-1">← Alla album</button>
+        <span class="text-slate-600">|</span>
+        <span class="text-xs bg-amber-600/80 text-white px-2 py-0.5 rounded-full font-semibold">📚 Projekt</span>
+        <h1 id="proj-name" class="text-lg font-semibold text-white cursor-pointer hover:text-blue-300 transition-colors flex-1"
+            title="Klicka för att byta namn">${escHtml(album.name)}</h1>
+        <button id="proj-share-btn" class="text-xs text-blue-400 hover:text-blue-300 px-2 py-1 rounded hover:bg-slate-700 transition-colors">🔗 Dela</button>
+      </div>
+      <div class="flex flex-1 overflow-hidden">
+        <!-- Sidebar -->
+        <aside class="w-56 flex-shrink-0 border-r border-slate-700 flex flex-col bg-slate-900">
+          <div class="p-3 flex items-center justify-between">
+            <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Kapitel</span>
+            <button id="add-chapter-btn"
+              class="w-6 h-6 rounded-full bg-blue-600 hover:bg-blue-500 text-white text-lg leading-none flex items-center justify-center transition-colors"
+              title="Lägg till kapitel">+</button>
+          </div>
+          <ul id="chapter-list" class="flex-1 overflow-y-auto py-1"></ul>
+        </aside>
+        <!-- Huvudyta -->
+        <main class="flex-1 overflow-y-auto">
+          <div id="chapter-main" class="p-4">
+            <div class="text-slate-500 text-sm text-center mt-16">Välj ett kapitel till vänster för att se bilder</div>
+          </div>
+        </main>
+      </div>
+    </div>`;
+
+  // Byt albumnamn vid klick
+  container.querySelector('#proj-name')?.addEventListener('click', async () => {
+    const name = await promptModal('Byt albumnamn', 'Albumnamn', album.name, false);
+    if (!name?.trim() || name.trim() === album.name) return;
+    try {
+      await api.updateAlbum(albumId, { name: name.trim() });
+      album.name = name.trim();
+      const el = container.querySelector('#proj-name');
+      if (el) el.textContent = album.name;
+      toast('Namn uppdaterat', 'success');
+    } catch (e) { toast(e.message, 'error'); }
+  });
+
+  container.querySelector('#proj-share-btn')?.addEventListener('click', () => {
+    openShareModal({ albumId, name: album.name });
+  });
+
+  let chapters = [];
+  let activeChapterId = null;
+  const _ts = await getThumbSettings().catch(() => null);
+
+  const renderChapterList = () => {
+    const ul = container.querySelector('#chapter-list');
+    if (!ul) return;
+    ul.innerHTML = '';
+    if (!chapters.length) {
+      ul.innerHTML = '<li class="px-3 py-2 text-xs text-slate-500">Inga kapitel ännu</li>';
+      return;
+    }
+    chapters.forEach((ch) => {
+      const li = document.createElement('li');
+      li.className = `group relative flex items-center gap-2 px-3 py-2 cursor-pointer transition-colors text-sm
+        ${ch.id === activeChapterId ? 'bg-slate-700 text-white' : 'text-slate-300 hover:bg-slate-800'}`;
+      li.innerHTML = `
+        <span class="flex-1 truncate" title="${escHtml(ch.title || 'Utan namn')}">${escHtml(ch.title || 'Utan namn')}</span>
+        <span class="text-xs text-slate-500 flex-shrink-0">${ch.assets?.length ?? 0}</span>
+        <div class="absolute right-1 top-1/2 -translate-y-1/2 hidden group-hover:flex gap-0.5">
+          <button class="ch-edit-btn w-5 h-5 rounded bg-slate-600 hover:bg-blue-600 text-white text-xs flex items-center justify-center" title="Redigera">✏</button>
+          <button class="ch-del-btn w-5 h-5 rounded bg-slate-600 hover:bg-red-600 text-white text-xs flex items-center justify-center" title="Ta bort">✕</button>
+        </div>`;
+      li.addEventListener('click', (e) => {
+        if (/** @type {Element} */ (e.target).closest('.ch-edit-btn, .ch-del-btn')) return;
+        activeChapterId = ch.id;
+        renderChapterList();
+        renderChapterMain(ch);
+      });
+      li.querySelector('.ch-edit-btn')?.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const title = await promptModal('Redigera kapitel', 'Kapitelnamn', ch.title, false);
+        if (title === null) return;
+        try {
+          await api.updateChapter(albumId, ch.id, { title: title.trim() });
+          ch.title = title.trim();
+          renderChapterList();
+          if (activeChapterId === ch.id) renderChapterMain(ch);
+          toast('Kapitel uppdaterat', 'success');
+        } catch (err) { toast(err.message, 'error'); }
+      });
+      li.querySelector('.ch-del-btn')?.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const ok = await confirm(`Ta bort kapitlet "${ch.title || 'Utan namn'}"? Bilderna påverkas inte.`);
+        if (!ok) return;
+        try {
+          await api.deleteChapter(albumId, ch.id);
+          chapters = chapters.filter((c) => c.id !== ch.id);
+          if (activeChapterId === ch.id) {
+            activeChapterId = chapters[0]?.id ?? null;
+            const next = chapters.find((c) => c.id === activeChapterId);
+            if (next) renderChapterMain(next);
+            else container.querySelector('#chapter-main').innerHTML =
+              '<div class="text-slate-500 text-sm text-center mt-16">Välj ett kapitel till vänster</div>';
+          }
+          renderChapterList();
+          toast('Kapitel borttaget', 'success');
+        } catch (err) { toast(err.message, 'error'); }
+      });
+      ul.appendChild(li);
+    });
+  };
+
+  const renderChapterMain = (ch) => {
+    const main = container.querySelector('#chapter-main');
+    if (!main) return;
+    main.innerHTML = `
+      <div class="flex items-center gap-3 mb-4">
+        <h2 class="text-lg font-semibold text-white flex-1">${escHtml(ch.title || 'Utan namn')}</h2>
+        <button id="add-assets-to-ch-btn"
+          class="text-xs bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg transition-colors">
+          + Lägg till bilder
+        </button>
+      </div>
+      <div id="ch-asset-grid" class="grid gap-0.5" style="grid-template-columns: repeat(auto-fill, minmax(140px, 1fr))"></div>`;
+
+    const renderChGrid = () => {
+      const grid = main.querySelector('#ch-asset-grid');
+      if (!grid) return;
+      grid.innerHTML = '';
+      if (!ch.assets?.length) {
+        grid.innerHTML = '<div class="col-span-full text-slate-500 text-sm py-4">Inga bilder i detta kapitel ännu.</div>';
+        return;
+      }
+      ch.assets.forEach((asset, i) => {
+        const cell = buildPhotoCell(
+          asset,
+          () => openLightbox(ch.assets, i),
+          undefined,
+          _ts,
+        );
+        cell.style.position = 'relative';
+
+        const removeBtn = document.createElement('button');
+        removeBtn.className = 'absolute top-1 left-1 z-20 w-5 h-5 rounded-full bg-black/70 hover:bg-red-600 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity';
+        removeBtn.title = 'Ta bort från kapitel';
+        removeBtn.textContent = '✕';
+        removeBtn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          try {
+            await api.removeFromChapter(albumId, ch.id, asset.id);
+            ch.assets = ch.assets.filter((a) => a.id !== asset.id);
+            renderChGrid();
+            renderChapterList();
+          } catch (err) { toast(err.message, 'error'); }
+        });
+        cell.appendChild(removeBtn);
+
+        grid.appendChild(cell);
+      });
+    };
+
+    renderChGrid();
+
+    main.querySelector('#add-assets-to-ch-btn')?.addEventListener('click', async () => {
+      await openAssetPickerForChapter(albumId, ch, () => {
+        renderChGrid();
+        renderChapterList();
+      });
+    });
+  };
+
+  container.querySelector('#add-chapter-btn')?.addEventListener('click', async () => {
+    const title = await promptModal('Nytt kapitel', 'Kapitelnamn', '', false);
+    if (title === null) return;
+    try {
+      const { data } = await api.createChapter(albumId, { title: title.trim() || 'Nytt kapitel' });
+      data.assets = [];
+      chapters.push(data);
+      activeChapterId = data.id;
+      renderChapterList();
+      renderChapterMain(data);
+      toast('Kapitel skapat', 'success');
+    } catch (e) { toast(e.message, 'error'); }
+  });
+
+  // Ladda kapitel
+  try {
+    const { data } = await api.albumChapters(albumId);
+    chapters = data;
+    renderChapterList();
+    if (chapters.length) {
+      activeChapterId = chapters[0].id;
+      renderChapterMain(chapters[0]);
+    }
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function openAssetPickerForChapter(albumId, chapter, onAdded) {
+  const overlay = document.createElement('div');
+  overlay.className = 'fixed inset-0 z-[200] flex items-center justify-center bg-black/80';
+  overlay.innerHTML = `
+    <div class="bg-slate-800 border border-slate-700 rounded-2xl shadow-2xl flex flex-col w-full max-w-3xl h-[80vh]">
+      <div class="flex items-center justify-between px-5 py-4 border-b border-slate-700 flex-shrink-0">
+        <h2 class="text-base font-semibold text-white">Välj bilder att lägga till i "${escHtml(chapter.title || 'kapitlet')}"</h2>
+        <button id="picker-close" class="text-slate-400 hover:text-white text-xl leading-none">✕</button>
+      </div>
+      <div id="picker-grid" class="flex-1 overflow-y-auto p-3 grid gap-1"
+           style="grid-template-columns: repeat(auto-fill, minmax(110px, 1fr))">
+        <div class="col-span-full text-slate-400 text-sm text-center py-8">Laddar…</div>
+      </div>
+      <div class="flex items-center justify-between px-5 py-3 border-t border-slate-700 flex-shrink-0">
+        <span id="picker-count" class="text-sm text-slate-400">0 valda</span>
+        <div class="flex gap-2">
+          <button id="picker-cancel" class="px-4 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-700 rounded-lg transition-colors">Avbryt</button>
+          <button id="picker-add" class="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors" disabled>Lägg till</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  const close = () => overlay.remove();
+  overlay.querySelector('#picker-close')?.addEventListener('click', close);
+  overlay.querySelector('#picker-cancel')?.addEventListener('click', close);
+
+  const selected = new Set(chapter.assets?.map((a) => a.id) ?? []);
+  const pickerGrid = overlay.querySelector('#picker-grid');
+  const countEl = overlay.querySelector('#picker-count');
+  const addBtn = /** @type {HTMLButtonElement|null} */ (overlay.querySelector('#picker-add'));
+  const newlySelected = new Set();
+
+  const updateCount = () => {
+    const n = newlySelected.size;
+    if (countEl) countEl.textContent = `${n} val${n !== 1 ? 'da' : 'd'}`;
+    if (addBtn) addBtn.disabled = n === 0;
+  };
+
+  try {
+    const { data } = await api.assets({ limit: 300, offset: 0 });
+    const assets = data?.assets ?? data ?? [];
+    if (!pickerGrid) return;
+    pickerGrid.innerHTML = '';
+    assets.forEach((asset) => {
+      const alreadyIn = selected.has(asset.id);
+      const thumbSrc = asset.thumb_small_path ? `/thumbs/${asset.thumb_small_path}` : '/icons/placeholder.svg';
+      const wrap = document.createElement('div');
+      wrap.className = `relative cursor-pointer rounded overflow-hidden aspect-square bg-slate-700 ${alreadyIn ? 'opacity-40 pointer-events-none' : ''}`;
+      wrap.innerHTML = `
+        <img src="${thumbSrc}" loading="lazy" class="w-full h-full object-cover">
+        <div class="check-overlay absolute inset-0 border-2 border-transparent flex items-end justify-end p-1 transition-all"></div>`;
+
+      if (!alreadyIn) {
+        wrap.addEventListener('click', () => {
+          if (newlySelected.has(asset.id)) {
+            newlySelected.delete(asset.id);
+            wrap.classList.remove('ring-2', 'ring-blue-500');
+            const chk = wrap.querySelector('.check-overlay');
+            if (chk) chk.innerHTML = '';
+          } else {
+            newlySelected.add(asset.id);
+            wrap.classList.add('ring-2', 'ring-blue-500');
+            const chk = wrap.querySelector('.check-overlay');
+            if (chk) chk.innerHTML = '<span class="bg-blue-500 text-white text-xs w-5 h-5 rounded-full flex items-center justify-center font-bold">✓</span>';
+          }
+          updateCount();
+        });
+      }
+      pickerGrid.appendChild(wrap);
+    });
+  } catch (e) { toast(e.message, 'error'); }
+
+  overlay.querySelector('#picker-add')?.addEventListener('click', async () => {
+    if (!newlySelected.size) return;
+    try {
+      await api.addToChapter(albumId, chapter.id, [...newlySelected]);
+      // Lägg till assets i kapitel-listan lokalt
+      const { data } = await api.albumChapters(albumId);
+      const updatedCh = data.find((c) => c.id === chapter.id);
+      if (updatedCh) chapter.assets = updatedCh.assets;
+      close();
+      onAdded();
+      toast(`${newlySelected.size} bild${newlySelected.size > 1 ? 'er' : ''} tillagd${newlySelected.size > 1 ? 'a' : ''}`, 'success');
+    } catch (e) { toast(e.message, 'error'); }
+  });
+}
+
+// ── Projektalbum — ny modal ───────────────────────────────────────────────────
+
+async function showNewProjectAlbumModal(container) {
+  const overlay = document.createElement('div');
+  overlay.className = 'fixed inset-0 z-50 flex items-center justify-center bg-black/70';
+  overlay.innerHTML = `
+    <div class="bg-slate-800 rounded-2xl p-6 w-full max-w-sm shadow-2xl border border-slate-700">
+      <h2 class="text-lg font-semibold text-white mb-1">📚 Nytt projektalbum</h2>
+      <p class="text-sm text-slate-400 mb-4">Organisera bilder i kapitel – perfekt för fotoboken eller reseberättelser.</p>
+      <input id="pa-name" type="text" placeholder="Projektnamn" autofocus
+        class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-amber-500 mb-4">
+      <div class="flex gap-2 justify-end">
+        <button id="pa-cancel" class="px-4 py-2 rounded-lg text-sm text-slate-300 hover:text-white hover:bg-slate-700 transition-colors">Avbryt</button>
+        <button id="pa-create" class="px-4 py-2 rounded-lg text-sm bg-amber-600 hover:bg-amber-500 text-white transition-colors">Skapa projekt</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const nameInput = /** @type {HTMLInputElement} */ (overlay.querySelector('#pa-name'));
+  nameInput?.focus();
+
+  overlay.querySelector('#pa-cancel')?.addEventListener('click', () => overlay.remove());
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+  const create = async () => {
+    const name = nameInput?.value.trim();
+    if (!name) return;
+    try {
+      const { data } = await api.createAlbum({ name, albumType: 'project' });
+      overlay.remove();
+      toast('Projektalbum skapat!', 'success');
+      location.hash = `#/albums/${data.id}`;
+    } catch (e) { toast(e.message, 'error'); }
+  };
+
+  overlay.querySelector('#pa-create')?.addEventListener('click', create);
+  nameInput?.addEventListener('keydown', (e) => { if (/** @type {KeyboardEvent} */ (e).key === 'Enter') create(); });
 }
 
 // ── Smart album — ny modal ────────────────────────────────────────────────────

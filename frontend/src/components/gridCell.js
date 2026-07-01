@@ -75,23 +75,32 @@ export function buildPhotoCell(asset, onClick, onFavChange, ts = null, { onExpan
 
   // ── Bild-wrapper (square) ──
   const imgWrapClass = `photo-img-wrap relative overflow-hidden flex-shrink-0${isStack ? ' is-stack-wrap' : ''}`;
+  // Live Photo = separat .mov-fil; Motion Photo = inbäddad video i JPEG
+  const hasLiveVideo   = !!asset.live_video_path && !isVideo(asset.mime_type);
+  const hasMotionVideo = !!asset.is_motion_photo && !isVideo(asset.mime_type);
+  const hasHoverVideo  = hasLiveVideo || hasMotionVideo;
 
   cell.innerHTML = `
     <div class="${imgWrapClass}" style="aspect-ratio:1">
       <img src="${thumbSrc}" loading="lazy" alt="${_esc(asset.file_name ?? '')}"
-           class="w-full h-full object-cover bg-slate-800">
+           class="w-full h-full object-cover bg-slate-800${hasHoverVideo ? ' live-photo-thumb' : ''}">
+      ${hasHoverVideo ? `
+        <video class="live-photo-video absolute inset-0 w-full h-full object-cover opacity-0 transition-opacity duration-200"
+               muted playsinline preload="none" loop></video>` : ''}
       ${isVideo(asset.mime_type) ? `
         <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
           <div class="bg-black/50 rounded-full p-2">
             <svg class="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
           </div>
         </div>` : ''}
-      ${asset.is_motion_photo && !isVideo(asset.mime_type) ? `
-        <div class="absolute top-1 right-8 pointer-events-none" title="Motion Photo">
-          <div class="bg-black/60 rounded-full p-1">
-            <svg class="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/>
-            </svg>
+      ${hasLiveVideo ? `
+        <div class="absolute top-9 right-1 pointer-events-none live-photo-badge" title="Live Photo">
+          <div class="bg-black/60 rounded-full px-1.5 py-0.5 text-[9px] text-white font-semibold tracking-wide">LIVE</div>
+        </div>` : ''}
+      ${hasMotionVideo ? `
+        <div class="absolute top-9 right-1 pointer-events-none live-photo-badge" title="Motion Photo — håll muspekaren för att spela">
+          <div class="bg-black/60 rounded-full px-1.5 py-0.5 text-[9px] text-white font-semibold tracking-wide flex items-center gap-0.5">
+            <svg class="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>LIVE
           </div>
         </div>` : ''}
       ${isStack ? `
@@ -109,6 +118,60 @@ export function buildPhotoCell(asset, onClick, onFavChange, ts = null, { onExpan
       ${ratingHtml}
     </div>
     ${infoStripHtml}`;
+
+  // ── Live Photo / Motion Photo hover-video ──
+  if (hasHoverVideo) {
+    const wrap = cell.querySelector('.photo-img-wrap');
+    const video = /** @type {HTMLVideoElement|null} */ (cell.querySelector('.live-photo-video'));
+    const thumb = /** @type {HTMLImageElement|null} */ (cell.querySelector('.live-photo-thumb'));
+    const badge = /** @type {HTMLElement|null} */ (cell.querySelector('.live-photo-badge'));
+
+    const videoEndpoint = hasLiveVideo
+      ? `/api/assets/${asset.id}/live-video`
+      : `/api/assets/${asset.id}/motion-video`;
+
+    const getVideoUrl = () => {
+      const token = /** @type {any} */ (window).__pmToken;
+      return token ? `${videoEndpoint}?token=${encodeURIComponent(token)}` : videoEndpoint;
+    };
+
+    if (wrap && video && thumb) {
+      let hovered = false;
+
+      const showVideo = () => {
+        video.style.opacity = '1';
+        thumb.style.opacity = '0';
+        if (badge) badge.style.opacity = '0';
+      };
+      const hideVideo = () => {
+        video.pause();
+        video.style.opacity = '0';
+        thumb.style.opacity = '1';
+        if (badge) badge.style.opacity = '1';
+      };
+
+      video.addEventListener('canplay', () => {
+        if (hovered) { showVideo(); video.play().catch(() => {}); }
+      });
+      video.addEventListener('error', () => { hideVideo(); });
+
+      wrap.addEventListener('mouseenter', () => {
+        hovered = true;
+        if (!video.src) {
+          video.src = getVideoUrl();
+          video.load();
+        } else if (video.readyState >= 3) {
+          showVideo();
+          video.currentTime = 0;
+          video.play().catch(() => {});
+        }
+      });
+      wrap.addEventListener('mouseleave', () => {
+        hovered = false;
+        hideVideo();
+      });
+    }
+  }
 
   cell.addEventListener('dblclick', (e) => {
     if (!(/** @type {Element} */ (e.target)).closest('.fav-heart, .stack-badge')) onClick();

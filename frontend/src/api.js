@@ -163,6 +163,14 @@ export const api = {
   saveAlbumRules:     (id, body) => request('PUT', `/api/albums/${id}/rules`, body),
   rebuildAlbum:       (id)       => request('POST', `/api/albums/${id}/rebuild`, {}),
   previewAlbumRules:  (body)     => request('POST', `/api/albums/preview-rules`, body),
+  // Projekt-kapitel
+  albumChapters:       (id)               => request('GET',    `/api/albums/${id}/chapters`),
+  createChapter:       (id, body)         => request('POST',   `/api/albums/${id}/chapters`, body),
+  updateChapter:       (id, chId, body)   => request('PATCH',  `/api/albums/${id}/chapters/${chId}`, body),
+  deleteChapter:       (id, chId)         => request('DELETE', `/api/albums/${id}/chapters/${chId}`),
+  addToChapter:        (id, chId, assetIds) => request('POST', `/api/albums/${id}/chapters/${chId}/assets`, { assetIds }),
+  removeFromChapter:   (id, chId, assetId)  => request('DELETE', `/api/albums/${id}/chapters/${chId}/assets/${assetId}`),
+  reorderChapter:      (id, chId, assetIds) => request('PUT',  `/api/albums/${id}/chapters/${chId}/reorder`, { assetIds }),
 
   // Stacks
   createStack:     (body)     => request('POST',   '/api/stacks', body),

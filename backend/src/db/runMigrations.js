@@ -47,6 +47,8 @@ const MIGRATIONS = [
   '040_social.sql',
   '041_share_last_viewed.sql',
   '042_backup_configs.sql',
+  '043_live_video_path.sql',
+  '044_project_albums.sql',
 ];
 
 export async function runMigrations(client) {

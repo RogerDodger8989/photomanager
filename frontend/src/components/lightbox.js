@@ -106,15 +106,36 @@ function playMotionVideo(assetId) {
 }
 
 lbMotionVideo?.addEventListener('ended', () => {
-  lbMotionVideo.classList.add('hidden');
+  const asset = items[currentIndex];
+  // Live Photo-video loopar; Motion Photo gömmer sig efter uppspelning
+  if (!asset?.live_video_path) {
+    lbMotionVideo.classList.add('hidden');
+  }
 });
+
+function playLiveVideo(assetId) {
+  if (!lbMotionVideo) return;
+  lbMotionVideo.src = authVideoUrl(`/api/assets/${assetId}/live-video`);
+  lbMotionVideo.classList.remove('hidden');
+  lbMotionVideo.load();
+  lbMotionVideo.addEventListener('canplay', () => {
+    lbMotionVideo.play().catch(() => {
+      lbMotionVideo.classList.add('hidden');
+    });
+  }, { once: true });
+  lbMotionReplay?.classList.remove('hidden');
+  lbMotionDivider?.classList.remove('hidden');
+}
 
 lbMotionReplay?.addEventListener('click', () => {
   const asset = items[currentIndex];
-  if (!asset?.is_motion_photo) return;
-  lbMotionVideo.classList.remove('hidden');
-  lbMotionVideo.currentTime = 0;
-  lbMotionVideo.play().catch(() => {});
+  if (asset?.is_motion_photo) {
+    lbMotionVideo.classList.remove('hidden');
+    lbMotionVideo.currentTime = 0;
+    lbMotionVideo.play().catch(() => {});
+  } else if (asset?.live_video_path) {
+    playLiveVideo(asset.id);
+  }
 });
 
 function resetZoom() {
@@ -168,9 +189,11 @@ function showItem(idx) {
   } else {
     lbImg.src = `/thumbs/${asset.thumb_large_path ?? asset.thumb_small_path}`;
     lbImg.alt = asset.file_name;
-    // Motion Photo: spela upp inbäddad video automatiskt
+    // Motion Photo (inbäddad video) eller Live Photo (sidenvideo .mov/.mp4)
     if (asset.is_motion_photo) {
       playMotionVideo(asset.id);
+    } else if (asset.live_video_path) {
+      playLiveVideo(asset.id);
     }
   }
 

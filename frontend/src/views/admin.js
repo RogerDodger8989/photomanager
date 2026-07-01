@@ -625,9 +625,21 @@ async function renderJobs(content) {
         class="px-4 py-2 bg-teal-700 hover:bg-teal-600 text-white text-xs font-medium rounded-lg transition-colors">
         🎬 Skanna Motion Photos
       </button>
+      <button id="verify-motion-btn"
+        class="px-4 py-2 bg-orange-700 hover:bg-orange-600 text-white text-xs font-medium rounded-lg transition-colors">
+        🔍 Verifiera Motion Photo-flaggor
+      </button>
+      <button id="backfill-live-video-btn"
+        class="px-4 py-2 bg-teal-700 hover:bg-teal-600 text-white text-xs font-medium rounded-lg transition-colors">
+        📸 Hitta Live Photo-videor
+      </button>
       <button id="phash-backfill-btn"
         class="px-4 py-2 bg-indigo-700 hover:bg-indigo-600 text-white text-xs font-medium rounded-lg transition-colors">
         #️⃣ Beräkna bildfingeravtryck (pHash)
+      </button>
+      <button id="backfill-place-tags-btn"
+        class="px-4 py-2 bg-green-700 hover:bg-green-600 text-white text-xs font-medium rounded-lg transition-colors">
+        📍 Skapa ortstagg-hierarkier (backfill)
       </button>
     </div>
 
@@ -755,6 +767,36 @@ async function renderJobs(content) {
     }
   });
 
+  content.querySelector('#verify-motion-btn')?.addEventListener('click', async (e) => {
+    const btn = /** @type {HTMLButtonElement} */ (e.currentTarget);
+    btn.disabled = true;
+    btn.textContent = '⏳ Verifierar…';
+    try {
+      const { data } = await api.post('/api/admin/verify-motion-photos', {});
+      toast(data.message, data.cleared > 0 ? 'warning' : 'success', 5000);
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '🔍 Verifiera Motion Photo-flaggor';
+    }
+  });
+
+  content.querySelector('#backfill-live-video-btn')?.addEventListener('click', async (e) => {
+    const btn = /** @type {HTMLButtonElement} */ (e.currentTarget);
+    btn.disabled = true;
+    btn.textContent = '⏳ Skannar…';
+    try {
+      const { data } = await api.post('/api/admin/backfill-live-videos', {});
+      toast(data.message, data.updated > 0 ? 'success' : 'info', 5000);
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '📸 Hitta Live Photo-videor';
+    }
+  });
+
   content.querySelector('#phash-backfill-btn')?.addEventListener('click', async (e) => {
     const btn = /** @type {HTMLButtonElement} */ (e.currentTarget);
     btn.disabled = true;
@@ -767,6 +809,21 @@ async function renderJobs(content) {
     } finally {
       btn.disabled = false;
       btn.textContent = '#️⃣ Beräkna bildfingeravtryck (pHash)';
+    }
+  });
+
+  content.querySelector('#backfill-place-tags-btn')?.addEventListener('click', async (e) => {
+    const btn = /** @type {HTMLButtonElement} */ (e.currentTarget);
+    btn.disabled = true;
+    btn.textContent = '⏳ Startar…';
+    try {
+      const { data } = await api.post('/api/admin/backfill-place-tags', {});
+      toast(data.message, data.queued > 0 ? 'success' : 'info', 5000);
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '📍 Skapa ortstagg-hierarkier (backfill)';
     }
   });
 

@@ -157,6 +157,27 @@ export async function reverseGeocode(lat, lon) {
   }
 }
 
+// Returnerar strukturerad adressdata för att bygga ortstagg-hierarki
+export async function reverseGeocodeDetailed(lat, lon) {
+  try {
+    const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`;
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'PhotoManager/1.0 (self-hosted)' },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const addr = data.address ?? {};
+    return {
+      country: addr.country ?? null,
+      state:   addr.state ?? addr.region ?? addr.province ?? null,
+      city:    addr.city ?? addr.town ?? addr.village ?? addr.hamlet ?? addr.county ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 function zoomToRadius(zoom) {
   const radii = {
     1: 5_000_000, 2: 2_000_000, 3: 1_000_000, 4: 500_000,

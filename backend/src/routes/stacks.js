@@ -77,7 +77,7 @@ export default async function stacksRoutes(fastify) {
       `SELECT a.id, a.file_name, a.thumb_small_path, a.thumb_large_path,
               a.taken_at, a.mime_type, a.duration, a.location_label,
               a.rating, a.flag, a.color_label, a.width, a.height,
-              a.file_size, a.indexed_at, a.is_motion_photo, a.stack_id,
+              a.file_size, a.indexed_at, a.is_motion_photo, a.live_video_path, a.stack_id,
               (SELECT COUNT(*)::int FROM assets s WHERE s.stack_id = a.stack_id AND s.status = 'active') AS stack_size,
               EXISTS(SELECT 1 FROM favorites fv WHERE fv.asset_id = a.id AND fv.user_id = $2) AS is_favorite,
               sa.sort_order

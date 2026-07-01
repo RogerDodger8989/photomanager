@@ -146,7 +146,7 @@ export default async function assetsRoutes(fastify) {
       `SELECT a.id, a.file_name, a.mime_type, a.file_size, a.width, a.height,
               a.taken_at, a.indexed_at, a.thumb_small_path, a.thumb_large_path,
               a.location_label, a.view_count, a.duration, a.transcode_status,
-              a.is_motion_photo, a.flag, a.color_label, a.rating, a.visibility,
+              a.is_motion_photo, a.live_video_path, a.flag, a.color_label, a.rating, a.visibility,
               a.stack_id,
               (SELECT COUNT(*)::int FROM assets s WHERE s.stack_id = a.stack_id AND s.status = 'active') AS stack_size,
               ${isAdmin ? 'a.owner_id,' : ''}

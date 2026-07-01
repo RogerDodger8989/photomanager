@@ -1,9 +1,13 @@
-import { join, resolve } from 'path';
+import { join, resolve, dirname, basename, extname } from 'path';
+import { existsSync } from 'fs';
+import { open as fsOpen } from 'fs/promises';
 import { query } from '../db/pool.js';
 import { getJobStats } from '../services/jobService.js';
 import { backfillMotionPhotos } from '../workers/motionPhotoBackfill.js';
 import { getModelStatus, downloadModel } from '../services/objectDetectionService.js';
 import { testRemote, runBackup, startOAuthFlow, handleOAuthCallback, generateKeyConfig } from '../services/rcloneService.js';
+import { reverseGeocodeDetailed } from '../services/geoService.js';
+import { ensurePlaceTagsForAsset } from '../services/placeTagService.js';
 import { config } from '../config.js';
 import bcrypt from 'bcrypt';
 import { v4 as uuidv4 } from 'uuid';
@@ -711,6 +715,112 @@ export default async function adminRoutes(fastify) {
   fastify.post('/api/admin/backfill-motion-photos', async (request, reply) => {
     const result = await backfillMotionPhotos();
     return reply.send({ data: result });
+  });
+
+  // POST /api/admin/verify-motion-photos — rensa is_motion_photo för filer som inte längre innehåller rörelsedata
+  fastify.post('/api/admin/verify-motion-photos', async (_request, reply) => {
+    const { rows: assets } = await query(
+      `SELECT id, file_path FROM assets WHERE is_motion_photo = true AND status = 'active'`
+    );
+
+    let cleared = 0;
+    for (const a of assets) {
+      const absPath = resolve(config.media.photosPath, a.file_path);
+      if (!existsSync(absPath)) {
+        await query('UPDATE assets SET is_motion_photo = false WHERE id = $1', [a.id]);
+        cleared++;
+        continue;
+      }
+      try {
+        const fd = await fsOpen(absPath, 'r');
+        const buf = Buffer.alloc(131072);
+        const { bytesRead } = await fd.read(buf, 0, 131072, 0);
+        await fd.close();
+        const snippet = buf.subarray(0, bytesRead).toString('latin1');
+        const hasMarkers =
+          snippet.includes('MotionPhoto="1"') ||
+          snippet.includes('MotionPhoto>1<') ||
+          snippet.includes('MicroVideo="1"') ||
+          snippet.includes('MicroVideo>1<') ||
+          snippet.includes('GCamera:MotionPhoto') ||
+          snippet.includes('Camera:MotionPhoto');
+        if (!hasMarkers) {
+          await query('UPDATE assets SET is_motion_photo = false WHERE id = $1', [a.id]);
+          cleared++;
+        }
+      } catch { /* hoppa över oläsbara filer */ }
+    }
+
+    return reply.send({ data: {
+      checked: assets.length,
+      cleared,
+      message: `${assets.length} bilder kontrollerade, ${cleared} felaktiga flaggor rensade`,
+    }});
+  });
+
+  // POST /api/admin/backfill-live-videos — hitta sidenvideor (.mov/.mp4) för befintliga bilder
+  fastify.post('/api/admin/backfill-live-videos', async (request, reply) => {
+    const { rows: assets } = await query(
+      `SELECT id, file_path FROM assets
+       WHERE status = 'active' AND live_video_path IS NULL
+         AND mime_type LIKE 'image/%'`
+    );
+
+    let updated = 0;
+    const VIDEO_EXTS = ['.mov', '.MOV', '.mp4', '.MP4'];
+
+    for (const a of assets) {
+      const absPath = resolve(config.media.photosPath, a.file_path);
+      const dir = dirname(absPath);
+      const base = basename(absPath, extname(absPath));
+      let found = null;
+      for (const ext of VIDEO_EXTS) {
+        const candidate = join(dir, base + ext);
+        if (existsSync(candidate)) { found = candidate; break; }
+      }
+      if (found) {
+        const relVideo = found.startsWith(config.media.photosPath)
+          ? found.slice(config.media.photosPath.length).replace(/\\/g, '/').replace(/^\//, '')
+          : found.replace(/\\/g, '/');
+        await query('UPDATE assets SET live_video_path = $1 WHERE id = $2', [relVideo, a.id]);
+        updated++;
+      }
+    }
+
+    return reply.send({ data: { scanned: assets.length, updated, message: `${assets.length} bilder skannade, ${updated} sidenvideor hittade` } });
+  });
+
+  // POST /api/admin/backfill-place-tags — skapa ortstagg-hierarkier för alla bilder med GPS
+  fastify.post('/api/admin/backfill-place-tags', async (request, reply) => {
+    // Hämta assets med GPS som saknar geo-taggar
+    const { rows: assets } = await query(`
+      SELECT a.id, ST_Y(a.location::geometry) AS lat, ST_X(a.location::geometry) AS lon
+      FROM assets a
+      WHERE a.status = 'active'
+        AND a.location IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM asset_tags at2
+          JOIN tags t ON t.id = at2.tag_id
+          WHERE at2.asset_id = a.id AND at2.source = 'geo'
+        )
+      LIMIT 500
+    `);
+
+    reply.send({ data: { queued: assets.length, message: `Backfill startat för ${assets.length} bilder` } });
+
+    // Kör i bakgrunden med Nominatim rate limit: 1 req/sek
+    (async () => {
+      let done = 0;
+      for (const a of assets) {
+        try {
+          const detailed = await reverseGeocodeDetailed(a.lat, a.lon);
+          if (detailed) await ensurePlaceTagsForAsset(a.id, detailed);
+          done++;
+        } catch { /* skip */ }
+        await new Promise((r) => setTimeout(r, 1100)); // 1 req/sek
+      }
+      console.log(`Backfill ortstagg klart: ${done}/${assets.length} bilder`);
+    })().catch(console.error);
   });
 
   // GET /api/admin/import-sessions — senaste import-sessioner

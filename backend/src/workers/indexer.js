@@ -1,10 +1,13 @@
-import { relative } from 'path';
+import { relative, join, dirname, basename, extname } from 'path';
+import { existsSync } from 'fs';
+import { stat } from 'fs/promises';
 import { v4 as uuidv4 } from 'uuid';
 import { config } from '../config.js';
 import { query } from '../db/pool.js';
 import { computeFileHash } from '../services/hashService.js';
 import { extractMetadata, isImage, isVideo, getMimeType } from '../services/metadataService.js';
-import { upsertAssetLocation, reverseGeocode } from '../services/geoService.js';
+import { upsertAssetLocation, reverseGeocode, reverseGeocodeDetailed } from '../services/geoService.js';
+import { ensurePlaceTagsForAsset } from '../services/placeTagService.js';
 import { generateThumbnails } from './thumbnailer.js';
 import { createJob } from '../services/jobService.js';
 import { broadcast } from '../services/sseService.js';
@@ -40,10 +43,21 @@ export async function indexFile(absolutePath, sourceFolderPath = null, sessionId
   const relPath = relative(config.media.photosPath, absolutePath).replace(/\\/g, '/');
   const fileName = absolutePath.split(/[\\/]/).pop();
 
+  // Hoppa över filer som är länkade som live_video_path av en annan asset (extraherad Motion Photo-video, Apple Live Photo .mov)
+  if (isVideo(mimeType)) {
+    const { rows: linked } = await query(
+      `SELECT id FROM assets WHERE live_video_path = $1 LIMIT 1`, [relPath]
+    );
+    if (linked.length > 0) {
+      await recordResult(sessionId, 'skipped');
+      return { status: 'skipped' };
+    }
+  }
+
   // 1. Kolla om filen redan är indexerad (t.ex. server-restart)
   // Inkluderar även 'deleted' — annars blockerar UNIQUE-constrainten på file_path en ny INSERT.
   const existing = await query(
-    `SELECT a.id, a.status, a.source_folder, a.thumb_small_path, a.location,
+    `SELECT a.id, a.status, a.source_folder, a.thumb_small_path, a.location, a.file_size,
             (SELECT COUNT(*) FROM faces f WHERE f.asset_id = a.id)::int AS face_count,
             (SELECT COUNT(*) FROM faces f WHERE f.asset_id = a.id AND f.person_id IS NULL AND f.source != 'ai')::int AS unassigned_faces
      FROM assets a WHERE a.file_path = $1`,
@@ -83,6 +97,36 @@ export async function indexFile(absolutePath, sourceFolderPath = null, sessionId
         await generateThumbnails(row.id, absolutePath, mimeType);
       } catch (err) {
         console.warn(`Thumbnail misslyckades (befintlig) för ${relPath}:`, err.message);
+      }
+    }
+    // Om filen på disk har annan storlek än i DB: filen ersattes — uppdatera is_motion_photo, live_video_path m.m.
+    let _fileStat = null;
+    try { _fileStat = await stat(absolutePath); } catch {}
+    if (_fileStat && _fileStat.size !== Number(row.file_size)) {
+      try {
+        const changedMeta = await extractMetadata(absolutePath);
+        let updatedLiveVideo = null;
+        if (isImage(mimeType)) {
+          const dir = dirname(absolutePath);
+          const base = basename(absolutePath, extname(absolutePath));
+          for (const ext of ['.mov', '.MOV', '.mp4', '.MP4']) {
+            const candidate = join(dir, base + ext);
+            if (existsSync(candidate)) {
+              updatedLiveVideo = relative(config.media.photosPath, candidate).replace(/\\/g, '/');
+              break;
+            }
+          }
+        }
+        await query(
+          `UPDATE assets SET file_size = $1, is_motion_photo = $2, live_video_path = $3,
+                             width = COALESCE($4, width), height = COALESCE($5, height)
+           WHERE id = $6`,
+          [changedMeta.fileSize, changedMeta.isMotionPhoto ?? false, updatedLiveVideo,
+           changedMeta.width, changedMeta.height, row.id]
+        );
+        console.log(`Fil ändrad (${row.file_size}→${_fileStat.size} B), uppdaterade metadata: ${relPath}`);
+      } catch (err) {
+        console.warn(`Metadata-uppdatering vid filbyte misslyckades för ${relPath}:`, err.message);
       }
     }
     // Fyll i GPS och ansikten om de saknas eller saknar orientationskorrigering
@@ -158,13 +202,28 @@ export async function indexFile(absolutePath, sourceFolderPath = null, sessionId
   // 4. Skapa asset-rad i DB — alltid 'active', dublikathantering sker i Dublikat-vyn
   const assetId = uuidv4();
   const initialStatus = 'active';
+
+  // Sök efter sidenvideo (Apple Live Photo: .jpg + .mov / .mp4 med samma basename)
+  let liveVideoRelPath = null;
+  if (isImage(mimeType)) {
+    const dir = dirname(absolutePath);
+    const base = basename(absolutePath, extname(absolutePath));
+    for (const ext of ['.mov', '.MOV', '.mp4', '.MP4']) {
+      const videoAbs = join(dir, base + ext);
+      if (existsSync(videoAbs)) {
+        liveVideoRelPath = relative(config.media.photosPath, videoAbs).replace(/\\/g, '/');
+        break;
+      }
+    }
+  }
+
   await query(
     `INSERT INTO assets
        (id, file_path, file_name, file_hash, mime_type, file_size,
         width, height, taken_at, file_created_at,
         transcode_status, rating, title, description, source_folder, is_motion_photo, status,
-        iso, aperture, shutter_speed, focal_length_mm, lens_model)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)`,
+        iso, aperture, shutter_speed, focal_length_mm, lens_model, live_video_path)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)`,
     [
       assetId,
       relPath,
@@ -188,6 +247,7 @@ export async function indexFile(absolutePath, sourceFolderPath = null, sessionId
       meta.shutterSpeed ?? null,
       meta.focalLengthMm ?? null,
       meta.lensModel ?? null,
+      liveVideoRelPath,
     ]
   );
 
@@ -269,16 +329,20 @@ export async function indexFile(absolutePath, sourceFolderPath = null, sessionId
   // 6b. Mapp→tagg-regler
   await applyFolderTagRules(assetId, relPath);
 
-  // 7. GPS + reverse geocoding
+  // 7. GPS + reverse geocoding + ortstagg-hierarki
   if (meta.gps) {
     await upsertAssetLocation(assetId, meta.gps.lat, meta.gps.lon);
     // Geocoding körs asynkront — försök 3 gånger med 5 sek mellanrum
     (async () => {
       for (let attempt = 0; attempt < 3; attempt++) {
         if (attempt > 0) await new Promise((r) => setTimeout(r, 5000));
-        const label = await reverseGeocode(meta.gps.lat, meta.gps.lon);
+        const [label, detailed] = await Promise.all([
+          reverseGeocode(meta.gps.lat, meta.gps.lon),
+          reverseGeocodeDetailed(meta.gps.lat, meta.gps.lon),
+        ]);
         if (label) {
           await query('UPDATE assets SET location_label = $1 WHERE id = $2', [label, assetId]).catch(() => {});
+          if (detailed) await ensurePlaceTagsForAsset(assetId, detailed).catch(() => {});
           break;
         }
       }

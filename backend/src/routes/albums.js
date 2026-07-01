@@ -17,7 +17,7 @@ export default async function albumsRoutes(fastify) {
     const params = [request.user.id];
     if (assetId) params.push(assetId);
     const { rows } = await query(
-      `SELECT al.id, al.name, al.description, al.is_smart, al.rule_logic, al.created_at, al.updated_at,
+      `SELECT al.id, al.name, al.description, al.is_smart, al.album_type, al.rule_logic, al.created_at, al.updated_at,
               al.cover_asset_id,
               COALESCE(
                 a.thumb_small_path,
@@ -51,14 +51,15 @@ export default async function albumsRoutes(fastify) {
           name:        { type: 'string', minLength: 1 },
           description: { type: 'string' },
           is_smart:    { type: 'boolean' },
+          albumType:   { type: 'string', enum: ['manual', 'project'] },
         },
       },
     },
   }, async (request, reply) => {
-    const { name, description, is_smart } = request.body;
+    const { name, description, is_smart, albumType } = request.body;
     const { rows } = await query(
-      'INSERT INTO albums (id, name, description, owner_id, is_smart) VALUES ($1,$2,$3,$4,$5) RETURNING *',
-      [uuidv4(), name, description ?? null, request.user.id, is_smart ?? false]
+      'INSERT INTO albums (id, name, description, owner_id, is_smart, album_type) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+      [uuidv4(), name, description ?? null, request.user.id, is_smart ?? false, albumType ?? 'manual']
     );
     return reply.status(201).send({ data: rows[0] });
   });
@@ -86,7 +87,7 @@ export default async function albumsRoutes(fastify) {
       `SELECT a.id, a.file_name, a.mime_type, a.taken_at,
               a.thumb_small_path, a.thumb_large_path, a.duration,
               a.rating, a.flag, a.color_label, a.width, a.height,
-              a.file_size, a.indexed_at, a.is_motion_photo, a.title,
+              a.file_size, a.indexed_at, a.is_motion_photo, a.live_video_path, a.title,
               a.stack_id, a.location_label,
               aa.sort_order,
               (SELECT COUNT(*)::int FROM assets s WHERE s.stack_id = a.stack_id AND s.status = 'active') AS stack_size,
@@ -267,6 +268,194 @@ export default async function albumsRoutes(fastify) {
     );
     const count = await rebuildSmartAlbum(id, request.user.id, rules, rows[0].rule_logic, request.user.role === 'admin');
     return reply.send({ data: { ok: true, assetCount: count } });
+  });
+
+  // ── Projektalbum: kapitel-CRUD ────────────────────────────────────────────────
+
+  // GET /api/albums/:id/chapters — hämta kapitel med assets
+  fastify.get('/api/albums/:id/chapters', {
+    onRequest: [fastify.authenticate],
+  }, async (request, reply) => {
+    const { id } = request.params;
+    const { rows: album } = await query(
+      'SELECT id FROM albums WHERE id = $1 AND owner_id = $2',
+      [id, request.user.id]
+    );
+    if (!album[0]) return reply.status(404).send({ error: 'Album hittades inte' });
+
+    const { rows: chapters } = await query(
+      `SELECT pc.id, pc.title, pc.description, pc.sort_order, pc.cover_asset_id,
+              a.thumb_small_path AS cover_thumb
+       FROM project_chapters pc
+       LEFT JOIN assets a ON a.id = pc.cover_asset_id
+       WHERE pc.album_id = $1
+       ORDER BY pc.sort_order, pc.created_at`,
+      [id]
+    );
+
+    for (const ch of chapters) {
+      const { rows: assets } = await query(
+        `SELECT a.id, a.file_name, a.mime_type, a.taken_at,
+                a.thumb_small_path, a.thumb_large_path, a.duration,
+                a.rating, a.flag, a.color_label, a.width, a.height,
+                a.file_size, a.is_motion_photo, a.live_video_path,
+                ca.sort_order,
+                EXISTS(SELECT 1 FROM favorites fv WHERE fv.asset_id = a.id AND fv.user_id = $2) AS is_favorite
+         FROM chapter_assets ca
+         JOIN assets a ON a.id = ca.asset_id AND a.status = 'active'
+         WHERE ca.chapter_id = $1
+         ORDER BY ca.sort_order, a.taken_at`,
+        [ch.id, request.user.id]
+      );
+      ch.assets = assets;
+    }
+
+    return reply.send({ data: chapters });
+  });
+
+  // POST /api/albums/:id/chapters — skapa kapitel
+  fastify.post('/api/albums/:id/chapters', {
+    onRequest: [fastify.authenticate],
+    schema: {
+      body: {
+        type: 'object',
+        properties: {
+          title:       { type: 'string' },
+          description: { type: 'string' },
+          sortOrder:   { type: 'integer' },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { id } = request.params;
+    const { title = 'Nytt kapitel', description, sortOrder } = request.body ?? {};
+
+    const { rows: album } = await query(
+      'SELECT id FROM albums WHERE id = $1 AND owner_id = $2',
+      [id, request.user.id]
+    );
+    if (!album[0]) return reply.status(404).send({ error: 'Album hittades inte' });
+
+    // Beräkna sort_order om inte angiven
+    let order = sortOrder;
+    if (order === undefined) {
+      const { rows: cnt } = await query(
+        'SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM project_chapters WHERE album_id = $1',
+        [id]
+      );
+      order = cnt[0].next;
+    }
+
+    const { rows } = await query(
+      `INSERT INTO project_chapters (album_id, title, description, sort_order)
+       VALUES ($1,$2,$3,$4) RETURNING *`,
+      [id, title, description ?? null, order]
+    );
+    return reply.status(201).send({ data: rows[0] });
+  });
+
+  // PATCH /api/albums/:id/chapters/:chId — uppdatera kapitel
+  fastify.patch('/api/albums/:id/chapters/:chId', {
+    onRequest: [fastify.authenticate],
+    schema: {
+      body: {
+        type: 'object',
+        properties: {
+          title:        { type: 'string' },
+          description:  { type: 'string' },
+          sortOrder:    { type: 'integer' },
+          coverAssetId: { type: 'string' },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { chId } = request.params;
+    const { title, description, sortOrder, coverAssetId } = request.body ?? {};
+
+    const sets = [];
+    const vals = [];
+    if (title       !== undefined) { vals.push(title);       sets.push(`title = $${vals.length}`); }
+    if (description !== undefined) { vals.push(description); sets.push(`description = $${vals.length}`); }
+    if (sortOrder   !== undefined) { vals.push(sortOrder);   sets.push(`sort_order = $${vals.length}`); }
+    if (coverAssetId !== undefined) { vals.push(coverAssetId); sets.push(`cover_asset_id = $${vals.length}`); }
+
+    if (!sets.length) return reply.send({ data: { ok: true } });
+
+    vals.push(chId);
+    await query(`UPDATE project_chapters SET ${sets.join(', ')} WHERE id = $${vals.length}`, vals);
+    return reply.send({ data: { ok: true } });
+  });
+
+  // DELETE /api/albums/:id/chapters/:chId
+  fastify.delete('/api/albums/:id/chapters/:chId', {
+    onRequest: [fastify.authenticate],
+  }, async (request, reply) => {
+    await query('DELETE FROM project_chapters WHERE id = $1', [request.params.chId]);
+    return reply.send({ data: { ok: true } });
+  });
+
+  // POST /api/albums/:id/chapters/:chId/assets — lägg till assets i kapitel
+  fastify.post('/api/albums/:id/chapters/:chId/assets', {
+    onRequest: [fastify.authenticate],
+    schema: {
+      body: {
+        type: 'object',
+        required: ['assetIds'],
+        properties: {
+          assetIds: { type: 'array', items: { type: 'string' } },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { chId } = request.params;
+    const { assetIds } = request.body;
+
+    const { rows: cnt } = await query(
+      'SELECT COALESCE(MAX(sort_order), -1) AS max FROM chapter_assets WHERE chapter_id = $1',
+      [chId]
+    );
+    let order = (cnt[0].max ?? -1) + 1;
+
+    for (const assetId of assetIds) {
+      await query(
+        'INSERT INTO chapter_assets (chapter_id, asset_id, sort_order) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING',
+        [chId, assetId, order++]
+      );
+    }
+    return reply.send({ data: { ok: true, added: assetIds.length } });
+  });
+
+  // DELETE /api/albums/:id/chapters/:chId/assets/:assetId
+  fastify.delete('/api/albums/:id/chapters/:chId/assets/:assetId', {
+    onRequest: [fastify.authenticate],
+  }, async (request, reply) => {
+    await query(
+      'DELETE FROM chapter_assets WHERE chapter_id = $1 AND asset_id = $2',
+      [request.params.chId, request.params.assetId]
+    );
+    return reply.send({ data: { ok: true } });
+  });
+
+  // PUT /api/albums/:id/chapters/:chId/reorder — sätt ny ordning för assets i kapitel
+  fastify.put('/api/albums/:id/chapters/:chId/reorder', {
+    onRequest: [fastify.authenticate],
+    schema: {
+      body: {
+        type: 'object',
+        required: ['assetIds'],
+        properties: { assetIds: { type: 'array', items: { type: 'string' } } },
+      },
+    },
+  }, async (request, reply) => {
+    const { chId } = request.params;
+    const { assetIds } = request.body;
+    for (let i = 0; i < assetIds.length; i++) {
+      await query(
+        'UPDATE chapter_assets SET sort_order = $1 WHERE chapter_id = $2 AND asset_id = $3',
+        [i, chId, assetIds[i]]
+      );
+    }
+    return reply.send({ data: { ok: true } });
   });
 }
 

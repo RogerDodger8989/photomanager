@@ -1,0 +1,1 @@
+ALTER TABLE assets ADD COLUMN IF NOT EXISTS live_video_path TEXT;

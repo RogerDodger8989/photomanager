@@ -197,6 +197,60 @@ export default async function streamRoutes(fastify) {
     return reply.send(fd.createReadStream());
   });
 
+  // GET /api/assets/:id/live-video — streamar tillhörande Live Photo-video (.mov/.mp4 med samma basename)
+  fastify.get('/api/assets/:id/live-video', {
+    onRequest: [fastify.authenticate],
+  }, async (request, reply) => {
+    const { id } = request.params;
+
+    const { rows } = await query(
+      `SELECT live_video_path FROM assets WHERE id = $1 AND status = 'active'`,
+      [id]
+    );
+    const asset = rows[0];
+    if (!asset?.live_video_path) {
+      return reply.status(404).send({ error: 'Ingen Live Photo-video' });
+    }
+
+    const filePath = resolve(config.media.photosPath, asset.live_video_path);
+    let fileSize;
+    try {
+      const s = await stat(filePath);
+      fileSize = s.size;
+    } catch {
+      return reply.status(404).send({ error: 'Videofil ej tillgänglig' });
+    }
+
+    const rangeHeader = request.headers['range'];
+    const contentType = asset.live_video_path.toLowerCase().endsWith('.mov') ? 'video/quicktime' : 'video/mp4';
+
+    if (!rangeHeader) {
+      reply.header('Content-Type', contentType);
+      reply.header('Content-Length', fileSize);
+      reply.header('Accept-Ranges', 'bytes');
+      const fd = await open(filePath, 'r');
+      return reply.send(fd.createReadStream());
+    }
+
+    const [startStr, endStr] = rangeHeader.replace('bytes=', '').split('-');
+    const start = parseInt(startStr, 10);
+    const end   = endStr ? parseInt(endStr, 10) : fileSize - 1;
+
+    if (start >= fileSize || end >= fileSize || start > end) {
+      reply.header('Content-Range', `bytes */${fileSize}`);
+      return reply.status(416).send({ error: 'Range not satisfiable' });
+    }
+
+    reply.status(206);
+    reply.header('Content-Range', `bytes ${start}-${end}/${fileSize}`);
+    reply.header('Accept-Ranges', 'bytes');
+    reply.header('Content-Length', end - start + 1);
+    reply.header('Content-Type', contentType);
+
+    const fd = await open(filePath, 'r');
+    return reply.send(fd.createReadStream({ start, end }));
+  });
+
   // GET /api/assets/:id/motion-video — extraherar och streamar den inbäddade MP4:an i en Motion Photo
   fastify.get('/api/assets/:id/motion-video', {
     onRequest: [fastify.authenticate],
