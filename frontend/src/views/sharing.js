@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { toast, formatDate, confirm } from '../utils.js';
+import { toast, formatDate, formatDateTime, confirm } from '../utils.js';
 import { openShareModal } from '../components/shareModal.js';
 
 export async function renderSharing(container) {
@@ -102,6 +102,7 @@ function renderShareCard(s) {
   const typeLabel = s.share_type === 'public_link' ? '🔗 Publik länk' : `👤 ${s.shared_with_username ?? '–'}`;
   const expiryLabel = s.expires_at ? `· Utgår ${formatDate(s.expires_at)}` : '';
   const maxViewsLabel = s.max_views ? `· Max ${s.max_views} visningar` : '';
+  const lastViewedLabel = s.last_viewed_at ? `· Senast visad ${formatDateTime(s.last_viewed_at)}` : '';
   const isExpired = s.expires_at && new Date(s.expires_at) < new Date();
 
   return `
@@ -116,7 +117,7 @@ function renderShareCard(s) {
             ${isExpired ? '<span class="ml-1 text-xs text-red-400">Utgången</span>' : ''}
           </div>
           <div class="text-xs text-slate-400 mt-0.5">
-            ${typeLabel} ${expiryLabel} ${maxViewsLabel} · ${s.view_count} visningar
+            ${typeLabel} ${expiryLabel} ${maxViewsLabel} · 👁 ${s.view_count} visningar ${lastViewedLabel}
           </div>
           ${url ? `
             <div class="flex items-center gap-1.5 mt-1.5">

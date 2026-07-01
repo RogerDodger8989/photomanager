@@ -33,6 +33,10 @@ export const config = {
     autoCleanDays: parseInt(process.env.TRASH_AUTO_CLEAN_DAYS ?? '30'),
   },
 
+  app: {
+    baseUrl: process.env.APP_BASE_URL ?? 'http://localhost:3000',
+  },
+
   models: {
     path: process.env.MODELS_PATH ?? './models',
   },

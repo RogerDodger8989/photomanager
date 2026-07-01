@@ -139,7 +139,7 @@ export default async function sharesRoutes(fastify) {
     if (share.expires_at && new Date(share.expires_at) < new Date()) {
       return reply.status(410).type('text/html').send('<html><body style="background:#0f172a;color:#94a3b8;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><h2>Länken har gått ut</h2></body></html>');
     }
-    await query('UPDATE shares SET view_count = view_count + 1 WHERE token = $1', [token]);
+    await query('UPDATE shares SET view_count = view_count + 1, last_viewed_at = NOW() WHERE token = $1', [token]);
 
     const isVideo = share.mime_type?.startsWith('video/');
     const mediaSrc = isVideo
@@ -212,7 +212,7 @@ export default async function sharesRoutes(fastify) {
       return reply.status(410).send({ error: 'Länkens maxvisningar har uppnåtts' });
     }
 
-    await query('UPDATE shares SET view_count = view_count + 1 WHERE token = $1', [token]);
+    await query('UPDATE shares SET view_count = view_count + 1, last_viewed_at = NOW() WHERE token = $1', [token]);
 
     // Om det är ett album, hämta innehållet
     let albumAssets = null;

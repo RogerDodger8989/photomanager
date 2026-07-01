@@ -2,7 +2,7 @@
 import { toast, formatDateTime, formatBytes, confirm } from '../utils.js';
 import { invalidateThumbSettings } from '../components/thumbSettings.js';
 
-const TABS = ['stats', 'storage', 'users', 'jobs', 'ai', 'audit', 'duplicates', 'folders', 'trash', 'settings', 'import'];
+const TABS = ['stats', 'storage', 'users', 'jobs', 'ai', 'audit', 'duplicates', 'folders', 'trash', 'settings', 'import', 'backup'];
 
 export async function renderAdmin(container, tab = 'stats') {
   container.innerHTML = `
@@ -32,7 +32,7 @@ export async function renderAdmin(container, tab = 'stats') {
 }
 
 function tabLabel(t) {
-  return { stats:'Statistik', storage:'Lagring', users:'Användare', jobs:'Jobb', ai:'AI-förslag', audit:'Logg', duplicates:'Duplikat', folders:'Mappar', trash:'🗑 Papperskorg', settings:'Inställningar', import:'Import' }[t] ?? t;
+  return { stats:'Statistik', storage:'Lagring', users:'Användare', jobs:'Jobb', ai:'AI-förslag', audit:'Logg', duplicates:'Duplikat', folders:'Mappar', trash:'🗑 Papperskorg', settings:'Inställningar', import:'Import', backup:'☁️ Backup' }[t] ?? t;
 }
 
 async function loadTab(tab, content) {
@@ -49,6 +49,7 @@ async function loadTab(tab, content) {
     if (tab === 'trash')      await renderTrash(content);
     if (tab === 'settings')   await renderUserSettings(content);
     if (tab === 'import')     await renderImportSessions(content);
+    if (tab === 'backup')     await renderBackups(content);
   } catch (e) { content.innerHTML = `<div class="text-red-400 text-sm">${e.message}</div>`; }
 }
 
@@ -1986,4 +1987,443 @@ async function renderImportSessions(content) {
         </table>
       </div>
     </div>`;
+}
+
+// ── Backup (rclone) ─────────────────────────────────────────────────────────
+
+const PROVIDERS = [
+  { id: 'gdrive',   label: 'Google Drive',  icon: '🌐', oauth: true,  hint: 'Kräver ett Google Cloud OAuth-projekt' },
+  { id: 'onedrive', label: 'OneDrive',      icon: '☁️', oauth: true,  hint: 'Kräver ett Microsoft Azure OAuth-app' },
+  { id: 'dropbox',  label: 'Dropbox',       icon: '📦', oauth: true,  hint: 'Kräver ett Dropbox Developer-app' },
+  { id: 's3',       label: 'Amazon S3 / Wasabi / Cloudflare R2', icon: '🪣', oauth: false },
+  { id: 'b2',       label: 'Backblaze B2',  icon: '💾', oauth: false },
+  { id: 'webdav',   label: 'WebDAV / Nextcloud', icon: '🔗', oauth: false },
+  { id: 'sftp',     label: 'SFTP',          icon: '🔒', oauth: false },
+];
+
+function backupStatusBadge(status) {
+  const map = { success: 'bg-green-500/15 text-green-400', error: 'bg-red-500/15 text-red-400', running: 'bg-blue-500/15 text-blue-400 animate-pulse' };
+  const label = { success: 'OK', error: 'Fel', running: 'Kör…' }[status] ?? 'Aldrig körd';
+  return `<span class="px-2 py-0.5 rounded-full text-[11px] font-medium ${map[status] ?? 'bg-slate-700 text-slate-400'}">${label}</span>`;
+}
+function scheduleLabel(s) { return { manual: 'Manuell', daily: 'Dagligen', weekly: 'Varje vecka' }[s] ?? s; }
+
+async function renderBackups(content) {
+  content.innerHTML = '<div class="text-slate-400 text-sm">Laddar…</div>';
+  const { data: backups } = await api.backups();
+
+  content.innerHTML = `
+    <div class="space-y-4">
+      <div class="flex items-center justify-between">
+        <h2 class="text-base font-semibold text-white">☁️ Molnbackup</h2>
+        <button id="add-backup-btn" class="bg-blue-600 hover:bg-blue-500 text-white text-sm px-3 py-1.5 rounded-lg transition-colors">+ Ny backup</button>
+      </div>
+      <p class="text-xs text-slate-500">Synkar <code class="text-slate-400">/media/photos</code> till molnet. Allt körs inbyggt — ingen extern programvara krävs.</p>
+      ${!backups.length
+        ? '<p class="text-sm text-slate-400 py-6 text-center">Inga backuper ännu. Klicka "+ Ny backup" för att komma igång.</p>'
+        : `<div class="space-y-2">${backups.map((b) => renderBackupCard(b)).join('')}</div>`}
+    </div>`;
+
+  content.querySelector('#add-backup-btn')?.addEventListener('click', () => openProviderPicker(content));
+  wireBackupCardEvents(content);
+
+  // Lyssna på OAuth-popup som signalerar att anslutning lyckades
+  window.addEventListener('message', function onMsg(e) {
+    if (e.data?.type === 'oauth-done') {
+      window.removeEventListener('message', onMsg);
+      toast('Backup ansluten!', 'success');
+      renderBackups(content);
+    }
+  });
+}
+
+function renderBackupCard(b) {
+  const prov = PROVIDERS.find((p) => b.remote_name?.startsWith(p.id)) ?? PROVIDERS[0];
+  return `
+    <div class="bg-slate-800 rounded-xl p-3.5 border border-slate-700">
+      <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="text-lg leading-none">${prov.icon}</span>
+            <span class="text-sm font-medium text-white truncate">${escHtmlAdmin(b.name)}</span>
+            ${backupStatusBadge(b.last_status)}
+            ${!b.enabled ? '<span class="text-[11px] text-slate-500">(inaktiverad)</span>' : ''}
+          </div>
+          <div class="text-xs text-slate-400 mt-1">
+            ${escHtmlAdmin(b.remote_name)}:${escHtmlAdmin(b.dest_path)} · ${scheduleLabel(b.schedule)}
+            ${b.last_run ? ` · Senast körd ${formatDateTime(b.last_run)}` : ' · Aldrig körd'}
+          </div>
+        </div>
+        <div class="flex items-center gap-1.5 flex-shrink-0 flex-wrap justify-end">
+          <button class="backup-test-btn text-xs px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg transition-colors" data-id="${b.id}">Testa</button>
+          <button class="backup-run-btn text-xs px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors" data-id="${b.id}">Kör nu</button>
+          <button class="backup-toggle-btn text-xs px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg transition-colors" data-id="${b.id}" data-enabled="${b.enabled}">${b.enabled ? 'Pausa' : 'Aktivera'}</button>
+          <button class="backup-delete-btn w-7 h-7 flex items-center justify-center text-red-400 hover:text-red-300 hover:bg-red-400/10 rounded-lg transition-colors text-sm" data-id="${b.id}" title="Ta bort">✕</button>
+        </div>
+      </div>
+      ${b.last_log ? `
+        <details class="mt-2">
+          <summary class="text-xs text-slate-500 cursor-pointer hover:text-slate-300">Visa logg</summary>
+          <pre class="mt-1.5 text-[11px] text-slate-400 bg-slate-900 rounded-lg p-2.5 overflow-x-auto max-h-48 whitespace-pre-wrap">${escHtmlAdmin(b.last_log)}</pre>
+        </details>` : ''}
+    </div>`;
+}
+
+function wireBackupCardEvents(content) {
+  content.querySelectorAll('.backup-test-btn').forEach((el) => {
+    const btn = /** @type {HTMLElement} */ (el);
+    btn.addEventListener('click', async () => {
+      const orig = btn.textContent;
+      btn.textContent = 'Testar…';
+      try {
+        const { data } = await api.testBackup(btn.dataset.id);
+        toast(data.ok ? '✓ Anslutning OK' : `Fel: ${data.error}`, data.ok ? 'success' : 'error');
+      } catch (e) { toast(e.message, 'error'); }
+      btn.textContent = orig;
+    });
+  });
+  content.querySelectorAll('.backup-run-btn').forEach((el) => {
+    const btn = /** @type {HTMLElement} */ (el);
+    btn.addEventListener('click', async () => {
+      try {
+        await api.runBackup(btn.dataset.id);
+        toast('Backup startad i bakgrunden', 'success');
+        setTimeout(() => renderBackups(content), 4000);
+      } catch (e) { toast(e.message, 'error'); }
+    });
+  });
+  content.querySelectorAll('.backup-toggle-btn').forEach((el) => {
+    const btn = /** @type {HTMLElement} */ (el);
+    btn.addEventListener('click', async () => {
+      try {
+        await api.updateBackup(btn.dataset.id, { enabled: btn.dataset.enabled !== 'true' });
+        renderBackups(content);
+      } catch (e) { toast(e.message, 'error'); }
+    });
+  });
+  content.querySelectorAll('.backup-delete-btn').forEach((el) => {
+    const btn = /** @type {HTMLElement} */ (el);
+    btn.addEventListener('click', async () => {
+      if (!await confirm('Ta bort backup-konfigurationen? Filer i molnet påverkas inte.')) return;
+      try { await api.deleteBackup(btn.dataset.id); renderBackups(content); }
+      catch (e) { toast(e.message, 'error'); }
+    });
+  });
+}
+
+// ── Provider-väljare ─────────────────────────────────────────────────────────
+
+function openProviderPicker(content) {
+  const overlay = mkOverlay();
+  overlay.innerHTML = `
+    <div class="bg-slate-800 rounded-2xl w-full max-w-md shadow-2xl border border-slate-700">
+      <div class="flex items-center justify-between px-6 py-4 border-b border-slate-700">
+        <h2 class="text-lg font-semibold text-white">Välj lagringstjänst</h2>
+        <button class="modal-close text-slate-400 hover:text-white text-xl leading-none">✕</button>
+      </div>
+      <div class="p-4 grid grid-cols-1 gap-2">
+        ${PROVIDERS.map((p) => `
+          <button class="provider-btn flex items-center gap-3 px-4 py-3 bg-slate-700 hover:bg-slate-600 rounded-xl transition-colors text-left"
+                  data-provider="${p.id}">
+            <span class="text-2xl leading-none">${p.icon}</span>
+            <div>
+              <div class="text-sm font-medium text-white">${p.label}</div>
+              ${p.hint ? `<div class="text-[11px] text-slate-400">${p.hint}</div>` : ''}
+            </div>
+            ${p.oauth ? '<span class="ml-auto text-[10px] bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded-full">OAuth</span>' : ''}
+          </button>`).join('')}
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  overlay.querySelector('.modal-close')?.addEventListener('click', () => overlay.remove());
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+  overlay.querySelectorAll('.provider-btn').forEach((el) => {
+    const btn = /** @type {HTMLElement} */ (el);
+    btn.addEventListener('click', () => {
+      overlay.remove();
+      const prov = PROVIDERS.find((p) => p.id === btn.dataset.provider);
+      if (!prov) return;
+      if (prov.oauth) openOAuthModal(content, prov);
+      else            openKeyModal(content, prov);
+    });
+  });
+}
+
+// ── Gemensamma fält (namn, remote-id, mål, schema) ───────────────────────────
+
+function commonFields(providerLabel, suggestedRemote) {
+  return `
+    <div>
+      <label class="bk-label">Namn på backup</label>
+      <input id="bk-name" type="text" placeholder="T.ex. Min ${providerLabel}-backup" class="bk-input">
+    </div>
+    <div class="grid grid-cols-2 gap-2">
+      <div>
+        <label class="bk-label">Remote-ID <span class="text-slate-600">(bokstäver/siffror)</span></label>
+        <input id="bk-remote" type="text" value="${suggestedRemote}" class="bk-input">
+      </div>
+      <div>
+        <label class="bk-label">Målmapp i molnet</label>
+        <input id="bk-dest" type="text" value="PhotoManager" class="bk-input">
+      </div>
+    </div>
+    <div>
+      <label class="bk-label">Schema</label>
+      <select id="bk-schedule" class="bk-input">
+        <option value="manual">Manuell</option>
+        <option value="daily">Dagligen</option>
+        <option value="weekly">Varje vecka</option>
+      </select>
+    </div>`;
+}
+
+function commonValues(overlay) {
+  return {
+    name:       v(overlay, '#bk-name'),
+    remoteName: v(overlay, '#bk-remote'),
+    destPath:   v(overlay, '#bk-dest') || 'PhotoManager',
+    schedule:   /** @type {HTMLSelectElement} */ (overlay.querySelector('#bk-schedule'))?.value ?? 'manual',
+  };
+}
+
+function v(el, sel) { return /** @type {HTMLInputElement} */ (el.querySelector(sel))?.value?.trim() ?? ''; }
+
+// ── OAuth-modal (Google Drive / OneDrive / Dropbox) ──────────────────────────
+
+function openOAuthModal(content, prov) {
+  const overlay = mkOverlay();
+  overlay.innerHTML = `
+    <div class="bg-slate-800 rounded-2xl w-full max-w-lg shadow-2xl border border-slate-700 flex flex-col max-h-[90vh]">
+      <div class="flex items-center justify-between px-6 py-4 border-b border-slate-700 flex-shrink-0">
+        <h2 class="text-lg font-semibold text-white">${prov.icon} Anslut ${prov.label}</h2>
+        <button class="modal-close text-slate-400 hover:text-white text-xl leading-none">✕</button>
+      </div>
+      <div class="px-6 py-4 space-y-3 overflow-y-auto flex-1">
+        <div class="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3 text-xs text-blue-200 space-y-1.5">
+          <p class="font-medium">Så här kommer du igång:</p>
+          <ol class="list-decimal list-inside space-y-1 text-blue-300">
+            ${oauthSteps(prov.id)}
+          </ol>
+        </div>
+        ${commonFields(prov.label, prov.id)}
+        <div class="grid grid-cols-1 gap-2">
+          <div>
+            <label class="bk-label">Client ID</label>
+            <input id="bk-client-id" type="text" placeholder="..." class="bk-input font-mono text-xs">
+          </div>
+          <div>
+            <label class="bk-label">Client Secret</label>
+            <input id="bk-client-secret" type="password" placeholder="..." class="bk-input font-mono text-xs">
+          </div>
+        </div>
+      </div>
+      <div class="px-6 py-4 border-t border-slate-700 flex justify-end gap-2 flex-shrink-0">
+        <button class="modal-close px-4 py-2 text-sm text-slate-300 hover:text-white">Avbryt</button>
+        <button id="bk-oauth-btn" class="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg">Anslut med ${prov.label} →</button>
+      </div>
+    </div>`;
+
+  bkStyles(overlay);
+  document.body.appendChild(overlay);
+  overlay.querySelectorAll('.modal-close').forEach((b) => b.addEventListener('click', () => overlay.remove()));
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+  overlay.querySelector('#bk-oauth-btn')?.addEventListener('click', async () => {
+    const { name, remoteName, destPath, schedule } = commonValues(overlay);
+    const clientId     = v(overlay, '#bk-client-id');
+    const clientSecret = v(overlay, '#bk-client-secret');
+    if (!name || !remoteName || !clientId || !clientSecret) {
+      toast('Alla fält måste fyllas i', 'error');
+      return;
+    }
+    try {
+      const { data } = await api.oauthStart({ provider: prov.id, clientId, clientSecret, remoteName, name, destPath, schedule });
+      overlay.remove();
+      // Öppna OAuth-popup – 600×700, centrerad
+      const w = 600, h = 700;
+      const left = Math.round(screen.width / 2 - w / 2);
+      const top  = Math.round(screen.height / 2 - h / 2);
+      window.open(data.authUrl, 'pm-oauth', `width=${w},height=${h},top=${top},left=${left},resizable=yes,scrollbars=yes`);
+      toast(`${prov.label}-fönster öppnat — logga in och godkänn`, 'info');
+    } catch (e) { toast(e.message, 'error'); }
+  });
+}
+
+function oauthSteps(provider) {
+  const redirect = `${location.origin}/api/admin/oauth/callback`;
+  const steps = {
+    gdrive: [
+      'Gå till <a class="underline" href="https://console.cloud.google.com" target="_blank">Google Cloud Console</a>',
+      'Skapa ett projekt → Aktivera "Google Drive API"',
+      'Skapa OAuth 2.0-klientuppgifter (typ: Webbapplikation)',
+      `Lägg till <code class="bg-slate-900 px-1 rounded">${redirect}</code> som auktoriserad omdirigerings-URI`,
+      'Kopiera Client ID och Client Secret hit',
+    ],
+    onedrive: [
+      'Gå till <a class="underline" href="https://portal.azure.com" target="_blank">Azure Portal</a> → App-registreringar',
+      'Registrera en ny app → välj "Personliga Microsoft-konton"',
+      `Lägg till omdirigerings-URI: <code class="bg-slate-900 px-1 rounded">${redirect}</code>`,
+      'Skapa en klienthemlighet under "Certifikat & hemligheter"',
+      'Kopiera Program-ID (Client ID) och hemligheten hit',
+    ],
+    dropbox: [
+      'Gå till <a class="underline" href="https://www.dropbox.com/developers/apps" target="_blank">Dropbox Developer</a>',
+      'Skapa en ny app → välj "Scoped access" → "Full Dropbox"',
+      `Lägg till omdirigerings-URI: <code class="bg-slate-900 px-1 rounded">${redirect}</code>`,
+      'Kopiera App key (Client ID) och App secret hit',
+    ],
+  };
+  return (steps[provider] ?? []).map((s) => `<li>${s}</li>`).join('');
+}
+
+// ── Nyckelbaserad modal (S3, B2, WebDAV, SFTP) ───────────────────────────────
+
+function openKeyModal(content, prov) {
+  const overlay = mkOverlay();
+  overlay.innerHTML = `
+    <div class="bg-slate-800 rounded-2xl w-full max-w-lg shadow-2xl border border-slate-700 flex flex-col max-h-[90vh]">
+      <div class="flex items-center justify-between px-6 py-4 border-b border-slate-700 flex-shrink-0">
+        <h2 class="text-lg font-semibold text-white">${prov.icon} Anslut ${prov.label}</h2>
+        <button class="modal-close text-slate-400 hover:text-white text-xl leading-none">✕</button>
+      </div>
+      <div class="px-6 py-4 space-y-3 overflow-y-auto flex-1">
+        ${commonFields(prov.label, prov.id)}
+        ${providerFields(prov.id)}
+      </div>
+      <div class="px-6 py-4 border-t border-slate-700 flex justify-end gap-2 flex-shrink-0">
+        <button class="modal-close px-4 py-2 text-sm text-slate-300 hover:text-white">Avbryt</button>
+        <button id="bk-save-btn" class="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg">Spara</button>
+      </div>
+    </div>`;
+
+  bkStyles(overlay);
+  document.body.appendChild(overlay);
+  overlay.querySelectorAll('.modal-close').forEach((b) => b.addEventListener('click', () => overlay.remove()));
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+  overlay.querySelector('#bk-save-btn')?.addEventListener('click', async () => {
+    const { name, remoteName, destPath, schedule } = commonValues(overlay);
+    if (!name || !remoteName) { toast('Namn och Remote-ID krävs', 'error'); return; }
+
+    const extra = providerValues(prov.id, overlay);
+    if (extra.error) { toast(extra.error, 'error'); return; }
+
+    try {
+      await api.createBackup({ provider: prov.id, name, remoteName, destPath, schedule, ...extra.values });
+      toast('Backup skapad!', 'success');
+      overlay.remove();
+      renderBackups(content);
+    } catch (e) { toast(e.message, 'error'); }
+  });
+}
+
+function providerFields(provider) {
+  switch (provider) {
+    case 's3': return `
+      <div>
+        <label class="bk-label">Undertjänst</label>
+        <select id="bk-s3p" class="bk-input">
+          <option value="AWS">Amazon S3</option>
+          <option value="Wasabi">Wasabi</option>
+          <option value="Cloudflare">Cloudflare R2</option>
+          <option value="Other">Annan S3-kompatibel</option>
+        </select>
+      </div>
+      <div class="grid grid-cols-2 gap-2">
+        <div><label class="bk-label">Access Key ID</label><input id="bk-akid" type="text" class="bk-input font-mono text-xs"></div>
+        <div><label class="bk-label">Secret Access Key</label><input id="bk-sak" type="password" class="bk-input font-mono text-xs"></div>
+      </div>
+      <div class="grid grid-cols-2 gap-2">
+        <div><label class="bk-label">Region</label><input id="bk-region" type="text" placeholder="eu-west-1" class="bk-input"></div>
+        <div><label class="bk-label">Endpoint (valfri)</label><input id="bk-endpoint" type="text" placeholder="https://..." class="bk-input text-xs"></div>
+      </div>`;
+    case 'b2': return `
+      <div class="grid grid-cols-2 gap-2">
+        <div><label class="bk-label">Account ID</label><input id="bk-b2acc" type="text" class="bk-input font-mono text-xs"></div>
+        <div><label class="bk-label">Application Key</label><input id="bk-b2key" type="password" class="bk-input font-mono text-xs"></div>
+      </div>`;
+    case 'webdav': return `
+      <div><label class="bk-label">WebDAV-URL</label><input id="bk-url" type="text" placeholder="https://nextcloud.example.com/remote.php/dav/files/USER" class="bk-input text-xs"></div>
+      <div>
+        <label class="bk-label">Tjänst</label>
+        <select id="bk-vendor" class="bk-input">
+          <option value="nextcloud">Nextcloud</option>
+          <option value="owncloud">ownCloud</option>
+          <option value="other">Annan WebDAV</option>
+        </select>
+      </div>
+      <div class="grid grid-cols-2 gap-2">
+        <div><label class="bk-label">Användarnamn</label><input id="bk-user" type="text" class="bk-input"></div>
+        <div><label class="bk-label">Lösenord</label><input id="bk-pass" type="password" class="bk-input"></div>
+      </div>`;
+    case 'sftp': return `
+      <div class="grid grid-cols-3 gap-2">
+        <div class="col-span-2"><label class="bk-label">Värd</label><input id="bk-host" type="text" placeholder="backup.example.com" class="bk-input"></div>
+        <div><label class="bk-label">Port</label><input id="bk-port" type="text" value="22" class="bk-input"></div>
+      </div>
+      <div class="grid grid-cols-2 gap-2">
+        <div><label class="bk-label">Användarnamn</label><input id="bk-user" type="text" class="bk-input"></div>
+        <div><label class="bk-label">Lösenord</label><input id="bk-pass" type="password" class="bk-input"></div>
+      </div>`;
+    default: return '';
+  }
+}
+
+function providerValues(provider, overlay) {
+  switch (provider) {
+    case 's3': {
+      const akid = v(overlay, '#bk-akid'), sak = v(overlay, '#bk-sak');
+      if (!akid || !sak) return { error: 'Access Key ID och Secret Access Key krävs' };
+      return { values: {
+        s3Provider:      /** @type {HTMLSelectElement} */ (overlay.querySelector('#bk-s3p'))?.value ?? 'AWS',
+        accessKeyId:     akid,
+        secretAccessKey: sak,
+        region:          v(overlay, '#bk-region') || 'auto',
+        endpoint:        v(overlay, '#bk-endpoint') || undefined,
+      }};
+    }
+    case 'b2': {
+      const acc = v(overlay, '#bk-b2acc'), key = v(overlay, '#bk-b2key');
+      if (!acc || !key) return { error: 'Account ID och Application Key krävs' };
+      return { values: { accountId: acc, applicationKey: key } };
+    }
+    case 'webdav': {
+      const url = v(overlay, '#bk-url'), user = v(overlay, '#bk-user'), pass = v(overlay, '#bk-pass');
+      if (!url || !user || !pass) return { error: 'URL, användarnamn och lösenord krävs' };
+      return { values: {
+        url,
+        vendor: /** @type {HTMLSelectElement} */ (overlay.querySelector('#bk-vendor'))?.value ?? 'other',
+        user, pass,
+      }};
+    }
+    case 'sftp': {
+      const host = v(overlay, '#bk-host'), user = v(overlay, '#bk-user'), pass = v(overlay, '#bk-pass');
+      if (!host || !user) return { error: 'Värd och användarnamn krävs' };
+      return { values: { host, port: v(overlay, '#bk-port') || '22', user, pass } };
+    }
+    default: return { values: {} };
+  }
+}
+
+// ── Hjälpfunktioner ──────────────────────────────────────────────────────────
+
+function mkOverlay() {
+  const el = document.createElement('div');
+  el.className = 'fixed inset-0 z-[8000] flex items-center justify-center bg-black/70 p-4';
+  return el;
+}
+
+function bkStyles(root) {
+  root.querySelectorAll('.bk-label').forEach((el) => {
+    el.className = 'block text-xs text-slate-400 mb-1';
+  });
+  root.querySelectorAll('.bk-input').forEach((el) => {
+    el.className = (el.className || '') + ' w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white';
+  });
+}
+
+function escHtmlAdmin(s) {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }

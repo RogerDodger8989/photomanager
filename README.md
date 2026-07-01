@@ -18,6 +18,7 @@
 - [Miljövariabler](#miljövariabler)
 - [API-översikt](#api-översikt)
 - [Projektstruktur](#projektstruktur)
+- [Kortkommandon](#kortkommandon)
 - [Roadmap](#roadmap)
 - [Licens](#licens)
 
@@ -32,18 +33,18 @@
 - **SHA-256**-hashning för automatisk exakt dubblettdetektering
 - **Perceptuell hash (dHash)** — hittar nästan-identiska bilder med Hamming-distans ≤ 10 bitar
 - Stöd för **nätverksmappar (SMB/CIFS)** som bevakade källmappar
-- Administratörsgränssnitt för att lägga till och hantera bevakade mappar
+- **Import-sessionsspårning** — varje importkörning loggas med antal importerade, hoppade och felaktiga filer, synlig i Admin → Import
 
 ### Bilder
 - Genererar **WebP-thumbnails** i två storlekar (400 px + 1 200 px) via Sharp
 - Automatisk **HEIC → WebP**-konvertering vid indexering
 - Korrekt hantering av **EXIF-rotation**
-- **Stjärnbetyg** (1–5) — sätts via högerklick eller kortkommando, visas direkt på thumbnail
+- **Stjärnbetyg** (1–5) — sätts via högerklick, toolbar eller kortkommando
 - **Flaggning** — Flaggad 🚩 / Avvisad ✗ / Ingen — via högerklick eller kortkommando
 - **Färgetiketter** — 5 färger (röd/gul/grön/blå/lila) visas som border runt thumbnail
 - **Konfigurerbar thumbnail-overlay** — välj fritt vad som visas: betyg, flagga, färgkant, filnamn, storlek, datum, dimensioner
 - **Staplar (Stacks)** — gruppera burst-bilder och varianter, en "cover"-bild visas i grid
-- **Motion Photos** (Google Pixel) — identifieras automatiskt vid indexering, kort videoklipp extraheras
+- **Motion Photos** (Google Pixel) — identifieras automatiskt, kort videoklipp extraheras
 
 ### Video
 - **FFmpeg**-transkodning: HEVC/MOV → H.264 MP4 för sömlös webbuppspelning
@@ -54,10 +55,10 @@
 - Avancerade filter: datumintervall, plats, album, person, filtyp och favoriter
 - **Tagghantering** med normaliserade taggar, hierarkiska sökvägar och autocomplete
 
-### Utforska
-- **Tidslinje** grupperad per dag, månad och år med cursor-paginering
+### Utforska & tidslinje
+- **Tidslinje** med zoombar vy — dekad → år → månad → dag, klick-filtrering till bilder
 - **Händelser** — auto-grupperade resor och tillfällen utifrån datum och plats (24h-fönster, 200 km)
-- **Minnesvy "Denna dag i historien"** — visar bilder från samma datum tidigare år, grupperade per år
+- **Minnesvy "Denna dag i historien"** — foton från samma datum tidigare år, grupperade per år
 - **Daglig push-notis** kl 08:00 när det finns minnen för dagen
 - **Resor med GPS-spår** — automatisk ruttvisualisering från geo-taggade bilder (≥ 2 dagar)
 - **Platsklustring** — bilder grupperade per geografiskt område
@@ -67,11 +68,22 @@
 - **Touch-swipe** — svep vänster/höger för nästa/föregående bild
 - **Pinch-zoom** — nyp med två fingrar för att zooma, panorera med ett finger när inzoomad
 - Tangentbordsnavigering: ←/→ navigerar bilder, Esc stänger, +/- zoomar
+- **Infodrager** med metadata, taggar, person-koppningar och sociala funktioner i accordion-layout
+
+### Social
+- **Kommentarer** per bild — lägg till, visa, ta bort egna (eller all som admin)
+- **Emoji-reaktioner** — ❤️ 😂 😮 👍 😢 🔥, toggle-baserade, visas med antal direkt i lightboxen
+- Kommentarer och reaktioner visas i ett dedikerat accordion-avsnitt i infodrawern
+
+### Aktivitetsflöde
+- Ny navigationspost **Aktivitet** (🔔) — human-läsbar vy av alla händelser
+- Visar vad som ändrades: "Dennis lade till 47 foton", "Anna redigerade metadata på foto.jpg (betyg → 5 ★)"
+- Klickbara thumbnails öppnar lightboxen direkt från flödet
+- Paginering via "Ladda fler"-knapp
 
 ### Kamera & statistik
 - **Kamerastatistik** i admindashboarden — histograms för ISO, bländare, slutartid, brännvidd och objektiv
 - Kolumnerna `iso`, `aperture`, `shutter_speed`, `focal_length_mm`, `lens_model` indexerade direkt på `assets`
-- Backfill-funktion som beräknar statistik från befintliga EXIF-metadata
 
 ### Karta
 - Interaktiv karta (**Leaflet.js**) med **PostGIS-baserad klustring** som anpassas efter zoomnivå
@@ -85,14 +97,13 @@
 - **AI-förslag** på personnamn med accept/avvisa per ansikte eller i batch
 - Separat **Python Flask-tjänst** (InsightFace `buffalo_l`) som alternativ AI-backend
 - **YOLOv8-nano motivigenkänning** — taggar automatiskt 80 COCO-klasser (hund, katt, bil, mat …) på svenska
-  - Modellen (~6 MB) laddas ner via admingränssnittet
+  - Modellen (~6 MB) laddas ner direkt från admingränssnittet
   - AI-taggar märks med ⚡ och lila färg i lightboxen
   - Backfill-knapp för att tagga befintliga foton
 - Manuell hantering: skapa, namnge, slå ihop och ta bort personer
 - Spara **födelseår och dödsår** på personer
 - **Personrelationer** — koppla ihop personer med varandra
-- **Borttagna förslag** (dismissed) — skippa ansikten du inte vill kategorisera
-- Graceful degradation — appen startar utan AI-modeller om de saknas
+- Graceful degradation — appen startar utan AI-modeller
 
 ### Album & delning
 - Manuella och smarta **album** med valfri sorteringsordning
@@ -100,21 +111,41 @@
 - **Favoriter** — markera och filtrera dina bästa bilder
 - **Intern delning** med specifika användare
 - **Publika delningslänkar** med valfri giltighetstid och max antal visningar
-- Vy för inkommande och utgående delningar
-- Offentliga bilder/album tillgängliga utan inloggning via unik token
+- Vy för inkommande och utgående delningar med **visningsräknare och tidsstämpel för senaste visning**
+- `view_count` och `last_viewed_at` uppdateras automatiskt när någon öppnar en delad länk
 
-### Export & backup
-- Ladda ner **ZIP-arkiv** med originalfiler och **XMP-sidecar**-filer per bild
+### Export
+- Ladda ner **ZIP-arkiv** med originalfiler och **XMP-sidecar**-filer
+- **Vattenstämpel** — SVG-text compositas med Sharp vid export, konfigurerbart i Admin → Inställningar
 - Export körs asynkront via jobbkön och är nedladdningsbar när den är klar
+- Batchexport med multiselect — markera valfritt antal bilder via Ctrl+klik / Shift+klik
+
+### Digital fotoram
+- Helskärms-slideshow tillgänglig på `/frame.html`
+- Konfiguration i Admin → Inställningar: källa (album/favoriter/slumpmässigt), intervall (5–60 sek)
+- Token-skyddad
+
+### Molnbackup (inbyggt, kräver ingen extern installation)
+- **Fullt integrerat i appen** — ingen extern installation av rclone behövs av användaren
+- Stöd för **7 molnleverantörer** med egna formulär för varje:
+  - **Google Drive** — inbyggt OAuth-flöde med popup-fönster direkt i appen
+  - **Microsoft OneDrive** — inbyggt OAuth-flöde
+  - **Dropbox** — inbyggt OAuth-flöde
+  - **Amazon S3 / Wasabi / Cloudflare R2** — formulär med Access Key + Secret
+  - **Backblaze B2** — formulär med Account ID + Application Key
+  - **WebDAV / Nextcloud** — formulär med URL, användarnamn och lösenord
+  - **SFTP** — formulär med värd, port, användarnamn och lösenord
+- Schema: manuell, dagligen eller varje vecka
+- Visar status (OK / Fel / Kör…), senast körd och rullningsbar logg per backup-konfiguration
+- "Testa anslutning"-knapp innan riktig synkronisering körs
 
 ### Admin & säkerhet
 - **Användarhantering**: skapa, redigera, aktivera och inaktivera konton
-- **RBAC** med tre roller (`admin` / `user` / `guest`) och granulära rättigheter per användare
+- **RBAC** med roller (`admin` / `user` / `guest`) och granulära rättigheter per användare
 - **Audit-log** med CSV-export — spårar login, borttagning, delning och nedladdning
 - **Jobbkö** — övervaka status för thumbnail, transcode, phash, object_detection och zip-jobb
-- **Dubblettrapport** baserat på SHA-256 och perceptuell hash (nästan-identiska)
-- **Kamerastatistik**: histograms för ISO, bländare, slutartid, brännvidd och objektiv
-- **YOLOv8-sektionen** i admin: modellstatus, nedladdning och backfill
+- **Import-historik** — sessionsbaserad logg med antal importerade, hoppade och felaktiga filer
+- **Dubblettrapport** baserat på SHA-256 och perceptuell hash
 - **Systemstatistik**: antal assets, lagringsutrymme och jobbstatus
 - Rate-limiting, httpOnly JWT-refresh-cookie och bcrypt-lösenordshashning
 
@@ -138,6 +169,7 @@
 | **Bildhantering** | Sharp 0.33 (thumbnails, HEIC-konvertering, phash, YOLO-preprocessning) |
 | **Videohantering** | FFmpeg (H.264-transkodning, range-requests) |
 | **Metadata** | exifr + exiftool (EXIF/IPTC/XMP) |
+| **Molnbackup** | rclone 1.72 (inbyggt i Docker-imagen — inga externa verktyg behövs) |
 | **Geo** | PostGIS (klustring, avstånd) + reverse geocoding |
 | **Realtid** | Server-Sent Events (SSE) för live-uppdateringar |
 | **Processhantering** | PM2 (kör Node + Python parallellt i produktion) |
@@ -147,68 +179,26 @@
 
 | Worker | Uppgift |
 |--------|---------|
-| `fileWatcher.js` | Bevakar mediamappar via chokidar, köar nya filer |
+| `fileWatcher.js` | Bevakar mediamappar via chokidar, köar nya filer, skapar import-sessioner |
 | `indexer.js` | Extraherar metadata, reverse-geocodar GPS, detekterar dubbletter, köar jobb |
 | `thumbnailer.js` | Genererar 400 px + 1 200 px WebP-thumbnails |
 | `transcoder.js` | Transkoderar video till H.264 MP4 med FFmpeg |
 | `aiEmbedder.js` | Kör ansiktsdetektering och skapar 512-dim embeddings |
 | `jobRunner.js` | Polling-baserad jobbkoordinator (phash, object_detection, transcode, thumbnail) |
-| `trashCleaner.js` | Cron kl 24h-intervall — permanent raderar filer efter N dagar i papperskorgen |
-| `dailyPushJob.js` | Cron kl 08:00 — skickar minnespush till alla prenumeranter med foton "denna dag" |
+| `trashCleaner.js` | Cron — permanent raderar filer efter N dagar i papperskorgen |
+| `dailyPushJob.js` | Cron kl 08:00 — skickar minnespush till alla prenumeranter |
 | `motionPhotoBackfill.js` | Identifierar Motion Photos bland befintliga bilder vid uppstart |
+| `backupScheduler.js` | Kör schemalagda molnbackuper (dagligen/varje vecka) via rclone |
 
 ### Autentisering & säkerhet
 
 - JWT **access token** (15 min) i Authorization-header
 - JWT **refresh token** (30 dagar) i httpOnly-cookie
-- Automatisk token-förnyelse i API-klienten
+- Automatisk token-förnyelse i API-klienten utan användarinteraktion
 - bcrypt-hashning av lösenord
 - Rate-limiting på inloggningsendpointen (10 försök/min)
 - Granulär RBAC — per-användarbehörigheter kan t.ex. stänga av karta, ansikten eller borttagning
-
----
-
-## Kortkommandon
-
-Gäller i **Bilder-vyn** när inget textfält är aktivt och lightboxen är stängd.
-
-### Flaggning
-| Tangent | Åtgärd |
-|---------|--------|
-| `P` | Flagga bild(er) som Flaggad 🚩 |
-| `X` | Markera bild(er) som Avvisad ✗ |
-| `U` | Ta bort flagga |
-
-### Betyg
-| Tangent | Åtgärd |
-|---------|--------|
-| `1` – `5` | Sätt stjärnbetyg 1–5 ⭐ |
-
-### Färgetikett
-| Tangent | Färg |
-|---------|------|
-| `6` | Röd |
-| `7` | Gul |
-| `8` | Grön |
-| `9` | Blå |
-| `0` | Ta bort färg |
-
-> Kortkommandona appliceras på **alla markerade bilder** (Ctrl+klik / Shift+klik). Om ingen bild är markerad appliceras de på den fokuserade bilden.
-
-### Mappar-vyn
-| Tangent | Åtgärd |
-|---------|--------|
-| `↑` / `↓` | Navigera bland filer/mappar |
-| `→` | Öppna markerad mapp / gå till filruta |
-| `←` | Fokus till mappträdet |
-| `Backspace` | Gå upp en nivå |
-| `F2` | Byt namn (öppnar dialog) |
-| `Enter` | Öppna mapp eller bild |
-| `Delete` | Radera till papperskorg |
-| `G` | Växla till gridvy |
-| `L` | Växla till listvy |
-| `Ctrl+A` | Markera alla |
-| `Ctrl+X` / `C` / `V` | Klipp ut / Kopiera / Klistra in |
+- OAuth 2.0-flöde med PKCE-liknande state-verifiering för molnbackup
 
 ---
 
@@ -224,17 +214,17 @@ PostgreSQL 16 med följande extensions:
 | `vector` (pgvector) | 512-dim ansiktsembeddings och similaritetssökning |
 | `pg_trgm` | Trigram-baserad fuzzy-textsökning |
 
-### Tabeller (36 migrationer, 001–036)
+### Tabeller (42 migrationer, 001–042)
 
 | Tabell | Beskrivning |
 |--------|-------------|
 | `users` | Konton med roller och inloggningshistorik |
 | `user_permissions` | Granulära rättigheter per användare |
-| `user_settings` | JSONB-inställningar (t.ex. face detection-tröskel) |
+| `user_settings` | JSONB-inställningar (face detection-tröskel m.m.) |
 | `assets` | Alla foton/videor — metadata, sökvägar, status, rating, iso, aperture, shutter_speed, focal_length_mm, lens_model, phash |
 | `asset_metadata` | Rådata från EXIF/IPTC/XMP per asset |
 | `asset_tags` | Koppling asset ↔ tag (med `source` och `confidence` för AI-taggar) |
-| `tags` | Normaliserade taggar med hierarkiska sökvägar (`source`: manual/ai) |
+| `tags` | Normaliserade taggar med hierarkiska sökvägar (`source`: manual/ai/xmp) |
 | `stacks` | Grupper av burst-bilder och varianter |
 | `stack_assets` | Koppling stack ↔ asset med cover-flagga |
 | `faces` | Detekterade ansikten med ONNX-embedding (VECTOR 512) |
@@ -246,11 +236,15 @@ PostgreSQL 16 med följande extensions:
 | `favorites` | Användarens favoritmarkerade bilder |
 | `events` | Auto-grupperade händelser/resor |
 | `event_assets` | Koppling event ↔ asset |
-| `shares` | Intern och publik delning med token, giltighetstid och max-visningar |
+| `shares` | Intern och publik delning — token, giltighetstid, max-visningar, `view_count`, `last_viewed_at` |
 | `jobs` | Asynkrona jobb (thumbnail, transcode, phash, object_detection, zip_export) |
-| `audit_log` | Komplett logg över alla användarhandlingar |
+| `audit_log` | Komplett logg över alla användarhandlingar (inkl. kommentarer, reaktioner, metadata-ändringar) |
 | `watched_folders` | Bevakade mappar inkl. SMB/CIFS-konfiguration |
 | `push_subscriptions` | Web Push-prenumerationer per användare |
+| `import_sessions` | Sessionsbaserad import-historik — importerade, hoppade och felaktiga filer per körning |
+| `comments` | Per-bild kommentarer med användarreferens och tidsstämplar |
+| `reactions` | Per-bild emoji-reaktioner (unik per användare + emoji) |
+| `backup_configs` | Molnbackup-konfigurationer — provider, schema, OAuth-tokens, logg och körhistorik |
 
 ---
 
@@ -291,26 +285,28 @@ docker compose up -d
 docker compose -f docker-compose.dev.yml up
 ```
 
-Kör backend med `--watch` för automatisk omstart vid filändringar. Startar även InsightFace som separat tjänst på port 5000.
+Kör backend med `--watch` för automatisk omstart vid filändringar. Startar även InsightFace som separat tjänst.
 
 ### AI-modeller
 
 #### Ansiktsigenkänning (valfritt)
-Lägg ONNX-modellerna i mappen du konfigurerade under `AI_DETECTOR_PATH` och `AI_RECOGNIZER_PATH`:
+Lägg ONNX-modellerna i mappen konfigurerad via `AI_DETECTOR_PATH` och `AI_RECOGNIZER_PATH`:
 
 - Detektor: `SCRFD_500M_bnkps_shape640x640.onnx`
 - Igenkänning: `w600k_r50.onnx`
 
 #### Motivigenkänning YOLOv8 (valfritt)
-Ladda ner direkt från admingränssnittet (Admin → Jobb → YOLOv8 AI-taggning → Ladda ner modell), eller manuellt:
+Ladda ner direkt från admingränssnittet (Admin → AI → Ladda ner modell) eller manuellt:
 
 ```bash
-# Lägg modellen i MODELS_PATH (standard: ./models/)
 wget -O models/yolov8n.onnx \
   https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.onnx
 ```
 
 Appen startar och fungerar fullt ut utan modellerna — AI-funktionerna är inaktiverade tills modellerna finns på plats.
+
+### Molnbackup
+Konfigurera backuper direkt i appen under **Admin → ☁️ Backup**. Välj leverantör, fyll i formuläret — inga externa verktyg behövs. rclone är inbyggt i Docker-imagen.
 
 ---
 
@@ -334,6 +330,9 @@ MEDIA_TRANSCODE_PATH=/media/transcode
 
 # Mapp för ONNX-modeller (YOLOv8 m.fl.)
 MODELS_PATH=./models
+
+# Publik bas-URL — används som OAuth-återanrops-URI vid molnbackup
+APP_BASE_URL=http://localhost:3000
 
 VAPID_PUBLIC_KEY=<web-push-nyckel>
 VAPID_PRIVATE_KEY=<web-push-nyckel>
@@ -361,9 +360,12 @@ Alla endpoints under `/api/` kräver JWT i `Authorization: Bearer <token>`-heade
 | Persons | `/api/persons` | CRUD, dubbletter, ansiktsförslag |
 | AI | `/api/ai` | Status, förslag, accept/avvisa, träna om kluster |
 | Album | `/api/albums` | CRUD, lägg till/ta bort assets, smarta album |
-| Delning | `/api/shares` | Inkommande, utgående, publika länkar |
-| Export | `/api/export` | Starta ZIP-export, ladda ner färdigt arkiv |
-| Admin | `/api/admin` | Användare, jobb, dubbletter, kamerastatistik, YOLOv8-modell, backfill |
+| Social | `/api/assets/:id/social` | Kommentarer, reaktioner per bild |
+| Aktivitet | `/api/activity` | Aktivitetsflöde (audit_log, paginerat) |
+| Delning | `/api/shares` | Inkommande, utgående, publika länkar med åtkomststatistik |
+| Export | `/api/export` | Starta ZIP-export, vattenstämpel, ladda ner färdigt arkiv |
+| Admin | `/api/admin` | Användare, jobb, import-sessioner, backup (CRUD + OAuth + kör), kamerastatistik |
+| OAuth-callback | `/api/admin/oauth/callback` | Tar emot OAuth-kod från Google/Microsoft/Dropbox |
 | Stream | `/api/stream` | Foton och videor med range-request-stöd |
 | Push | `/api/push` | Registrera/avregistrera Web Push-prenumeration |
 | Inställningar | `/api/settings` | Användarinställningar (JSONB) |
@@ -380,74 +382,113 @@ Alla endpoints under `/api/` kräver JWT i `Authorization: Bearer <token>`-heade
 PhotoManager/
 ├── backend/
 │   ├── src/
-│   │   ├── server.js                  # Fastify-applikation och startpunkt
-│   │   ├── config.js                  # Miljökonfiguration
+│   │   ├── server.js                   # Fastify-applikation och startpunkt
+│   │   ├── config.js                   # Miljökonfiguration
 │   │   ├── db/
-│   │   │   ├── migrations/            # 36 SQL-migrationer (001–036)
-│   │   │   ├── runMigrations.js       # Migrationskörare
-│   │   │   └── pool.js                # PostgreSQL-anslutningspool
-│   │   ├── plugins/                   # Fastify-plugins (auth, cors, rate-limit, static)
-│   │   ├── routes/                    # 19 routfiler (assets, albums, persons, search …)
-│   │   ├── services/                  # Affärslogik (AI, geo, metadata, jobb, SSE, XMP,
-│   │   │                              #   objectDetection, pHash, faceRecognition, explore)
-│   │   └── workers/                   # Bakgrundsprocesser (se tabell ovan)
-│   ├── models/                        # ONNX-modellcache (yolov8n.onnx m.fl.)
-│   ├── insightface_server.py          # Python Flask AI-backend
-│   ├── pm2.config.js                  # PM2 multi-process-konfiguration
-│   ├── Dockerfile                     # Produktionsbild (Node + Python + FFmpeg)
-│   ├── Dockerfile.dev                 # Utvecklingsbild med watch-läge
-│   ├── Dockerfile.insightface         # Separat Python-tjänst
+│   │   │   ├── migrations/             # 42 SQL-migrationer (001–042)
+│   │   │   ├── runMigrations.js        # Migrationskörare
+│   │   │   └── pool.js                 # PostgreSQL-anslutningspool
+│   │   ├── plugins/                    # Fastify-plugins (auth, cors, rate-limit, static)
+│   │   ├── routes/                     # Routfiler (assets, albums, persons, social,
+│   │   │                               #   shares, admin, stream, search, export …)
+│   │   ├── services/                   # Affärslogik (AI, geo, metadata, jobb, SSE,
+│   │   │                               #   rcloneService, importSessionService, explore …)
+│   │   └── workers/                    # Bakgrundsprocesser (se tabell ovan)
+│   ├── models/                         # ONNX-modellcache (yolov8n.onnx m.fl.)
+│   ├── insightface_server.py           # Python Flask AI-backend
+│   ├── pm2.config.js                   # PM2 multi-process-konfiguration
+│   ├── Dockerfile                      # Produktionsbild (Node + Python + FFmpeg + rclone)
+│   ├── Dockerfile.dev                  # Utvecklingsbild (Node + FFmpeg + rclone, watch-läge)
+│   ├── Dockerfile.insightface          # Separat Python-tjänst
 │   └── .env.example
 ├── frontend/
 │   ├── public/
-│   │   ├── index.html                 # SPA-skal
-│   │   ├── app.js                     # Ingångspunkt
-│   │   ├── manifest.json              # PWA-manifest
-│   │   └── sw.js                      # Service Worker
+│   │   ├── index.html                  # SPA-skal
+│   │   ├── app.js                      # Ingångspunkt + router
+│   │   ├── frame.html                  # Fristående digital fotoram
+│   │   ├── manifest.json               # PWA-manifest
+│   │   └── sw.js                       # Service Worker
 │   └── src/
-│       ├── api.js                     # API-klient med JWT auto-refresh
-│       ├── state.js                   # Global tillståndshantering
-│       ├── components/                # lightbox, gridCell, nav, selectionManager
-│       └── views/                     # timeline, albums, mapview, persons,
-│                                      # explore, admin, folders, sharing, upload
+│       ├── api.js                      # API-klient med JWT auto-refresh
+│       ├── state.js                    # Global tillståndshantering
+│       ├── components/                 # lightbox, socialPanel, gridCell,
+│       │                               # nav, selectionManager, shareModal …
+│       └── views/                      # timeline, albums, mapview, persons,
+│                                       # explore, admin, folders, sharing,
+│                                       # upload, activity, search, duplicates …
 ├── postgres/
-│   └── Dockerfile                     # PostgreSQL 16 + pgvector + PostGIS
-├── docker-compose.yml                 # Produktion
-└── docker-compose.dev.yml             # Utveckling (inkl. InsightFace-tjänst)
+│   └── Dockerfile                      # PostgreSQL 16 + pgvector + PostGIS
+├── docker-compose.yml                  # Produktion
+└── docker-compose.dev.yml              # Utveckling (inkl. InsightFace-tjänst)
 ```
+
+---
+
+## Kortkommandon
+
+### Bilder-vyn (ingen textinmatning aktiv)
+
+| Tangent | Åtgärd |
+|---------|--------|
+| `P` | Flagga markerade bilder 🚩 |
+| `X` | Markera som avvisad ✗ |
+| `U` | Ta bort flagga |
+| `1`–`5` | Sätt stjärnbetyg |
+| `6` | Röd färgetikett |
+| `7` | Gul färgetikett |
+| `8` | Grön färgetikett |
+| `9` | Blå färgetikett |
+| `0` | Ta bort färgetikett |
+
+> Kortkommandona appliceras på **alla markerade bilder** (Ctrl+klik / Shift+klik).
+
+### Mappar-vyn
+
+| Tangent | Åtgärd |
+|---------|--------|
+| `↑` / `↓` | Navigera bland filer/mappar |
+| `→` | Öppna markerad mapp |
+| `←` | Fokus till mappträdet |
+| `Backspace` | Gå upp en nivå |
+| `F2` | Byt namn |
+| `Enter` | Öppna mapp eller bild |
+| `Delete` | Radera till papperskorg |
+| `G` / `L` | Växla grid- / listvy |
+| `Ctrl+A` | Markera alla |
+| `Ctrl+X` / `C` / `V` | Klipp ut / Kopiera / Klistra in |
 
 ---
 
 ## Roadmap
 
-Funktioner som planeras implementeras, i prioritetsordning. Bockas av när de är klara.
-
 ### Klar ✅
+
 | # | Funktion | Beskrivning |
 |---|----------|-------------|
 | 1A | Perceptuell hash | dHash — nästan-identiska bilder med Hamming ≤ 10 |
 | 1B | YOLOv8-nano auto-taggning | COCO-80 → svenska taggar, CPU-only, ⚡-ikon i UI |
 | 2A | Touch-gester i lightbox | Swipe-navigation + pinch-zoom + touch-panorering |
+| 2B | Decennietal/årsvy | Zoombar tidslinje: dekad → år → månad → dag |
+| 2C | Tangentbordsnavigering i gallery | ↑↓←→ i fotogrid, Enter, Space, Ctrl+A |
+| 2D | Digital fotoram | Helskärms-slideshow `/frame.html`, konfig i admin |
 | 3A | Kamerastatistik | ISO/bländare/slutartid/brännvidd/objektiv-histograms i admin |
 | 3B | Minnesvy + push-notis | "Denna dag i historien" + daglig push kl 08:00 |
-| 3C | Lagringsanalys | Diskutrymme per år/album/person — ny "Lagring"-flik i admin |
-| 2C | Tangentbordsnavigering i gallery | ↑↓←→ i fotogrid, Enter öppnar lightbox, Space markerar, Ctrl+A markera alla |
-| 2B | Decennietal/årsvy | Ny "Tidslinje"-vy (#/timeline): dekad → år → månad, klick-filtrering till bilder |
-| 2D | Digital fotoram | Helskärms-slideshow på /frame.html, token-skyddad, konfig i Admin → Inställningar |
-| 4A | Vattenstämpel vid export | SVG-text compositas med Sharp vid ZIP-export, kryssruta i urvalstoolbar, konfig i admin |
-| 4B | Redigera EXIF (utökat) | Kameramodell-fält + GPS-karta (Leaflet CDN) + datum i modal, XMP-override + exiftool-writeback |
+| 3C | Lagringsanalys | Diskutrymme per år/album/person — "Lagring"-flik i admin |
+| 4A | Vattenstämpel vid export | Sharp-compositor, kryssruta i urvalstoolbar, konfig i admin |
+| 4B | Redigera EXIF (utökat) | GPS-karta, datum, kameramodell, XMP-writeback med exiftool |
+| 5A | Molnbackup (rclone, inbyggt) | Google Drive/OneDrive/Dropbox via OAuth-popup + S3/B2/WebDAV/SFTP via formulär — allt i appen, ingen extern installation |
+| 5B | Import-rapport | Sessionsbaserad logg per importkörning — Admin → Import |
+| 6A | Kommentarer + reaktioner | Per-bild kommentarer och 6 emoji-reaktioner i lightbox |
+| 6B | Aktivitetsflöde | Human-läsbar vy med detaljer om vad som ändrades, klickbara thumbnails |
+| 6C | Åtkomstlogg | Delningskort visar visningsräknare och senaste visningstid |
 
-### Kvar att bygga 🔜
+### Kommande 🔜
+
 | # | Funktion | Beskrivning |
 |---|----------|-------------|
-| 5A | rclone backup | Synka till Google Drive, OneDrive, S3/Backblaze via rclone — schema + logg i admin |
-| 5B | Import-rapport | Sessionsbaserad logg: importerade, dubbletter, fel per körning |
-| 6A | Kommentarer + reaktioner | Per-bild kommentarer och emoji-reaktioner (❤️ 😂 😮 👍) i lightboxen |
-| 6B | Aktivitetsflöde | Human-läsbar vy av audit_log — "Mamma lade till 47 foton i Julafton 2025" |
-| 6C | Åtkomstlogg UI | Frontend-vy för att se vem som tittade på delade album |
-| 7A | Ortstaggar automatiska | Skapa hierarkiska platstaggar (Platser/Sverige/Västra Götaland/Göteborg) vid import |
-| 7B | Live Photo hover-video | Visa tillhörande .mov som autoplay-video on hover i galleriet |
-| 7C | Projektmappar | Album-subtyp med kapitel, rubrik + text + cover per sektion, manuell ordning |
+| 7A | Ortstaggar automatiska | Skapa hierarkiska platstaggar (`Platser/Sverige/Västra Götaland/Göteborg`) automatiskt vid import baserat på reverse geocoding |
+| 7B | Live Photo hover-video | Para ihop `.jpg` med `.mov` (samma basnamn) vid import — spela upp videon automatiskt vid hover i galleriet |
+| 7C | Projektmappar / fotobok | Album-subtyp med kapitel, rubrik + brödtext + cover-foto per sektion och manuell ordning |
 
 ---
 

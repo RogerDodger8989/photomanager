@@ -43,6 +43,7 @@ import { buildEvents }           from './services/exploreService.js';
 import { initAiWorker, shutdownAiWorker } from './services/aiService.js';
 import { backfillMotionPhotos }  from './workers/motionPhotoBackfill.js';
 import { startDailyPushJob }     from './workers/dailyPushJob.js';
+import { startBackupScheduler }  from './workers/backupScheduler.js';
 
 const fastify = Fastify({
   logger: {
@@ -129,6 +130,8 @@ const start = async () => {
     backfillMotionPhotos().catch(console.error);
     // Skicka dagliga minnespush-notiser kl 08:00
     startDailyPushJob();
+    // Kör schemalagda molnbackuper (rclone)
+    startBackupScheduler();
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);

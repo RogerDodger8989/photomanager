@@ -31,6 +31,7 @@ services:
       TRASH_AUTO_CLEAN_DAYS: 30
       CHOKIDAR_USEPOLLING: "true"
       CHOKIDAR_INTERVAL: "3000"
+      APP_BASE_URL: "http://localhost:3000"
       # InsightFace körs som separat service på samma nätverk
       INSIGHTFACE_URL: "http://insightface:5000"
     cap_add:

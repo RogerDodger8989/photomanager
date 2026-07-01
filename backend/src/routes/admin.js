@@ -3,6 +3,7 @@ import { query } from '../db/pool.js';
 import { getJobStats } from '../services/jobService.js';
 import { backfillMotionPhotos } from '../workers/motionPhotoBackfill.js';
 import { getModelStatus, downloadModel } from '../services/objectDetectionService.js';
+import { testRemote, runBackup, startOAuthFlow, handleOAuthCallback, generateKeyConfig } from '../services/rcloneService.js';
 import { config } from '../config.js';
 import bcrypt from 'bcrypt';
 import { v4 as uuidv4 } from 'uuid';
@@ -725,4 +726,119 @@ export default async function adminRoutes(fastify) {
     );
     return reply.send({ data: rows });
   });
+
+  // GET /api/admin/backups — lista molnbackup-konfigurationer
+  fastify.get('/api/admin/backups', async (_request, reply) => {
+    const { rows } = await query(
+      `SELECT id, name, remote_name, dest_path, schedule, enabled,
+              last_run, last_status, last_log, created_at
+       FROM backup_configs ORDER BY created_at DESC`
+    );
+    return reply.send({ data: rows });
+  });
+
+  // POST /api/admin/backups — skapa via nyckelbaserad provider (S3, B2, WebDAV, SFTP)
+  fastify.post('/api/admin/backups', async (request, reply) => {
+    const { name, remoteName, destPath = 'PhotoManager', schedule = 'manual', provider, ...providerParams } = request.body;
+    if (!name || !remoteName || !provider) return reply.status(400).send({ error: 'name, remoteName och provider krävs' });
+
+    const rcloneConfig = await generateKeyConfig({ provider, remoteName, ...providerParams });
+    const { rows } = await query(
+      `INSERT INTO backup_configs (name, remote_name, rclone_config, dest_path, schedule, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6)
+       RETURNING id, name, remote_name, dest_path, schedule, enabled, last_run, last_status, last_log, created_at`,
+      [name, remoteName, rcloneConfig, destPath, schedule, request.user.id]
+    );
+    return reply.status(201).send({ data: rows[0] });
+  });
+
+  // POST /api/admin/oauth/start — starta OAuth-flöde för Google Drive / OneDrive / Dropbox
+  fastify.post('/api/admin/oauth/start', async (request, reply) => {
+    const { provider, clientId, clientSecret, remoteName, name, destPath, schedule } = request.body;
+    if (!provider || !clientId || !clientSecret || !remoteName || !name) {
+      return reply.status(400).send({ error: 'provider, clientId, clientSecret, remoteName och name krävs' });
+    }
+    const result = startOAuthFlow({ provider, clientId, clientSecret, remoteName, name, destPath, schedule });
+    return reply.send({ data: result });
+  });
+
+  // GET /api/admin/oauth/callback — OAuth-återanrop från Google/Microsoft/Dropbox (öppnas i popup)
+  fastify.get('/api/admin/oauth/callback', async (request, reply) => {
+    const { code, state, error: oauthError } = request.query;
+
+    if (oauthError) {
+      return reply.type('text/html').send(oauthCallbackHtml(false, `OAuth-fel: ${oauthError}`));
+    }
+    if (!code || !state) {
+      return reply.type('text/html').send(oauthCallbackHtml(false, 'Saknar code eller state i återanropet.'));
+    }
+
+    try {
+      await handleOAuthCallback(code, state);
+      return reply.type('text/html').send(oauthCallbackHtml(true, ''));
+    } catch (err) {
+      fastify.log.error(err, 'OAuth callback misslyckades');
+      return reply.type('text/html').send(oauthCallbackHtml(false, err.message));
+    }
+  });
+
+  // PATCH /api/admin/backups/:id
+  fastify.patch('/api/admin/backups/:id', async (request, reply) => {
+    const { id } = request.params;
+    const { name, destPath, schedule, enabled } = request.body;
+    const { rows } = await query(
+      `UPDATE backup_configs SET
+         name      = COALESCE($2, name),
+         dest_path = COALESCE($3, dest_path),
+         schedule  = COALESCE($4, schedule),
+         enabled   = COALESCE($5, enabled)
+       WHERE id = $1
+       RETURNING id, name, remote_name, dest_path, schedule, enabled, last_run, last_status, last_log, created_at`,
+      [id, name ?? null, destPath ?? null, schedule ?? null, enabled ?? null]
+    );
+    if (!rows[0]) return reply.status(404).send({ error: 'Backup-konfiguration hittades inte' });
+    return reply.send({ data: rows[0] });
+  });
+
+  // DELETE /api/admin/backups/:id
+  fastify.delete('/api/admin/backups/:id', async (request, reply) => {
+    const { rows } = await query('DELETE FROM backup_configs WHERE id = $1 RETURNING id', [request.params.id]);
+    if (!rows[0]) return reply.status(404).send({ error: 'Hittades inte' });
+    return reply.send({ data: { ok: true } });
+  });
+
+  // POST /api/admin/backups/:id/test
+  fastify.post('/api/admin/backups/:id/test', async (request, reply) => {
+    const result = await testRemote(request.params.id);
+    return reply.send({ data: result });
+  });
+
+  // POST /api/admin/backups/:id/run
+  fastify.post('/api/admin/backups/:id/run', async (request, reply) => {
+    const { id } = request.params;
+    const { rows } = await query('SELECT id FROM backup_configs WHERE id = $1', [id]);
+    if (!rows[0]) return reply.status(404).send({ error: 'Hittades inte' });
+    await query(`UPDATE backup_configs SET last_status = 'running' WHERE id = $1`, [id]);
+    runBackup(id).catch((err) => fastify.log.error(err, 'Backup misslyckades'));
+    return reply.send({ data: { ok: true } });
+  });
+}
+
+function oauthCallbackHtml(success, errorMsg) {
+  const escaped = String(errorMsg).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return `<!DOCTYPE html><html lang="sv">
+<head><meta charset="UTF-8"><title>${success ? 'Klart' : 'Fel'} – PhotoManager</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{background:#0f172a;color:#e2e8f0;font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh}
+.box{background:#1e293b;border:1px solid #334155;border-radius:1rem;padding:2rem 2.5rem;text-align:center;max-width:400px}
+h2{font-size:1.25rem;margin-bottom:.75rem;color:${success ? '#4ade80' : '#f87171'}}p{color:#94a3b8;font-size:.875rem;line-height:1.5}</style></head>
+<body><div class="box">
+<h2>${success ? '✓ Ansluten!' : '✕ Något gick fel'}</h2>
+<p>${success ? 'Backupen skapades. Det här fönstret stängs automatiskt…' : escaped}</p>
+</div>
+<script>
+if(${success}){
+  if(window.opener){window.opener.postMessage({type:'oauth-done'},'*');}
+  setTimeout(()=>window.close(),1500);
+}
+</script></body></html>`;
 }

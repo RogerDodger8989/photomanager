@@ -274,6 +274,15 @@ export const api = {
   deleteComment:   (commentId)      => request('DELETE', `/api/comments/${commentId}`),
   toggleReaction:  (assetId, emoji) => request('POST',   `/api/assets/${assetId}/reactions`, { emoji }),
 
+  // Backup (rclone)
+  backups:        ()              => request('GET',    '/api/admin/backups'),
+  createBackup:   (body)          => request('POST',   '/api/admin/backups', body),
+  oauthStart:     (body)          => request('POST',   '/api/admin/oauth/start', body),
+  updateBackup:   (id, body)      => request('PATCH',  `/api/admin/backups/${id}`, body),
+  deleteBackup:   (id)            => request('DELETE', `/api/admin/backups/${id}`),
+  testBackup:     (id)            => request('POST',   `/api/admin/backups/${id}/test`, {}),
+  runBackup:      (id)            => request('POST',   `/api/admin/backups/${id}/run`, {}),
+
   // Tags
   tagTree:          ()              => request('GET', '/api/tags/tree'),
   tagStats:         ()              => request('GET', '/api/tags/stats'),

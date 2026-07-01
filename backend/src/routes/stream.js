@@ -295,7 +295,7 @@ export default async function streamRoutes(fastify) {
     }
 
     // Öka vy-räknaren för delningen
-    await query('UPDATE shares SET view_count = view_count + 1 WHERE token = $1', [token]);
+    await query('UPDATE shares SET view_count = view_count + 1, last_viewed_at = NOW() WHERE token = $1', [token]);
 
     // Återanvänd streaming-logiken via intern redirect
     request.params.id = share.id;

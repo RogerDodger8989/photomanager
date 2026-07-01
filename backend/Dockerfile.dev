@@ -1,7 +1,7 @@
 FROM node:20-alpine
 
-# ffmpeg för videotranskodning
-RUN apk add --no-cache ffmpeg cifs-utils exiftool
+# ffmpeg för videotranskodning, rclone för molnbackup
+RUN apk add --no-cache ffmpeg cifs-utils exiftool rclone
 
 WORKDIR /app
 
